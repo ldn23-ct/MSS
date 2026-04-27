@@ -1,145 +1,136 @@
-# decisions.md
+# MSS 设计决策记录
 
-## Purpose
+## 1. 文档目的
 
-This document records accepted design decisions for the BackscatterSim project.
+本文档记录 `MSS` 第一版中已经接受的关键设计决策，用于避免 Codex 生成代码时发生设计漂移。
 
-It is intended to prevent design drift when using Codex to generate or modify code. It should not duplicate the full project specification. The authoritative functional requirements remain in `spec.md`; this file records why key implementation choices were made and what Codex must not change without an explicit spec update.
+本文档不替代 `spec.md`。功能需求、物理参数、宏命令、CSV 字段和验收标准仍以 `spec.md` 为准。
 
-Use this file together with:
+文档优先级：
 
-- `spec.md` for project requirements and acceptance criteria.
-- `architecture.md` for module boundaries and data flow.
-- `milestones.md` for staged implementation order.
+1. `docs/spec.md`
+2. `docs/decisions.md`
+3. `docs/architecture.md`
+4. `docs/milestones.md`
+5. 现有代码，但前提是不与上述文档冲突
+
+Codex 不应静默修改本文档中的 Accepted 决策。若必须修改，应先修改文档，再修改实现。
 
 ---
 
-## Decision status labels
+## 2. 决策状态
 
-| Status | Meaning |
+| 状态 | 含义 |
 |---|---|
-| Accepted | This decision is active and should be followed. |
-| Proposed | This decision is being considered but is not yet binding. |
-| Superseded | This decision has been replaced by a later decision. |
-| Deferred | This decision is intentionally postponed. |
+| Accepted | 已接受，当前实现必须遵守。 |
+| Proposed | 提案中，尚未成为约束。 |
+| Superseded | 已被后续决策替代。 |
+| Deferred | 有价值，但明确推迟。 |
 
 ---
 
-## Global rule for Codex
+## 3. 决策索引
 
-When implementation choices are ambiguous, Codex must follow this priority order:
-
-1. `spec.md`
-2. `decisions.md`
-3. `architecture.md`
-4. `milestones.md`
-5. Existing code, if it does not conflict with the documents above
-
-Codex must not silently change any accepted decision in this file. If a change is necessary, it must be handled as a documentation change first, then an implementation change.
-
----
-
-## Decision index
-
-| ID | Decision | Status |
+| ID | 决策 | 状态 |
 |---|---|---|
-| D001 | Keep the first version focused on event-level Monte Carlo data generation | Accepted |
-| D002 | Use a fixed right-handed coordinate system with PMMA depth along +z | Accepted |
-| D003 | Model the detector as an ideal counting plane | Accepted |
-| D004 | Define collimator geometry through an external CSV profile file | Accepted |
-| D005 | Use `G4ExtrudedSolid` for the two tungsten collimator jaws | Accepted |
-| D006 | Use `G4EmLivermorePhysics` with a global production cut of 0.1 mm | Accepted |
-| D007 | Define one event as one primary gamma | Accepted |
-| D008 | Support mono and spectrum energy modes, but keep the source geometry fixed in version 1 | Accepted |
-| D009 | Track only primary gamma scattering history inside PMMA | Accepted |
-| D010 | Output only detector-reaching primary gamma events | Accepted |
-| D011 | Keep CSV schemas stable and encode run metadata in filenames | Accepted |
-| D012 | Use per-thread temporary CSV files and master-side merge for multi-thread output | Accepted |
-| D013 | Use macro commands for runtime configuration, but keep selected geometry constants fixed | Accepted |
-| D014 | Fail fast on invalid collimator profile data | Accepted |
-| D015 | Keep module responsibilities narrow and separated | Accepted |
-| D016 | Implement the project milestone by milestone | Accepted |
-| D017 | Defer reconstruction, detector response, and post-processing analysis | Accepted |
+| D001 | 第一版只聚焦事件级 Monte Carlo 数据生成 | Accepted |
+| D002 | 使用固定右手坐标系，PMMA 深度为 +z | Accepted |
+| D003 | 探测器建模为理想计数平面 | Accepted |
+| D004 | 准直器几何由外部 CSV profile 定义 | Accepted |
+| D005 | 使用 `G4ExtrudedSolid` 构建两块钨准直器 jaw | Accepted |
+| D006 | 使用 `G4EmLivermorePhysics`，全局 production cut 为 0.1 mm | Accepted |
+| D007 | 定义 1 event = 1 primary gamma | Accepted |
+| D008 | 支持 mono/spectrum 能量模式，但第一版固定源几何 | Accepted |
+| D009 | 只追踪 primary gamma 在 PMMA 内的散射历史 | Accepted |
+| D010 | CSV 只输出到达探测器的 primary gamma | Accepted |
+| D011 | CSV schema 保持稳定，run 元数据写入文件名 | Accepted |
+| D012 | 多线程输出采用线程临时 CSV + master 合并 | Accepted |
+| D013 | 使用宏命令配置运行参数，但核心几何常量固定 | Accepted |
+| D014 | 非法准直器 profile 必须 fail fast | Accepted |
+| D015 | 模块职责保持窄边界 | Accepted |
+| D016 | 按里程碑实现，不跨阶段扩展 | Accepted |
+| D017 | 推迟重建、真实探测器响应和后处理分析 | Accepted |
+| D018 | 项目名、CMake project 名和可执行文件名统一为 `MSS` | Accepted |
+| D019 | `/output/debug` 需要区分“未设置”和“显式设置” | Accepted |
 
 ---
 
-## D001: Keep the first version focused on event-level Monte Carlo data generation
+## D001：第一版只聚焦事件级 Monte Carlo 数据生成
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-The project is intended to support analysis of gamma backscatter behavior under different collimator opening/profile conditions. The first version must produce data suitable for later statistical analysis, not perform the full analysis pipeline inside the Geant4 program.
+当前目标是支持 gamma 背散射几何下，不同准直器轮廓或开口条件的多重散射统计。第一版应先生成可靠的事件级 CSV 数据，而不是把完整分析流程写进 Geant4 程序。
 
-### Decision
+### 决策
 
-The first version will only generate event-level CSV data for detector-reaching primary gamma particles.
+第一版只生成到达探测器的 primary gamma 的事件级 CSV。
 
-It will not include:
+第一版不包含：
 
-- image reconstruction,
-- real detector material response,
-- detector energy deposition modeling,
-- post-processing analysis scripts,
-- batch scanning over all profiles,
-- full scatter trajectory output.
+- 图像重建；
+- 真实探测器材料响应；
+- 探测器能量沉积建模；
+- Python 后处理分析脚本；
+- 自动遍历所有 profile；
+- 全散射轨迹输出。
 
-### Rationale
+### 理由
 
-Keeping version 1 limited makes the project easier to implement, test, and debug. The Geant4 application should first establish a reliable physical event generator before analysis or reconstruction code is added.
+先确保事件生成、散射统计和输出链路正确，再扩展分析或重建模块。这样更容易检查错误，也便于用 Codex 分阶段实现。
 
-### Consequences
+### 影响
 
-- The output CSV becomes the boundary between simulation and downstream analysis.
-- Later analysis scripts should read CSV files rather than depend on Geant4 runtime internals.
-- Codex must not add reconstruction or detector-response features unless the specification is updated first.
-
----
-
-## D002: Use a fixed right-handed coordinate system with PMMA depth along +z
-
-**Status:** Accepted  
-**Date:** 2026-04-27
-
-### Context
-
-The simulation contains a source, PMMA phantom, air defect, collimator, and detector plane. Incorrect axis conventions would propagate into geometry construction, source direction sampling, detector crossing logic, and later analysis.
-
-### Decision
-
-Use a right-handed coordinate system:
-
-- `+z` points from the PMMA front surface into the PMMA interior.
-- `x` is the main transverse direction and corresponds to the detector-side post-processing coordinate.
-- `y` is the slit/jaw extrusion direction and is not the main analysis dimension.
-- Source and detector are located on the `z < 0` side.
-- The PMMA front surface is at `z = 0`.
-
-### Rationale
-
-This convention makes depth interpretation explicit and keeps detector crossing tests simple: detected backscattered gamma travels toward decreasing `z` and crosses the detector plane at `z = -73 mm`.
-
-### Consequences
-
-- Geometry, source sampling, and detector crossing code must use this convention consistently.
-- Codex must not swap depth to another axis.
-- Any future plotting or analysis script should treat `z` as PMMA depth.
+- CSV 是仿真程序与后处理分析之间的边界。
+- 后续分析脚本应读取 CSV，而不是依赖 Geant4 运行时内部状态。
+- Codex 不得在第一版中主动加入重建或探测器响应。
 
 ---
 
-## D003: Model the detector as an ideal counting plane
+## D002：使用固定右手坐标系，PMMA 深度为 +z
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-The current research question concerns PMMA scattering history and detector-reaching gamma statistics, not detector material response.
+坐标系会影响几何构建、源方向、探测面穿越判断和后处理解释。若轴向不固定，后续结果容易失去可比性。
 
-### Decision
+### 决策
 
-The detector will be implemented as an ideal plane at:
+采用右手坐标系：
+
+- `+z`：从 PMMA 前表面指向 PMMA 内部；
+- `x`：主要横向方向，与准直器限束方向和探测面后处理坐标相关；
+- `y`：狭缝/钨板拉伸方向，不作为主要分析维度；
+- source 和 detector 位于 `z < 0`；
+- PMMA 前表面为 `z = 0`。
+
+### 理由
+
+该约定使深度定义清晰，并使背散射探测条件简洁：被探测 gamma 朝 `-z` 方向穿越 `z = -73 mm` 平面。
+
+### 影响
+
+- Codex 不得把深度方向改到其他轴。
+- 后处理脚本应把 `z` 解释为 PMMA 深度。
+
+---
+
+## D003：探测器建模为理想计数平面
+
+**状态：** Accepted  
+**日期：** 2026-04-27
+
+### 背景
+
+当前问题关注 PMMA 内散射历史和探测面到达统计，不关注真实探测器响应。
+
+### 决策
+
+探测器定义为理想平面：
 
 ```text
 z = -73 mm
@@ -147,225 +138,206 @@ x = [53, 161] mm
 y = [-50, 50] mm
 ```
 
-The detector will not be modeled as a real scintillator, semiconductor, or energy-depositing physical volume in version 1.
+第一版不建模闪烁体、半导体、sensitive detector 或能量沉积响应。
 
-### Rationale
+### 理由
 
-An ideal plane isolates the transport and scattering problem from detector response modeling. This reduces implementation complexity and avoids mixing detector-response effects into the first-stage scattering statistics.
+理想平面可隔离输运和散射问题，避免真实探测器响应影响第一阶段统计。
 
-### Consequences
+### 影响
 
-- Detector hit detection is based on geometric boundary crossing, not sensitive detector energy deposition.
-- `det_energy` means gamma kinetic energy at plane crossing, not deposited energy.
-- Codex must not add detector material response or sensitive detector logic unless version 1 scope changes.
+- detector hit 来自几何穿越判断。
+- `det_energy` 表示穿越探测面时 gamma 的能量，不是探测器沉积能量。
+- Codex 不得加入真实探测器响应，除非规格更新。
 
 ---
 
-## D004: Define collimator geometry through an external CSV profile file
+## D004：准直器几何由外部 CSV profile 定义
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-The project needs to compare different collimator jaw profiles/openings. Hard-coding every geometry into C++ would make profile comparison difficult and error-prone.
+项目需要比较不同准直器轮廓或开口。如果将所有轮廓硬编码到 C++ 中，修改与复现实验都会变得困难。
 
-### Decision
+### 决策
 
-The collimator geometry is defined by an external CSV file containing profile groups. Each selected profile contains:
+准直器由外部 CSV 定义。每个 profile 包含：
 
-- one `profile_id`,
-- two jaws: `jaw_0` and `jaw_1`,
-- five vertices per jaw,
-- each vertex defined by global `(x_mm, z_mm)` coordinates.
+- 一个 `profile_id`；
+- 两块 jaw：`jaw_0` 与 `jaw_1`；
+- 每块 jaw 五个顶点；
+- 每个顶点为全局 `(x_mm, z_mm)` 坐标。
 
-Version 1 selects one profile per run via macro command:
+第一版每次运行只选择一个 profile：
 
 ```text
 /geometry/collimatorProfileFile data/collimator_profiles.csv
 /geometry/collimatorProfileId P001
 ```
 
-### Rationale
+### 理由
 
-External CSV profiles allow geometry variation without recompilation. Single-profile selection keeps version 1 simpler than full automatic batch scanning.
+外部 profile 允许不重新编译即可改变准直器几何。单次选择一个 profile 比自动批处理更适合第一版。
 
-### Alternatives considered
+### 影响
 
-| Alternative | Reason not selected for version 1 |
-|---|---|
-| Hard-code jaw vertices in C++ | Makes profile comparison cumbersome. |
-| Generate real jaw profiles inside C++ | Adds geometry-generation logic outside current scope. |
-| Automatically iterate over all profiles | Useful later, but complicates run management and output naming. |
-
-### Consequences
-
-- `CollimatorProfileReader` is responsible for parsing and validating profile data.
-- `CollimatorBuilder` is responsible only for converting validated profile data into Geant4 solids.
-- Codex must not change the CSV schema without updating `spec.md` first.
+- `CollimatorProfileReader` 负责解析和验证。
+- `CollimatorBuilder` 只负责把已验证 profile 转成 Geant4 几何。
+- CSV schema 不得被 Codex 随意修改。
 
 ---
 
-## D005: Use `G4ExtrudedSolid` for the two tungsten collimator jaws
+## D005：使用 `G4ExtrudedSolid` 构建两块钨准直器 jaw
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-Each collimator jaw is a convex pentagon in the global x-z plane extruded along the global y direction.
+每块准直器 jaw 是全局 x-z 平面内的凸五边形，并沿全局 y 方向拉伸。
 
-### Decision
+### 决策
 
-Each jaw will be implemented using `G4ExtrudedSolid`.
+每块 jaw 使用 `G4ExtrudedSolid` 构建。
 
-The mapping is:
+坐标映射：
 
-| Physical coordinate | `G4ExtrudedSolid` local coordinate |
+| 物理坐标 | `G4ExtrudedSolid` local 坐标 |
 |---|---|
 | global `x` | local `x` |
 | global `z` | local `y` |
-| global `y` | local `z` extrusion direction |
+| global `y` | local `z` 拉伸方向 |
 
-After construction, the solid is rotated so that the local extrusion direction corresponds to the global y direction. A rotation of `+90 deg` around the x axis is acceptable according to the project specification.
+构建后旋转，使 local z 拉伸方向对应 global y 方向。按 `spec.md`，绕 x 轴 `+90 deg` 可接受。
 
-### Rationale
+### 理由
 
-`G4ExtrudedSolid` directly represents a 2D polygon extruded along one axis, matching the jaw geometry. It avoids Boolean subtraction and keeps the collimator construction inspectable.
+`G4ExtrudedSolid` 直接对应“二维多边形 + 一维拉伸”的几何形式，避免使用布尔减法。
 
-### Consequences
+### 影响
 
-- Input CSV coordinates are global x-z coordinates, not local coordinates around a collimator center.
-- The builder must not apply an additional `collimator_center_z` offset.
-- Codex must be careful not to accidentally treat the CSV `z_mm` value as a local Geant4 extrusion coordinate.
+- CSV 中的 `x_mm` 与 `z_mm` 是全局坐标。
+- builder 不得额外叠加 `collimator_center_z`。
+- Codex 不得把 `z_mm` 误当作 local extrusion 坐标。
 
 ---
 
-## D006: Use `G4EmLivermorePhysics` with a global production cut of 0.1 mm
+## D006：使用 `G4EmLivermorePhysics`，全局 production cut 为 0.1 mm
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-The simulation focuses on low-energy gamma interactions in PMMA, especially Compton and Rayleigh scattering.
+仿真关注低能 gamma 在 PMMA 中的 Compton 与 Rayleigh 散射。
 
-### Decision
+### 决策
 
-Use:
+使用：
 
 ```cpp
 G4EmLivermorePhysics
 ```
 
-Set the global production cut to:
+全局 production cut：
 
 ```text
 0.1 mm
 ```
 
-### Rationale
+### 理由
 
-The Livermore electromagnetic model is appropriate for low-energy electromagnetic interactions and includes Rayleigh scattering, which is explicitly part of the PMMA scatter statistics.
+Livermore 电磁模型适合低能电磁相互作用，并包含 Rayleigh 散射。
 
-### Alternatives considered
+### 影响
 
-| Alternative | Reason not selected for version 1 |
-|---|---|
-| Default Geant4 EM physics | Less explicit for low-energy gamma focus. |
-| Penelope EM physics | Possible later comparison, but not the version 1 baseline. |
-| Custom physics list from scratch | Unnecessary for the first working version. |
-
-### Consequences
-
-- `PhysicsList` should be simple and explicit.
-- Codex must not substitute a different physics list unless the decision is updated.
-- Later validation studies may compare physics lists, but that is outside version 1.
+- `PhysicsList` 应保持简单明确。
+- Codex 不得替换为其他 physics list，除非决策更新。
 
 ---
 
-## D007: Define one event as one primary gamma
+## D007：定义 1 event = 1 primary gamma
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-The output CSV row represents the result of one primary gamma if it reaches the detector plane.
+CSV 每行表示一个到达探测器的 primary gamma 的历史摘要。
 
-### Decision
-
-Use:
+### 决策
 
 ```text
 1 event = 1 primary gamma
 ```
 
-Therefore:
+因此：
 
 ```text
 /run/beamOn N
 ```
 
-means simulating `N` incident gamma particles.
+表示模拟 `N` 个入射 gamma。
 
-### Rationale
+### 理由
 
-This mapping makes event-level statistics straightforward. It also simplifies scatter-count storage, detector-hit storage, and downstream normalization.
+该定义使 event 统计、散射计数和探测 hit 一一对应。
 
-### Consequences
+### 影响
 
-- `EventAction` can maintain one scatter summary per event.
-- Output rows can be interpreted as detector-reaching primary gamma histories.
-- Codex must not emit multiple primary gamma particles in a single event for version 1.
+- `EventAction` 每个 event 只维护一份散射摘要。
+- Codex 不得在单个 event 中产生多个 primary gamma。
 
 ---
 
-## D008: Support mono and spectrum energy modes, but keep the source geometry fixed in version 1
+## D008：支持 mono/spectrum 能量模式，但第一版固定源几何
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-The project needs both a simple monoenergetic mode for debugging and a spectrum mode for later realistic input. However, source geometry itself is already defined in the specification.
+需要 mono 模式用于调试，也需要 spectrum 模式用于后续接入真实能谱。但源几何已由规格固定。
 
-### Decision
+### 决策
 
-Support two energy modes:
+支持：
 
 ```text
 /source/energyMode mono
 /source/energyMode spectrum
 ```
 
-The source is a point gamma source at `(0, 0, -185 mm)` using target-plane sampling on a circular spot at `z = 0` with radius `1.5 mm`.
+源为 `(0, 0, -185 mm)` 点源，方向通过 z = 0 平面半径 `1.5 mm` 圆形束斑采样得到。
 
-Version 1 will not support macro commands for source position or beam spot size.
+第一版不支持源位置、束斑大小的宏命令。
 
-### Rationale
+### 理由
 
-Separating energy-mode variability from source-geometry variability keeps the first version manageable while still supporting both debug and future realistic spectrum runs.
+只开放能量模式，固定源几何，可以减少第一版变量数量。
 
-### Consequences
+### 影响
 
-- `PrimaryGeneratorAction` handles fixed geometry and delegates spectrum sampling to `SpectrumSampler`.
-- Codex must not add source-position or beam-spot macro commands unless `spec.md` is updated.
+- `PrimaryGeneratorAction` 实现固定源几何。
+- `SpectrumSampler` 只处理能谱采样。
+- Codex 不得增加源位置或束斑宏命令。
 
 ---
 
-## D009: Track only primary gamma scattering history inside PMMA
+## D009：只追踪 primary gamma 在 PMMA 内的散射历史
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-The target statistic is the PMMA scattering history of detector-reaching primary gamma particles. Secondary particles and non-PMMA interactions would change the meaning of the output fields.
+目标统计对象是“最终到达探测器的 primary gamma 在 PMMA 内经历了多少 Compton/Rayleigh 散射”。次级粒子或非 PMMA 相互作用会改变字段含义。
 
-### Decision
+### 决策
 
-Only track particles satisfying:
+只处理：
 
 ```text
 particle_name == gamma
@@ -373,344 +345,403 @@ track_id == 1
 parent_id == 0
 ```
 
-Only count PMMA interactions with process name:
+只计入 PMMA 内过程：
 
 ```text
 compt
 Rayl
 ```
 
-Do not count:
+不计入：
 
-- photoelectric effect,
-- collimator interactions,
-- air interactions,
-- world interactions,
-- secondary gamma interactions.
+- photoelectric effect；
+- 钨准直器内相互作用；
+- 空气或 World 中相互作用；
+- secondary gamma 相互作用。
 
-### Rationale
+### 理由
 
-This definition keeps `scatter_count_total`, `compton_count`, and `rayleigh_count` tied to one physical object: the primary gamma that eventually may reach the detector.
+这样 `scatter_count_total`、`compton_count`、`rayleigh_count` 的物理含义稳定。
 
-### Consequences
+### 影响
 
-- `SteppingAction` must filter by particle identity and track identity before updating scatter statistics.
-- Volume/location checks must ensure that counted interactions occur inside PMMA.
-- Codex must not include secondary gamma or tungsten interactions in PMMA scatter counts.
-
----
-
-## D010: Output only detector-reaching primary gamma events
-
-**Status:** Accepted  
-**Date:** 2026-04-27
-
-### Context
-
-The output data is intended for detector-side analysis. Events that never cross the detector plane would significantly increase output size while not contributing directly to detector statistics.
-
-### Decision
-
-CSV output includes only primary gamma events that cross the detector plane within its x-y bounds.
-
-Events are not output if:
-
-- the primary gamma does not reach the detector plane,
-- the particle is not the primary gamma,
-- the particle is not a gamma.
-
-### Rationale
-
-This keeps output compact and aligned with the intended statistical analysis: among detected primary gamma, evaluate scattering history and distribution.
-
-### Consequences
-
-- `EventAction` writes a row only if the detector-hit flag is set.
-- A zero-scatter detector hit is still output.
-- Codex must not output all simulated events unless the output policy is explicitly changed.
+- `SteppingAction` 必须先过滤 primary gamma。
+- 必须检查相互作用发生在 PMMA 内。
+- Codex 不得把次级 gamma 或钨内相互作用计入 PMMA 散射。
 
 ---
 
-## D011: Keep CSV schemas stable and encode run metadata in filenames
+## D010：CSV 只输出到达探测器的 primary gamma
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-The CSV fields are used for downstream analysis. Uncontrolled schema changes would break scripts and make comparisons difficult.
+输出数据用于探测器侧统计。未到达探测面的 event 写出会显著增加文件体积，并改变数据集含义。
 
-### Decision
+### 决策
 
-Maintain two schemas:
+CSV 只包含穿越探测面且落入探测器边界内的 primary gamma。
 
-- compact schema for formal statistical runs,
-- debug schema with extra event/track/direction fields.
+不输出：
 
-Run metadata such as profile ID, energy mode, mono energy, random seed, and debug mode is encoded in the output filename, not repeated in every CSV row.
+- 未到达探测器的 event；
+- 非 primary gamma；
+- 非 gamma 粒子。
 
-### Rationale
+若 primary gamma 没有 PMMA 散射但到达探测器，仍应输出。
 
-A stable row schema simplifies post-processing. Putting run-level metadata in filenames avoids repeated columns and keeps each row focused on detected primary gamma properties.
+### 理由
 
-### Consequences
+输出聚焦于“探测器可见信号”的事件摘要。
 
-- Codex must not add new CSV columns unless `spec.md` is updated.
-- Output filenames are part of the data contract.
-- Any post-processing script must parse run-level metadata from the filename or external run configuration.
+### 影响
 
----
-
-## D012: Use per-thread temporary CSV files and master-side merge for multi-thread output
-
-**Status:** Accepted  
-**Date:** 2026-04-27
-
-### Context
-
-Geant4 multi-threaded runs can involve multiple worker threads. Sharing one `std::ofstream` across worker threads risks race conditions and corrupted output.
-
-### Decision
-
-Use this strategy:
-
-1. Each worker thread writes its own temporary CSV file.
-2. No worker threads share the same `std::ofstream`.
-3. At run end, the master merges worker CSV files.
-4. The final merged file keeps only one header.
-5. In compact mode, temporary files are deleted after successful merge.
-6. In debug mode, temporary files are retained after successful merge.
-7. If merge fails, temporary files are retained and the program reports an error.
-
-### Rationale
-
-Per-thread files avoid output locking complexity and make debugging easier when multi-thread output problems occur.
-
-### Consequences
-
-- `CsvWriter` must be thread-aware.
-- `RunAction` triggers merge at run end.
-- Codex must not implement shared-stream multi-thread output.
+- `EventAction` 只在 hit 标记为 true 时写 CSV。
+- Codex 不得改为输出所有 event。
 
 ---
 
-## D013: Use macro commands for runtime configuration, but keep selected geometry constants fixed
+## D011：CSV schema 保持稳定，run 元数据写入文件名
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-Some runtime choices should be configurable without recompilation, while other geometric constants are intentionally fixed in version 1 to prevent uncontrolled scope expansion.
+后处理脚本依赖 CSV 字段。如果 Codex 任意增加字段，会破坏下游分析。
 
-### Decision
+### 决策
 
-Support macro commands for:
+保持两套 schema：
 
-- collimator profile file,
-- collimator profile ID,
-- air defect enable/disable,
-- energy mode,
-- mono energy,
-- spectrum file,
-- random seed,
-- number of threads,
-- output directory,
-- debug mode.
+- compact：正式统计；
+- debug：额外包含 event、track、方向等调试字段。
 
-Do not support macro commands for:
+profile ID、energy mode、mono energy、random seed、debug 状态写入文件名，而不是重复写入每一行。
 
-- source position,
-- detector bounds,
-- detector plane position,
-- beam spot size,
-- PMMA dimensions,
-- air defect dimensions.
+### 理由
 
-### Rationale
+稳定字段顺序可降低后处理复杂度。run 级信息放入文件名即可。
 
-The selected macros cover expected version 1 experiments while keeping geometry and data interpretation stable.
+### 影响
 
-### Consequences
-
-- `SimulationConfig` should centralize configurable runtime values.
-- Fixed geometry constants should be defined clearly in code, preferably near the owning module.
-- Codex must not add extra macro commands unless the specification is updated.
+- Codex 不得新增 CSV 列，除非 `spec.md` 更新。
+- 输出文件名是数据契约的一部分。
 
 ---
 
-## D014: Fail fast on invalid collimator profile data
+## D012：多线程输出采用线程临时 CSV + master 合并
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-A malformed collimator profile can produce invalid geometry, silent misalignment, or misleading simulation results.
+Geant4 多线程运行中，多个 worker 共享一个输出流容易造成竞争和文件损坏。
 
-### Decision
+### 决策
 
-The program must stop with a clear error if the selected profile has any of the following problems:
+采用：
 
-- missing `profile_id`,
-- not exactly two jaws,
-- a jaw does not have exactly five vertices,
-- missing or duplicated `vertex_id`,
-- empty, non-numeric, NaN, or infinite coordinate,
-- zero-area polygon,
-- non-convex pentagon.
+1. 每个 worker 写自己的临时 CSV。
+2. worker 之间不共享 `std::ofstream`。
+3. run 结束后由 master 合并。
+4. 最终文件只保留一个 header。
+5. compact 模式合并成功后删除临时文件。
+6. debug 模式合并成功后保留临时文件。
+7. 合并失败时保留所有临时文件并报错。
 
-### Rationale
+### 理由
 
-Failing fast prevents invalid geometry from producing plausible-looking but incorrect output.
+线程独立文件比共享流加锁更容易实现和调试。
 
-### Consequences
+### 影响
 
-- Profile validation belongs in `CollimatorProfileReader`, not in `CollimatorBuilder`.
-- Error messages should identify the failed profile and the reason.
-- Codex must not silently repair invalid profile data.
+- `CsvWriter` 必须线程感知。
+- `RunAction` 触发合并。
+- Codex 不得使用共享输出流替代该策略。
 
 ---
 
-## D015: Keep module responsibilities narrow and separated
+## D013：使用宏命令配置运行参数，但核心几何常量固定
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-The project will be built with Codex assistance. Narrow module boundaries reduce accidental coupling and make code easier to review milestone by milestone.
+部分参数需要运行时切换，但几何常量若全部开放，第一版会失去稳定解释基础。
 
-### Decision
+### 决策
 
-Use the following responsibility split:
+第一版支持宏命令配置：
 
-| Module | Responsibility |
+- collimator profile file；
+- collimator profile ID；
+- 是否启用空气缺陷；
+- energy mode；
+- mono energy；
+- spectrum file；
+- random seed；
+- number of threads；
+- output directory；
+- debug mode。
+
+第一版不支持宏命令配置：
+
+- 源位置；
+- 探测器边界；
+- 探测面 z；
+- 束斑大小；
+- PMMA 尺寸；
+- 空气缺陷尺寸。
+
+### 理由
+
+现有宏命令覆盖第一版实验变量，同时保持输出语义稳定。
+
+### 影响
+
+- `SimulationConfig` 集中保存运行配置。
+- 固定几何常量应集中定义并易于检查。
+- Codex 不得新增额外宏命令。
+
+---
+
+## D014：非法准直器 profile 必须 fail fast
+
+**状态：** Accepted  
+**日期：** 2026-04-27
+
+### 背景
+
+错误 profile 可能生成看似合理但实际错误的准直器几何。
+
+### 决策
+
+以下情况必须报错并停止：
+
+- 找不到 `profile_id`；
+- profile 中不是两块 jaw；
+- jaw 不是五个顶点；
+- `vertex_id` 缺失、重复或越界；
+- 坐标为空、非数值、NaN 或 Inf；
+- 多边形面积为 0；
+- 五边形非凸。
+
+### 理由
+
+宁可早期失败，也不能产生误导性结果。
+
+### 影响
+
+- 验证逻辑属于 `CollimatorProfileReader`。
+- Codex 不得静默修复非法 profile。
+
+---
+
+## D015：模块职责保持窄边界
+
+**状态：** Accepted  
+**日期：** 2026-04-27
+
+### 背景
+
+Codex 分阶段开发时，清晰边界可以降低耦合和误改概率。
+
+### 决策
+
+模块职责如下：
+
+| 模块 | 职责 |
 |---|---|
-| `DetectorConstruction` | Build world, PMMA, air defect, detector helper plane, and call collimator builder. |
-| `CollimatorProfileReader` | Read and validate profile CSV data. |
-| `CollimatorBuilder` | Convert validated profile data into tungsten Geant4 geometry. |
-| `PrimaryGeneratorAction` | Generate one primary gamma per event. |
-| `SpectrumSampler` | Read spectrum CSV and sample initial gamma energy. |
-| `EventAction` | Store one event's initial energy, scatter summary, and detector-hit record. |
-| `SteppingAction` | Detect PMMA scatter processes and detector plane crossing. |
-| `CsvWriter` | Write thread-local CSV files and merge them. |
-| `RunAction` | Manage random seed, output lifecycle, and run-end merge. |
+| `DetectorConstruction` | 构建 World、PMMA、空气缺陷、探测面辅助体，并调用准直器构建。 |
+| `CollimatorProfileReader` | 读取和验证 profile CSV。 |
+| `CollimatorBuilder` | 将 profile 转为钨准直器 Geant4 几何。 |
+| `PrimaryGeneratorAction` | 每 event 产生一个 primary gamma。 |
+| `SpectrumSampler` | 读取能谱 CSV 并采样初始能量。 |
+| `EventAction` | 保存当前 event 的初始能量、散射摘要和 hit。 |
+| `SteppingAction` | 判断 PMMA 散射与探测面穿越。 |
+| `CsvWriter` | 写线程本地 CSV 并合并。 |
+| `RunAction` | 管理随机种子、输出生命周期和合并。 |
 
-### Rationale
+### 影响
 
-This split matches the Geant4 lifecycle and makes each milestone testable.
-
-### Consequences
-
-- Codex should not place CSV writing inside `SteppingAction`.
-- Codex should not parse collimator CSV inside `DetectorConstruction` except by calling `CollimatorProfileReader`.
-- Codex should not mix spectrum parsing into `PrimaryGeneratorAction` if a dedicated `SpectrumSampler` exists.
+- CSV 写入不应放在 `SteppingAction`。
+- profile 解析不应散落在 `DetectorConstruction` 中。
+- spectrum 解析不应直接混入过多源几何逻辑。
 
 ---
 
-## D016: Implement the project milestone by milestone
+## D016：按里程碑实现，不跨阶段扩展
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-Generating the entire project in one Codex request would make errors difficult to isolate.
+一次性生成完整项目会让错误难以定位。
 
-### Decision
+### 决策
 
-Implement the project according to `milestones.md`.
+Codex 应按 `milestones.md` 一次实现一个里程碑。未经明确要求，不得实现后续里程碑。
 
-Codex should implement only the requested milestone and should not implement future milestones unless explicitly instructed.
+### 理由
 
-### Rationale
+阶段式实现便于编译、可视化、验证和回滚。
 
-Milestone-based implementation supports incremental review, compilation, and testing.
+### 影响
 
-### Consequences
-
-- Each Codex prompt should specify the target milestone.
-- After each milestone, Codex should summarize changed files, tests performed, and deferred work.
-- If a later milestone requires changing earlier code, the change should be minimal and explained.
+- 每次 Codex prompt 应明确目标 milestone。
+- Codex 应总结改动文件、测试方法和暂缓内容。
 
 ---
 
-## D017: Defer reconstruction, detector response, and post-processing analysis
+## D017：推迟重建、真实探测器响应和后处理分析
 
-**Status:** Accepted  
-**Date:** 2026-04-27
+**状态：** Accepted  
+**日期：** 2026-04-27
 
-### Context
+### 背景
 
-The broader research direction may eventually include image reconstruction, real detector response, post-processing analysis, and batch profile scanning. These are not needed for the first executable Geant4 simulation.
+后续研究可能需要重建、真实探测器响应、批处理和绘图，但它们不是第一版可运行仿真的必要条件。
 
-### Decision
+### 决策
 
-Defer the following work:
+推迟：
 
-- image reconstruction,
-- real detector material response,
-- detector energy deposition statistics,
-- Python post-processing scripts,
-- batch scanning over all profile IDs,
-- all scatter point trajectory output,
-- source position macro commands,
-- detector bounds macro commands,
-- real collimator profile generation logic.
+- 图像重建；
+- 真实探测器材料响应；
+- 探测器能量沉积统计；
+- Python 后处理脚本；
+- profile 批量扫描；
+- 完整散射轨迹输出；
+- 源位置宏命令；
+- 探测器边界宏命令；
+- 真实准直器 profile 生成逻辑。
 
-### Rationale
+### 影响
 
-These features are valid future extensions, but including them in version 1 would increase implementation risk and blur the acceptance criteria.
-
-### Consequences
-
-- The version 1 acceptance target is a correct event-level simulation and CSV output pipeline.
-- Deferred features should be added only after version 1 tests pass.
-- Codex must not interpret deferred work as current implementation scope.
+- 第一版验收目标是事件级仿真和 CSV 输出链路。
+- Codex 不得把 deferred work 当成当前实现范围。
 
 ---
 
-## Adding a new decision
+## D018：项目名、CMake project 名和可执行文件名统一为 `MSS`
 
-Use this template for future decisions:
+**状态：** Accepted  
+**日期：** 2026-04-27
+
+### 背景
+
+原文档中存在旧项目名 `BackscatterSim`。如果规划文档、CMake target、README 命令和宏运行命令不一致，Codex 容易生成旧名称或混合名称。
+
+### 决策
+
+第一版统一使用：
+
+```text
+项目名：MSS
+CMake project：MSS
+可执行文件：MSS
+仓库根目录示例：MSS/
+```
+
+运行命令示例应使用：
+
+```bash
+./MSS macros/run.mac
+./MSS macros/run_mt.mac
+./MSS macros/vis.mac
+```
+
+### 理由
+
+统一命名可以减少构建脚本、README 和 Codex prompt 中的歧义。
+
+### 影响
+
+- `spec.md`、`architecture.md`、`milestones.md`、`README.md`、`CMakeLists.txt` 应同步使用 `MSS`。
+- 除非另有说明，Codex 不应再创建 `BackscatterSim` 可执行文件。
+
+---
+
+## D019：`/output/debug` 需要区分“未设置”和“显式设置”
+
+**状态：** Accepted  
+**日期：** 2026-04-27
+
+### 背景
+
+`spec.md` 定义默认规则：单线程默认 debug，多线程默认 compact。同时宏命令 `/output/debug true/false` 可以显式覆盖默认值。若配置中只有一个 `bool debugOutput`，则无法判断该值来自默认值还是用户显式设置。
+
+### 决策
+
+实现中应区分：
+
+- 用户未设置 `/output/debug`；
+- 用户显式设置 `/output/debug true`；
+- 用户显式设置 `/output/debug false`。
+
+推荐使用：
+
+```cpp
+std::optional<bool> debug_override;
+```
+
+或等价设计。
+
+### 理由
+
+该设计同时满足默认规则和显式覆盖规则。
+
+### 影响
+
+- `RunAction` 需要根据线程数和 `debug_override` 解析最终输出模式。
+- `SimulationConfig` 不宜只用一个默认 bool 表示输出模式。
+
+---
+
+## 4. 新增决策模板
 
 ```md
-## DXXX: Short decision title
+## DXXX：简短标题
 
-**Status:** Proposed | Accepted | Superseded | Deferred  
-**Date:** YYYY-MM-DD
+**状态：** Proposed | Accepted | Superseded | Deferred  
+**日期：** YYYY-MM-DD
 
-### Context
+### 背景
 
-What problem or ambiguity requires a decision?
+需要决策的问题或歧义是什么？
 
-### Decision
+### 决策
 
-What has been decided?
+已经决定采用什么方案？
 
-### Rationale
+### 理由
 
-Why this option was selected.
+为什么选择该方案？
 
-### Alternatives considered
+### 备选方案
 
-| Alternative | Reason not selected |
+| 方案 | 未选择原因 |
 |---|---|
 | ... | ... |
 
-### Consequences
+### 影响
 
-What this affects in implementation, testing, or future extension.
+该决策影响哪些实现、测试或后续扩展？
 ```
 
 ---
 
-## Change control
+## 5. 变更控制
 
-Accepted decisions should not be edited casually. If a decision changes:
+修改 Accepted 决策时应：
 
-1. Mark the old decision as `Superseded`.
-2. Add a new decision with a new ID.
-3. Explain what changed and why.
-4. Update `spec.md`, `architecture.md`, or `milestones.md` if the change affects requirements, code structure, or implementation order.
+1. 将旧决策标记为 `Superseded`。
+2. 添加新的决策 ID。
+3. 说明变化内容和原因。
+4. 若影响需求、架构或实施顺序，同步更新 `spec.md`、`architecture.md` 或 `milestones.md`。

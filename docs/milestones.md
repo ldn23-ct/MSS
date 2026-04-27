@@ -1,38 +1,41 @@
-# milestones.md
+# MSS 里程碑实施计划
 
-## Purpose
+## 1. 文档目的
 
-This document defines the staged implementation plan for the `BackscatterSim` Geant4 project.
+本文档定义 `MSS` 第一版 Geant4 项目的分阶段实现计划。
 
-It is written for Codex-assisted development. Its purpose is to keep implementation incremental, reviewable, and aligned with `spec.md` and `architecture.md`.
+本文档不是科研时间表，也不是论文写作计划。它只约束第一版代码实现顺序、每阶段交付物和验收点。
 
-This file is not a research schedule and not a paper-writing plan. It only covers code implementation milestones for the first working version of the project.
+使用优先级：
+
+1. `docs/spec.md`：需求、物理参数、宏命令、CSV 字段和验收标准。
+2. `docs/architecture.md`：模块边界、数据流和生命周期。
+3. `docs/decisions.md`：已接受设计决策。
+4. `docs/milestones.md`：分阶段实现顺序。
 
 ---
 
-## How to use this file with Codex
+## 2. 与 Codex 配合方式
 
-Use one milestone at a time.
+每次只实现一个里程碑。
 
-For each Codex session:
+建议流程：
 
-1. Ask Codex to read:
-   - `spec.md`
-   - `architecture.md`
-   - `milestones.md`
-2. Tell Codex which milestone to implement.
-3. Tell Codex not to implement later milestones.
-4. Review changed files before moving to the next milestone.
-5. Run the milestone-specific checks before continuing.
+1. 让 Codex 读取 `docs/spec.md`、`docs/architecture.md`、`docs/decisions.md`、`docs/milestones.md`。
+2. 明确指定要实现的里程碑编号。
+3. 明确要求不要实现后续里程碑。
+4. 检查 Codex 修改过的文件。
+5. 运行该里程碑对应检查。
+6. 通过后再进入下一里程碑。
 
-Recommended interaction pattern:
+推荐 prompt 模板：
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
 Implement Milestone N only.
 Do not implement Milestone N+1 or later.
 After implementation, summarize:
-- files changed
+- changed files
 - what was implemented
 - how to test it
 - what was intentionally left for later
@@ -40,69 +43,67 @@ After implementation, summarize:
 
 ---
 
-## Global rules for Codex
+## 3. 全局规则
 
-Codex must follow these rules for every milestone.
+### 3.1 Codex 必须遵守
 
-### Required behavior
+- 以 `spec.md` 为最高依据。
+- 以 `architecture.md` 保持模块边界。
+- 以 `decisions.md` 保持已接受设计不漂移。
+- 每次只实现指定里程碑。
+- 保持代码简单、明确、可测试。
+- 优先清晰报错，不做静默 fallback。
+- 保持 `spec.md` 中的 CSV schema。
+- 保持 `spec.md` 中的宏命令名称。
+- 保持 `spec.md` 中的坐标系。
+- 保持第一版范围。
+- 每阶段结束后总结改动文件、测试方式和暂缓内容。
 
-- Always align implementation with `spec.md` first.
-- Use `architecture.md` for module boundaries and data flow.
-- Implement only the requested milestone.
-- Keep code simple, explicit, and testable.
-- Prefer clear runtime errors over silent fallback behavior.
-- Preserve the CSV schema defined in `spec.md`.
-- Preserve the macro command names defined in `spec.md`.
-- Preserve the coordinate system defined in `spec.md`.
-- Preserve the first-version scope.
-- After each milestone, summarize changed files and remaining deferred work.
+### 3.2 Codex 禁止行为
 
-### Forbidden behavior
-
-- Do not implement future milestones unless explicitly requested.
-- Do not add image reconstruction.
-- Do not add detector material response.
-- Do not add energy deposition scoring.
-- Do not add automatic scanning over all collimator profiles.
-- Do not output full scatter trajectories.
-- Do not add source position macro commands.
-- Do not add detector bounds macro commands.
-- Do not change the output CSV fields unless `spec.md` is updated first.
-- Do not replace the specified output strategy with a different one.
-- Do not let multiple worker threads write to the same `std::ofstream`.
-- Do not silently ignore invalid profile, spectrum, geometry, or output configuration.
+- 不得实现未请求的后续里程碑。
+- 不得增加图像重建。
+- 不得增加真实探测器材料响应。
+- 不得增加探测器能量沉积 scoring。
+- 不得自动扫描所有 collimator profile。
+- 不得输出完整散射轨迹。
+- 不得增加源位置宏命令。
+- 不得增加探测器边界宏命令。
+- 不得改变 CSV 字段，除非 `spec.md` 更新。
+- 不得替换多线程输出策略。
+- 不得让多个 worker 线程共享同一个 `std::ofstream`。
+- 不得静默忽略非法 profile、spectrum、geometry 或 output 配置。
+- 不得使用旧项目名 `BackscatterSim` 作为 project 名、target 名或可执行文件名。
 
 ---
 
-## Milestone overview
+## 4. 里程碑总览
 
-| Milestone | Name | Main deliverable |
+| 里程碑 | 名称 | 主要交付物 |
 |---:|---|---|
-| M0 | Repository skeleton | Minimal buildable Geant4 project structure |
-| M1 | Runtime configuration and macro commands | Central config object and UI command layer |
-| M2 | Collimator profile reader | CSV reader and validator for collimator profiles |
-| M3 | Basic geometry construction | World, PMMA, optional air defect, detector helper plane |
-| M4 | Collimator geometry construction | Two tungsten pentagonal jaws built from profile data |
-| M5 | Primary generator and spectrum sampler | Mono/spectrum gamma source with cone-beam target sampling |
-| M6 | Event-level state model | Per-event scatter and detector-hit state |
-| M7 | Stepping logic | Scatter counting and detector crossing logic |
-| M8 | CSV output in single-thread mode | Debug/compact CSV writing for one thread |
-| M9 | Multi-thread output merge | Per-thread temporary CSV files and master merge |
-| M10 | Macros, README alignment, and acceptance tests | Runnable macros, sample data, README, validation checklist |
+| M0 | 仓库骨架 | 可配置、可编译的最小 Geant4 项目结构 |
+| M1 | 运行配置与宏命令 | 中央配置对象与 UI command 层 |
+| M2 | 准直器 profile 读取器 | CSV reader 与 validator |
+| M3 | 基础几何 | World、PMMA、空气缺陷、探测面辅助体 |
+| M4 | 准直器几何 | 由 profile 构建两块钨五边形 jaw |
+| M5 | primary generator 与 spectrum sampler | mono/spectrum gamma 源与锥束目标面采样 |
+| M6 | event 状态模型 | 单 event 的散射与探测记录结构 |
+| M7 | stepping 逻辑 | PMMA 散射计数与探测面穿越判断 |
+| M8 | 单线程 CSV 输出 | debug/compact CSV 写出 |
+| M9 | 多线程输出合并 | worker 临时 CSV + master 合并 |
+| M10 | 宏文件、README 与验收 | 可运行宏、示例数据、README、验收清单 |
 
 ---
 
-# Milestone 0: Repository skeleton
+# M0：仓库骨架
 
-## Goal
+## 目标
 
-Create a minimal buildable Geant4 project skeleton for `BackscatterSim`.
+创建最小可编译的 Geant4 项目骨架。该阶段只建立目录、CMake、入口文件和占位类，不实现真实仿真行为。
 
-This milestone should establish the repository layout, CMake configuration, entry point, and placeholder classes. It should not implement real simulation behavior yet.
+## 创建或修改文件
 
-## Files to create or modify
-
-Create:
+创建：
 
 - `CMakeLists.txt`
 - `main.cc`
@@ -130,14 +131,19 @@ Create:
 - `data/.gitkeep`
 - `results/.gitkeep`
 
-## Tasks
+可选：
 
-### Task 0.1: Create project layout
+- `include/ActionInitialization.hh`
+- `src/ActionInitialization.cc`
 
-Create the expected top-level structure:
+## 任务
+
+### M0.1 创建项目结构
+
+目标结构：
 
 ```text
-BackscatterSim/
+MSS/
 ├── CMakeLists.txt
 ├── main.cc
 ├── include/
@@ -147,89 +153,78 @@ BackscatterSim/
 └── results/
 ```
 
-### Task 0.2: Configure CMake
+### M0.2 配置 CMake
 
-Configure CMake for:
+要求：
 
-- project name: `BackscatterSim`
-- C++ standard: C++17
-- Geant4 package discovery
-- executable target: `BackscatterSim`
-- include directory: `include/`
-- source files under `src/`
+- `project(MSS)`；
+- C++17；
+- 查找 Geant4；
+- executable target 为 `MSS`；
+- include 目录为 `include/`；
+- source 文件来自 `src/`。
 
-### Task 0.3: Implement minimal entry point
+### M0.3 实现最小入口
 
-In `main.cc`:
+`main.cc` 应：
 
-- create the Geant4 run manager using `G4RunManagerFactory::CreateRunManager(G4RunManagerType::Default)`
-- register placeholder detector construction
-- register placeholder physics list
-- register placeholder user actions
-- support macro execution from command-line argument
-- support interactive mode only if no macro file is passed
+- 使用 `G4RunManagerFactory::CreateRunManager(G4RunManagerType::Default)`；
+- 注册占位 `DetectorConstruction`；
+- 注册占位 `PhysicsList`；
+- 注册占位 user actions 或 `ActionInitialization`；
+- 支持从命令行参数执行宏文件；
+- 无宏文件时可进入交互模式。
 
-### Task 0.4: Add placeholder classes
+### M0.4 添加占位类
 
-Create placeholder implementations for the core classes so the project compiles.
+所有核心类应能编译。占位类只需最小行为。
 
-At this stage, placeholder classes may have minimal behavior only.
+## 完成标准
 
-## Done when
+- `cmake ..` 成功。
+- `make -j` 成功。
+- 生成可执行文件 `MSS`。
+- 无宏文件运行时不立即崩溃。
+- 未实现真实几何、源、探测、CSV、profile 解析或 spectrum 采样。
 
-- The project configures with CMake.
-- The project builds with `make -j`.
-- The executable `BackscatterSim` is produced.
-- Running the executable with no macro does not crash immediately.
-- No real geometry, source, detector crossing, CSV output, or profile parsing is implemented yet.
+## 不做
 
-## Do
+- 不实现 PMMA 几何。
+- 不实现准直器。
+- 不实现宏命令处理。
+- 不实现 CSV 输出。
+- 不实现散射追踪。
+- 不实现 spectrum 采样。
+- 不增加分析脚本。
 
-- Keep all placeholder classes minimal.
-- Use the class names from `spec.md`.
-- Use C++17.
-- Keep source and header files separated.
-
-## Do not
-
-- Do not implement real PMMA geometry.
-- Do not implement the collimator.
-- Do not implement macro command handling.
-- Do not implement CSV output.
-- Do not implement scatter tracking.
-- Do not implement spectrum sampling.
-- Do not add analysis scripts.
-
-## Suggested Codex prompt
+## 推荐 Codex prompt
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
-Implement Milestone 0 only: Repository skeleton.
-Create a minimal buildable Geant4 project with the expected file structure, CMakeLists.txt, main.cc, and placeholder classes.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
+Implement Milestone 0 only: repository skeleton.
+Create a minimal buildable Geant4 project named MSS with CMakeLists.txt, main.cc, and placeholder classes.
 Do not implement geometry details, macro commands, CSV output, source sampling, scatter tracking, or multi-thread output.
-After implementation, summarize files changed and the exact build commands to test this milestone.
+After implementation, summarize changed files and exact build commands.
 ```
 
 ---
 
-# Milestone 1: Runtime configuration and macro commands
+# M1：运行配置与宏命令
 
-## Goal
+## 目标
 
-Create a central runtime configuration layer and macro command interface.
+创建中央运行配置层和宏命令接口。该阶段只接收、保存和基本验证配置，不使用配置构建完整几何或写出数据。
 
-This milestone should make the project able to receive and store the first-version macro parameters. It should not yet use those parameters to build full geometry, emit particles, or write CSV files.
+## 创建或修改文件
 
-## Files to create or modify
-
-Create:
+创建：
 
 - `include/SimulationConfig.hh`
 - `src/SimulationConfig.cc`
 - `include/SimulationMessenger.hh`
 - `src/SimulationMessenger.cc`
 
-Modify:
+修改：
 
 - `CMakeLists.txt`
 - `main.cc`
@@ -240,11 +235,11 @@ Modify:
 - `include/RunAction.hh`
 - `src/RunAction.cc`
 
-## Tasks
+## 任务
 
-### Task 1.1: Define `SimulationConfig`
+### M1.1 定义 `SimulationConfig`
 
-Create a configuration object containing first-version runtime parameters:
+建议结构：
 
 ```cpp
 struct SimulationConfig {
@@ -260,15 +255,15 @@ struct SimulationConfig {
     int numberOfThreads = 1;
 
     std::string outputDirectory = "results";
-    bool debugOutput = true;
+    std::optional<bool> debugOutputOverride = std::nullopt;
 };
 ```
 
-The exact implementation can differ, but the stored values and defaults must match the specification.
+说明：`debugOutputOverride` 用于区分 `/output/debug` 未设置和显式设置。最终模式在 `RunAction` 中根据线程数解析。
 
-### Task 1.2: Implement macro commands
+### M1.2 实现宏命令
 
-Implement macro commands:
+必须支持：
 
 ```text
 /geometry/collimatorProfileFile data/collimator_profiles.csv
@@ -286,97 +281,81 @@ Implement macro commands:
 /output/debug false
 ```
 
-### Task 1.3: Validate simple command values
+### M1.3 基本验证
 
-Implement basic validation:
+报错条件：
 
-- `energyMode` must be `mono` or `spectrum`.
-- `monoEnergy` must be positive.
-- `numberOfThreads` must be at least 1.
-- `outputDirectory` must not be empty.
-- `collimatorProfileId` must not be empty.
-- `collimatorProfileFile` must not be empty.
-- `spectrumFile` must not be empty when energy mode is `spectrum`.
+- `energyMode` 不是 `mono` 或 `spectrum`；
+- `monoEnergy` 非正；
+- `numberOfThreads < 1`；
+- `outputDirectory` 为空；
+- `collimatorProfileId` 为空；
+- `collimatorProfileFile` 为空；
+- spectrum 模式下 `spectrumFile` 为空。
 
-### Task 1.4: Share config with core classes
+### M1.4 将 config 传给核心类
 
-Pass or share the configuration object with:
+至少传给：
 
 - `DetectorConstruction`
 - `PrimaryGeneratorAction`
 - `RunAction`
 
-The ownership model should be explicit and avoid dangling references.
+所有权应明确，避免悬空引用。
 
-### Task 1.5: Set thread count from configuration
+### M1.5 设置线程数
 
-Ensure `/run/numberOfThreads` can configure the run manager thread count when using multi-threaded Geant4.
+`/run/numberOfThreads` 应能配置 Geant4 多线程运行的线程数。不得写死单线程。
 
-The implementation must not hard-code single-thread or multi-thread mode.
+## 完成标准
 
-## Done when
+- 所有宏命令存在。
+- 宏命令能更新中央配置。
+- 简单非法值能清晰报错。
+- 项目仍能编译。
+- 未引入完整仿真行为。
 
-- All required macro commands exist.
-- Macro commands update the central configuration object.
-- Invalid simple values produce clear errors.
-- The project still builds.
-- No full simulation behavior is introduced yet.
+## 不做
 
-## Do
+- 不构建完整几何。
+- 不读取准直器 profile CSV。
+- 不读取 spectrum CSV。
+- 不写 CSV。
+- 不实现 scatter tracking。
 
-- Keep macro command names exactly as defined.
-- Keep defaults consistent with `spec.md`.
-- Make configuration access simple and explicit.
-- Use Geant4 UI command classes where appropriate.
-
-## Do not
-
-- Do not build the full geometry in this milestone.
-- Do not read the collimator profile CSV yet.
-- Do not read the spectrum CSV yet.
-- Do not write output CSV files.
-- Do not implement scatter tracking.
-- Do not modify the output CSV schema.
-
-## Suggested Codex prompt
+## 推荐 Codex prompt
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
-Implement Milestone 1 only: Runtime configuration and macro commands.
-Create SimulationConfig and a messenger for all required first-version macro commands.
-The commands should update configuration values and perform basic validation.
-Do not implement geometry, collimator profile reading, spectrum reading, CSV output, scatter tracking, or multi-thread file merging.
-After implementation, summarize files changed and how to test macro command parsing.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
+Implement Milestone 1 only: runtime configuration and macro commands.
+Create SimulationConfig and SimulationMessenger for all required first-version macro commands.
+Use an optional debug override so single-thread default debug and multi-thread default compact remain possible.
+Do not implement geometry, profile reading, spectrum reading, CSV output, scatter tracking, or file merging.
+After implementation, summarize changed files and how to test macro parsing.
 ```
 
 ---
 
-# Milestone 2: Collimator profile reader
+# M2：准直器 profile 读取器
 
-## Goal
+## 目标
 
-Implement a standalone reader for external collimator profile CSV files.
+实现外部准直器 profile CSV 的独立读取与验证。该阶段只返回结构化数据，不构建 Geant4 solid。
 
-The reader must load one selected `profile_id`, validate it, and return a structured `CollimatorProfile` object. This milestone must not construct Geant4 solids.
-
-## Files to create or modify
-
-Modify:
+## 修改文件
 
 - `include/CollimatorProfileReader.hh`
 - `src/CollimatorProfileReader.cc`
-- `CMakeLists.txt` if needed
+- `CMakeLists.txt` 如有需要
 
-Optional test/support files:
+可选：
 
 - `data/collimator_profiles.csv`
-- small local invalid sample files for manual testing, if useful
+- 手工测试用非法 CSV 样例
 
-## Tasks
+## 任务
 
-### Task 2.1: Define profile data structures
-
-Define data structures:
+### M2.1 定义数据结构
 
 ```cpp
 struct XZPoint {
@@ -396,157 +375,130 @@ struct CollimatorProfile {
 };
 ```
 
-The exact names may follow project style, but the semantic structure must be equivalent.
+### M2.2 解析 CSV
 
-### Task 2.2: Parse CSV rows
-
-Read CSV columns:
+读取列：
 
 ```text
 profile_id,jaw_id,vertex_id,x_mm,z_mm
 ```
 
-Rows not matching the selected `profile_id` should be ignored.
+只处理匹配目标 `profile_id` 的行。
 
-### Task 2.3: Validate selected profile existence
+### M2.3 验证 profile 存在与列合法
 
-Reject with a clear runtime error if:
+报错条件：
 
-- the file cannot be opened
-- the selected `profile_id` is not found
-- required CSV columns are missing
-- a required field is empty
+- 文件无法打开；
+- 指定 `profile_id` 不存在；
+- 必要列缺失；
+- 必要字段为空。
 
-### Task 2.4: Validate jaws and vertices
+### M2.4 验证 jaw 与 vertex
 
-Reject with a clear runtime error if:
+报错条件：
 
-- the selected profile does not contain exactly two jaws
-- jaw IDs are not `jaw_0` and `jaw_1`
-- a jaw does not contain exactly five vertices
-- `vertex_id` is missing
-- `vertex_id` is duplicated
-- `vertex_id` is outside `0..4`
+- 不是恰好两块 jaw；
+- jaw ID 不是 `jaw_0` 和 `jaw_1`；
+- 某 jaw 不是五个顶点；
+- `vertex_id` 缺失；
+- `vertex_id` 重复；
+- `vertex_id` 超出 `0..4`。
 
-### Task 2.5: Validate numeric coordinates
+### M2.5 验证数值
 
-Reject with a clear runtime error if:
+报错条件：
 
-- `x_mm` or `z_mm` is not numeric
-- `x_mm` or `z_mm` is NaN
-- `x_mm` or `z_mm` is infinite
+- `x_mm` 或 `z_mm` 非数值；
+- NaN；
+- Inf。
 
-### Task 2.6: Validate polygon geometry
+### M2.6 验证多边形
 
-For each jaw:
+对每个 jaw：
 
-- compute signed polygon area
-- reject zero-area polygons
-- verify convexity
-- reject non-convex pentagons
+- 计算有符号面积；
+- 拒绝零面积；
+- 验证凸性；
+- 拒绝非凸五边形。
 
-The reader does not need to verify that z coordinates lie in a specific range.
+不需要检查 z 坐标是否落在 `[-28, -20] mm`。
 
-## Done when
+## 完成标准
 
-- Valid `P001` data can be loaded.
-- Invalid profile ID produces a clear error.
-- Missing or duplicated vertex IDs produce clear errors.
-- Non-finite coordinates produce clear errors.
-- Zero-area and non-convex pentagons produce clear errors.
-- No Geant4 geometry is constructed in this milestone.
+- 合法 `P001` 可读取。
+- 错误 profile ID 有清晰错误。
+- 缺失/重复 vertex ID 有清晰错误。
+- 非有限坐标有清晰错误。
+- 零面积和非凸五边形有清晰错误。
+- 不构建 Geant4 geometry。
 
-## Do
+## 不做
 
-- Keep the reader independent of Geant4 geometry classes.
-- Return plain C++ data structures.
-- Use clear exception messages or fatal errors.
-- Preserve input units as mm.
-- Preserve input coordinates as global `x_mm` and `z_mm`.
+- 不创建 `G4ExtrudedSolid`。
+- 不创建钨 logical volume。
+- 不自动批量扫描 profile。
+- 不修改 CSV 格式。
+- 不静默修复非法 profile。
 
-## Do not
-
-- Do not create `G4ExtrudedSolid`.
-- Do not create tungsten logical volumes.
-- Do not implement profile batch scanning.
-- Do not modify the CSV format.
-- Do not add extra required columns.
-- Do not silently repair invalid profiles.
-
-## Suggested Codex prompt
+## 推荐 Codex prompt
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
-Implement Milestone 2 only: Collimator profile reader.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
+Implement Milestone 2 only: collimator profile reader.
 Implement CollimatorProfileReader as a standalone CSV reader and validator for one selected profile_id.
-It must validate jaw count, jaw IDs, vertex IDs, finite coordinates, polygon area, and convexity.
-Do not construct Geant4 solids, do not build tungsten volumes, and do not implement profile batch scanning.
-After implementation, summarize files changed and provide manual test cases for valid and invalid profiles.
+Validate jaw count, jaw IDs, vertex IDs, finite coordinates, polygon area, and convexity.
+Do not construct Geant4 solids, tungsten volumes, or profile batch scanning.
+After implementation, summarize changed files and manual valid/invalid test cases.
 ```
 
 ---
 
-# Milestone 3: Basic geometry construction
+# M3：基础几何
 
-## Goal
+## 目标
 
-Construct the basic Geant4 geometry excluding the tungsten collimator.
+构建除钨准直器外的基础 Geant4 几何：World、PMMA、可选空气缺陷、探测面辅助体和探测器边界配置。
 
-This milestone should build:
-
-- World
-- PMMA phantom
-- optional air defect
-- detector helper plane for visualization
-- detector boundary configuration for later stepping logic
-
-## Files to create or modify
-
-Modify:
+## 修改文件
 
 - `include/DetectorConstruction.hh`
 - `src/DetectorConstruction.cc`
-- `include/SimulationConfig.hh` if geometry constants need a home
-- `src/SimulationConfig.cc` if needed
+- `include/SimulationData.hh` 或 `include/SimulationConfig.hh` 如需要
 
-## Tasks
+## 任务
 
-### Task 3.1: Build World
+### M3.1 World
 
-Create World volume:
+- 立方体；
+- `1000 mm × 1000 mm × 1000 mm`；
+- 中心 `(0, 0, 0)`；
+- 材料 `G4_Galactic`。
 
-- shape: box
-- size: `1000 mm × 1000 mm × 1000 mm`
-- center: `(0, 0, 0)`
-- material: `G4_Galactic`
+### M3.2 PMMA 模体
 
-### Task 3.2: Build PMMA phantom
+- 材料 `G4_PLEXIGLASS`；
+- box；
+- 尺寸 `200 mm × 200 mm × 65 mm`；
+- 中心 `(0, 0, 32.5 mm)`；
+- z 范围 `[0, 65] mm`。
 
-Create PMMA phantom:
+### M3.3 空气缺陷
 
-- material: `G4_PLEXIGLASS`
-- shape: box
-- size: `200 mm × 200 mm × 65 mm`
-- center: `(0, 0, 32.5 mm)`
-- z range: `[0, 65] mm`
+当 `enableAirDefect == true`：
 
-### Task 3.3: Build optional air defect
+- 材料 `G4_AIR`；
+- cylinder；
+- 半径 `5 mm`；
+- 全长 `10 mm`；
+- 轴向 z；
+- 全局中心 `(0, 0, 55 mm)`；
+- z 范围 `[50, 60] mm`；
+- 作为 PMMA daughter volume 放置，不使用布尔减法。
 
-If `enableAirDefect == true`, create air cylinder as a daughter volume inside the PMMA phantom:
+### M3.4 探测器边界配置
 
-- material: `G4_AIR`
-- shape: cylinder
-- radius: `5 mm`
-- full length: `10 mm`
-- axis: z-axis
-- center: `(0, 0, 55 mm)` in global coordinates
-- z range: `[50, 60] mm`
-
-Do not use Boolean subtraction.
-
-### Task 3.4: Define detector boundary config
-
-Create or expose a detector plane configuration:
+定义或暴露：
 
 ```cpp
 struct DetectorPlaneConfig {
@@ -558,114 +510,93 @@ struct DetectorPlaneConfig {
 };
 ```
 
-This config will later be used by `SteppingAction`.
+### M3.5 探测面辅助体
 
-### Task 3.5: Add detector helper plane for visualization
-
-Add a thin, non-sensitive visualization helper plane or marker at:
-
-- `z = -73 mm`
-- `x = [53, 161] mm`
-- `y = [-50, 50] mm`
-
-This helper must not simulate detector material response.
-
-### Task 3.6: Add basic visualization attributes
-
-Make major volumes visually distinguishable:
-
-- World can be invisible.
-- PMMA should be visible or semi-transparent.
-- Air defect should be visible when enabled.
-- Detector helper plane should be visible.
-
-## Done when
-
-- `vis.mac` or a temporary visualization macro can show World, PMMA, optional air defect, and detector helper plane.
-- Air defect appears when enabled and is absent when disabled.
-- Detector plane is located at `z = -73 mm` with the specified bounds.
-- No tungsten collimator is built yet.
-
-## Do
-
-- Use Geant4 NIST materials.
-- Preserve the coordinate system from `spec.md`.
-- Keep detector helper plane non-physical for response modeling.
-- Make geometry constants easy to inspect.
-
-## Do not
-
-- Do not build collimator jaws.
-- Do not implement source generation.
-- Do not implement scatter tracking.
-- Do not implement detector crossing logic.
-- Do not write CSV files.
-- Do not add detector material response.
-- Do not add macro commands for source position or detector bounds.
-
-## Suggested Codex prompt
+在 `z = -73 mm` 添加可视化辅助体，范围为：
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
-Implement Milestone 3 only: Basic geometry construction.
-Build World, PMMA phantom, optional air defect, detector plane configuration, and a visualization helper plane.
-Do not build the tungsten collimator, do not implement source generation, stepping logic, detector response, or CSV output.
-After implementation, summarize files changed and explain how to visually check the geometry.
+x = [53, 161] mm
+y = [-50, 50] mm
+```
+
+该辅助体不作为真实探测器响应，不应设置为 sensitive detector。
+
+### M3.6 可视化属性
+
+- World 可不可见。
+- PMMA 可见或半透明。
+- 空气缺陷启用时可见。
+- 探测面辅助体可见。
+
+## 完成标准
+
+- 可视化中能看到 PMMA、空气缺陷和探测面辅助体。
+- 空气缺陷开关有效。
+- 探测面位置与范围正确。
+- 未构建钨准直器。
+
+## 不做
+
+- 不构建 collimator jaws。
+- 不实现源产生。
+- 不实现 stepping logic。
+- 不写 CSV。
+- 不添加探测器材料响应。
+
+## 推荐 Codex prompt
+
+```text
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
+Implement Milestone 3 only: basic geometry construction.
+Build World, PMMA, optional air defect, detector plane config, and a visualization helper plane.
+Do not build tungsten collimator, source generation, stepping logic, detector response, or CSV output.
+After implementation, summarize changed files and visual checks.
 ```
 
 ---
 
-# Milestone 4: Collimator geometry construction
+# M4：准直器几何
 
-## Goal
+## 目标
 
-Construct the two tungsten collimator jaws from a validated external profile.
+把 M2 的 profile reader 与 M3 的 DetectorConstruction 连接起来，使用 `G4ExtrudedSolid` 构建两块钨准直器 jaw。
 
-This milestone connects `CollimatorProfileReader` and `CollimatorBuilder` to `DetectorConstruction`.
-
-## Files to create or modify
-
-Modify:
+## 修改文件
 
 - `include/CollimatorBuilder.hh`
 - `src/CollimatorBuilder.cc`
 - `include/DetectorConstruction.hh`
 - `src/DetectorConstruction.cc`
-- `include/CollimatorProfileReader.hh` only if integration requires a small interface adjustment
-- `src/CollimatorProfileReader.cc` only if integration requires a small interface adjustment
+- 必要时小幅调整 `CollimatorProfileReader`
 
-## Tasks
+## 任务
 
-### Task 4.1: Define `CollimatorBuilder` interface
+### M4.1 定义 `CollimatorBuilder` 接口
 
-Create a builder interface that accepts:
+接口应接受：
 
-- validated `CollimatorProfile`
-- parent/world logical volume
-- material manager or tungsten material
+- 已验证 `CollimatorProfile`；
+- parent/world logical volume；
+- tungsten material 或 NIST manager。
 
-It should construct two physical tungsten jaw volumes.
+### M4.2 使用 `G4ExtrudedSolid`
 
-### Task 4.2: Use `G4ExtrudedSolid`
+每块 jaw 使用 `G4ExtrudedSolid`。
 
-Each jaw must be built using `G4ExtrudedSolid`.
+输入 profile 点是全局 `(x_mm, z_mm)`。
 
-Input profile points are global `(x_mm, z_mm)` coordinates.
+映射：
 
-Map them into the `G4ExtrudedSolid` local 2D section as:
-
-| Input | `G4ExtrudedSolid` local coordinate |
+| 输入 | local 坐标 |
 |---|---|
 | global x | local x |
 | global z | local y |
 
-The extrusion direction is local z.
+### M4.3 旋转到全局 y 拉伸
 
-### Task 4.3: Apply rotation for global y extrusion
+local z 是 extrusion 方向，应旋转到 global y。
 
-Rotate the extruded solid so that local z extrusion maps to global y direction.
-
-The intended mapping is:
+目标映射：
 
 ```text
 local x -> global x
@@ -673,127 +604,94 @@ local y -> global z
 local z -> global -y
 ```
 
-This is equivalent to rotation around the x-axis by `+90 deg`. Since the jaw is symmetric along y, local z mapping to global +y or -y gives equivalent geometric coverage.
+绕 x 轴 `+90 deg` 可接受。由于 jaw 沿 y 对称，映射到 global +y 或 -y 的几何覆盖等价。
 
-### Task 4.4: Set y extrusion length
+### M4.4 y 向长度
 
-Each jaw must be extruded over:
+- 全长 `120 mm`；
+- global y 范围 `[-60, 60] mm`。
 
-- full length: `120 mm`
-- global y range: `[-60, 60] mm`
+### M4.5 材料
 
-### Task 4.5: Use tungsten material
-
-Use Geant4 NIST tungsten material:
+使用：
 
 ```cpp
 G4_W
 ```
 
-### Task 4.6: Integrate with `DetectorConstruction`
+### M4.6 集成到 `DetectorConstruction`
 
-In `DetectorConstruction`:
+- 从 config 读取 profile 文件路径。
+- 从 config 读取 profile ID。
+- 用 `CollimatorProfileReader` 读取并验证。
+- 用 `CollimatorBuilder` 构建两块 jaw。
 
-- read selected profile file from config
-- select profile ID from config
-- validate via `CollimatorProfileReader`
-- build collimator via `CollimatorBuilder`
+## 完成标准
 
-## Done when
+- 合法 `P001` 生成两块钨 jaw。
+- 非法 profile 仍在 reader 阶段报错停止。
+- 可视化中可见两块五边形钨板。
+- 使用 CSV 全局 x-z 坐标，不额外加 z 偏移。
+- 未实现探测面穿越或输出逻辑。
 
-- Valid `P001` profile builds two tungsten jaw volumes.
-- Invalid profile data still stops at profile reader validation.
-- Visualization shows two pentagonal tungsten jaws.
-- The jaws are positioned using global x-z coordinates from the CSV without adding an extra z offset.
-- No detector crossing or output logic is implemented in this milestone.
+## 不做
 
-## Do
+- 不修改 profile CSV 格式。
+- 不自动批量扫描 profile。
+- 不添加额外坐标偏移。
+- 不检查 z 是否落在 `[-28, -20] mm`。
+- 不写 CSV。
 
-- Preserve global x-z coordinates from the profile file.
-- Use `G4ExtrudedSolid`.
-- Use y extrusion length of `120 mm`.
-- Keep jaw construction separate from profile reading.
-- Add visualization attributes for tungsten jaws.
-
-## Do not
-
-- Do not modify the profile CSV format.
-- Do not implement profile batch scanning.
-- Do not add extra coordinate offsets.
-- Do not check that z coordinates fall in `[-28, -20] mm`.
-- Do not implement detector crossing.
-- Do not implement scatter tracking.
-- Do not write CSV files.
-
-## Suggested Codex prompt
+## 推荐 Codex prompt
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
-Implement Milestone 4 only: Collimator geometry construction.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
+Implement Milestone 4 only: collimator geometry construction.
 Use CollimatorProfileReader output to build two tungsten jaws with G4ExtrudedSolid.
-Preserve global x-z coordinates from the CSV and rotate the extrusion so the jaw extends along global y.
-Do not modify the CSV format, do not implement profile batch scanning, and do not implement stepping or output logic.
-After implementation, summarize files changed and explain how to visually verify the collimator geometry.
+Preserve global x-z coordinates and rotate extrusion so each jaw extends along global y.
+Do not modify CSV format, add offsets, implement batch scanning, stepping, or output logic.
+After implementation, summarize changed files and visual verification steps.
 ```
 
 ---
 
-# Milestone 5: Primary generator and spectrum sampler
+# M5：Primary generator 与 Spectrum sampler
 
-## Goal
+## 目标
 
-Implement the primary gamma source.
+实现 primary gamma 源：每个 event 产生一个 gamma，支持 mono 与 spectrum 能量模式，并使用目标平面圆盘采样生成锥束方向。
 
-The source must support:
-
-- one event = one primary gamma
-- mono energy mode
-- spectrum energy mode
-- point source at `(0, 0, -185 mm)`
-- target-plane disk sampling at PMMA front surface `z = 0 mm`
-
-## Files to create or modify
-
-Modify:
+## 修改文件
 
 - `include/PrimaryGeneratorAction.hh`
 - `src/PrimaryGeneratorAction.cc`
 - `include/SpectrumSampler.hh`
 - `src/SpectrumSampler.cc`
-- `include/SimulationConfig.hh` if needed
-- `src/SimulationConfig.cc` if needed
+- 必要时调整 `SimulationConfig`
 
-## Tasks
+## 任务
 
-### Task 5.1: Implement point gamma source
+### M5.1 点源 gamma
 
-Use a primary generator method compatible with Geant4.
+每个 event：
 
-For each event:
+- 粒子：gamma；
+- 源位置：`(0, 0, -185 mm)`；
+- primary 数量：1。
 
-- particle: gamma
-- source position: `(0, 0, -185 mm)`
-- number of primaries: 1
+### M5.2 mono 模式
 
-### Task 5.2: Implement mono energy mode
-
-When:
+当：
 
 ```text
 /source/energyMode mono
 ```
 
-Use:
+使用配置的 mono energy，默认 `160 keV`。
 
-```text
-/source/monoEnergy 160 keV
-```
+### M5.3 spectrum sampler
 
-or the configured mono energy value.
-
-### Task 5.3: Implement spectrum sampler
-
-Implement `SpectrumSampler` to read CSV:
+读取 CSV：
 
 ```csv
 energy_keV,weight
@@ -802,149 +700,116 @@ energy_keV,weight
 50,0.06
 ```
 
-Validation requirements:
+验证：
 
-- file must exist
-- required columns must exist
-- energy must be positive
-- weight must be non-negative
-- at least one weight must be positive
-- values must be finite
+- 文件存在；
+- 必要列存在；
+- energy 为正且有限；
+- weight 非负且有限；
+- 至少一个 weight 大于 0。
 
-Sampling requirements:
+采样：
 
-- normalize weights
-- build cumulative distribution function
-- sample one energy per event
+- 内部归一化；
+- 构建 CDF；
+- 每个 event 采样一次能量。
 
-### Task 5.4: Implement target-plane disk sampling
+### M5.4 目标平面圆盘采样
 
-For each event:
+每个 event：
 
-1. sample a point uniformly in a disk on plane `z = 0 mm`
-2. disk center: `(0, 0, 0)`
-3. disk radius: `1.5 mm`
-4. initial direction:
+1. 在 `z = 0 mm` 平面半径 `1.5 mm` 的圆盘内均匀采样目标点；
+2. 圆心 `(0, 0, 0)`；
+3. 初始方向：
 
 ```text
 normalize((x_target, y_target, 0) - (0, 0, -185))
 ```
 
-### Task 5.5: Store initial energy for event state
+### M5.5 初始能量交给 event state
 
-Provide a clean way for `PrimaryGeneratorAction` to pass the sampled initial energy to `EventAction` later.
+为 M6 提供接口，把 `initial_energy_keV` 写入 `EventAction`。
 
-At this milestone, a stub method or clear interface is sufficient if M6 will finalize event state handling.
+## 完成标准
 
-## Done when
+- 每 event 一个 primary gamma。
+- mono 默认 `160 keV` 可用。
+- spectrum 模式可读取并采样 `data/spectrum.csv`。
+- 方向指向 z = 0 圆盘采样点。
+- 不模拟源准直器。
 
-- One primary gamma is generated per event.
-- Mono mode works with default `160 keV`.
-- Spectrum mode can load and sample from `data/spectrum.csv`.
-- Direction points from the source to a sampled target point on the disk at `z = 0 mm`.
-- Source collimator is not modeled.
+## 不做
 
-## Do
+- 不添加源位置或束斑半径宏命令。
+- 不实现 detector crossing。
+- 不实现 scatter counting。
+- 不写 CSV。
 
-- Use units explicitly.
-- Keep source geometry fixed in code for first version.
-- Keep target disk radius fixed at `1.5 mm`.
-- Keep energy units in keV for input and internal clarity.
-- Validate spectrum input strictly.
-
-## Do not
-
-- Do not simulate a source collimator.
-- Do not add macro commands for source position or beam spot radius.
-- Do not implement detector crossing logic.
-- Do not implement scatter counting.
-- Do not write output CSV files.
-- Do not implement image reconstruction or analysis scripts.
-
-## Suggested Codex prompt
+## 推荐 Codex prompt
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
-Implement Milestone 5 only: Primary generator and spectrum sampler.
-Generate one primary gamma per event from the fixed point source at (0,0,-185 mm), using target-plane disk sampling at z=0 with radius 1.5 mm.
-Support mono and spectrum energy modes, including strict spectrum CSV validation and CDF sampling.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
+Implement Milestone 5 only: primary generator and spectrum sampler.
+Generate one primary gamma per event from (0,0,-185 mm), using target-plane disk sampling at z=0 with radius 1.5 mm.
+Support mono and spectrum modes with strict spectrum CSV validation and CDF sampling.
 Do not simulate source collimator, detector crossing, scatter tracking, CSV output, or post-processing.
-After implementation, summarize files changed and how to test mono and spectrum modes.
+After implementation, summarize changed files and mono/spectrum tests.
 ```
 
 ---
 
-# Milestone 6: Event-level state model
+# M6：Event 状态模型
 
-## Goal
+## 目标
 
-Create the event-level state model used to accumulate scatter and detector-hit information for one primary gamma.
+创建单 event 状态模型，用于保存 primary gamma 的初始能量、PMMA 散射摘要和探测面 hit 信息。该阶段只定义和维护状态，不实现 step 判断。
 
-This milestone defines what information an event records, but it does not yet implement the step-level logic that fills it.
-
-## Files to create or modify
-
-Modify:
+## 修改文件
 
 - `include/EventAction.hh`
 - `src/EventAction.cc`
 - `include/PrimaryGeneratorAction.hh`
 - `src/PrimaryGeneratorAction.cc`
-- `include/RunAction.hh` if needed for later writer access
-- `src/RunAction.cc` if needed
+- 可选 `include/SimulationData.hh` 或 `include/EventRecord.hh`
 
-Optional new file:
+## 任务
 
-- `include/EventRecord.hh`
+### M6.1 散射状态
 
-## Tasks
+每个 event 保存：
 
-### Task 6.1: Define scatter state
+- `initial_energy`；
+- `scatter_count_total`；
+- `compton_count`；
+- `rayleigh_count`；
+- `first_scatter_x/y/z`；
+- `last_scatter_x/y/z`。
 
-For each event, store:
+无散射时 first/last scatter 坐标为 NaN。
 
-- `initial_energy`
-- `scatter_count_total`
-- `compton_count`
-- `rayleigh_count`
-- `first_scatter_x`
-- `first_scatter_y`
-- `first_scatter_z`
-- `last_scatter_x`
-- `last_scatter_y`
-- `last_scatter_z`
+### M6.2 detector hit 状态
 
-If no scatter occurs, first and last scatter positions must remain NaN.
+保存是否被探测。若被探测，保存：
 
-### Task 6.2: Define detector hit state
+- `det_x`；
+- `det_y`；
+- `det_z`；
+- `det_energy`；
+- `det_dir_x/y/z`。
 
-For each event, store whether the primary gamma has been detected.
+### M6.3 event reset
 
-If detected, store:
+每个 event 开始时：
 
-- `det_x`
-- `det_y`
-- `det_z`
-- `det_energy`
-- `det_dir_x`
-- `det_dir_y`
-- `det_dir_z`
+- 散射计数置 0；
+- first/last scatter 置 NaN；
+- detector hit flag 置 false；
+- detector hit 数据重置；
+- 准备接收初始能量。
 
-Debug fields may be stored even if compact output later omits them.
+### M6.4 状态更新接口
 
-### Task 6.3: Implement event reset
-
-At the beginning of each event:
-
-- reset scatter counts to zero
-- reset first/last scatter positions to NaN
-- reset detector hit flag
-- reset detector hit values
-- prepare to receive initial energy
-
-### Task 6.4: Implement state update methods
-
-Add methods such as:
+提供清晰方法，例如：
 
 - `SetInitialEnergy(...)`
 - `RecordComptonScatter(position)`
@@ -953,79 +818,63 @@ Add methods such as:
 - `HasDetectorHit()`
 - `GetRecord()`
 
-Exact names may differ, but state transitions must be clear.
+### M6.5 multiple scatter 标记
 
-### Task 6.5: Define multiple-scatter flag
-
-Compute:
+定义：
 
 ```text
 is_multiple_scatter = scatter_count_total >= 2
 ```
 
-This can be stored or computed when needed.
+可作为派生值计算。
 
-## Done when
+## 完成标准
 
-- Event state resets correctly at event start.
-- Initial energy can be stored.
-- Scatter state can be updated through explicit methods.
-- Detector hit state can be recorded through an explicit method.
-- `is_multiple_scatter` is available as a derived value.
-- No CSV file is written yet.
+- event start 能正确重置状态。
+- 初始能量可写入。
+- Compton/Rayleigh 计数可通过显式方法更新。
+- detector hit 可通过显式方法记录。
+- `is_multiple_scatter` 可获取。
+- 未写 CSV。
 
-## Do
+## 不做
 
-- Keep event state per event.
-- Use NaN for missing first/last scatter positions.
-- Keep units consistent with `spec.md`: mm and keV.
-- Keep debug fields available for later output.
+- 不实现 step-level process detection。
+- 不实现 detector plane crossing。
+- 不写 CSV。
+- 不实现多线程合并。
+- 不输出未命中 event。
 
-## Do not
-
-- Do not implement step-level process detection yet.
-- Do not implement detector plane crossing yet.
-- Do not write CSV files.
-- Do not implement multi-thread merging.
-- Do not output unhit events.
-- Do not add fields outside the specified schema unless they are internal-only and justified.
-
-## Suggested Codex prompt
+## 推荐 Codex prompt
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
-Implement Milestone 6 only: Event-level state model.
-Create clear per-event state for initial energy, Compton/Rayleigh counts, first/last scatter positions, detector hit information, and is_multiple_scatter.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
+Implement Milestone 6 only: event-level state model.
+Create per-event state for initial energy, Compton/Rayleigh counts, first/last scatter positions, detector hit information, and is_multiple_scatter.
 Implement reset and update methods, but do not implement step-level process detection, detector crossing, CSV writing, or multi-thread output.
-After implementation, summarize files changed and describe how EventAction state is updated.
+After implementation, summarize changed files and state update flow.
 ```
 
 ---
 
-# Milestone 7: Stepping logic
+# M7：Stepping 逻辑
 
-## Goal
+## 目标
 
-Implement step-level logic for primary gamma scatter tracking and detector plane crossing.
+实现 primary gamma 的 step-level 散射统计和探测面穿越判断，并把结果写入 `EventAction`。
 
-This milestone connects `SteppingAction` to `EventAction` and `DetectorConstruction` detector bounds.
-
-## Files to create or modify
-
-Modify:
+## 修改文件
 
 - `include/SteppingAction.hh`
 - `src/SteppingAction.cc`
-- `include/EventAction.hh`
-- `src/EventAction.cc` if event state methods need adjustment
-- `include/DetectorConstruction.hh` if detector config accessor is needed
-- `src/DetectorConstruction.cc` if detector config accessor is needed
+- 必要时调整 `EventAction`
+- 必要时调整 `DetectorConstruction` 以暴露 detector config
 
-## Tasks
+## 任务
 
-### Task 7.1: Filter to primary gamma only
+### M7.1 过滤 primary gamma
 
-Only process tracks satisfying:
+只处理：
 
 ```text
 particle_name == gamma
@@ -1033,53 +882,51 @@ track_id == 1
 parent_id == 0
 ```
 
-All other particles and secondary photons must be ignored for scatter-history statistics and detector output.
+所有其他粒子和 secondary gamma 均忽略。
 
-### Task 7.2: Detect PMMA internal scattering
+### M7.2 判断 PMMA 内散射
 
-For each step, determine whether the relevant interaction occurred inside PMMA.
-
-Count only processes:
+只计数：
 
 ```text
 compt
 Rayl
 ```
 
-Only count Compton and Rayleigh scattering inside PMMA.
+并且相互作用发生在 PMMA 内。
 
-Do not count:
+不计数：
 
-- photoelectric effect
-- collimator interactions
-- air interactions
-- world interactions
-- secondary particle interactions
+- photoelectric effect；
+- tungsten collimator；
+- air；
+- World；
+- secondary particle interactions。
 
-### Task 7.3: Record scatter position
+### M7.3 记录散射位置
 
-When a valid Compton or Rayleigh event occurs inside PMMA, use:
+使用：
 
 ```cpp
 step->GetPostStepPoint()->GetPosition()
 ```
 
-Update:
+更新：
 
-- total scatter count
-- Compton count or Rayleigh count
-- first scatter position if this is the first scatter
-- last scatter position
+- total scatter count；
+- Compton 或 Rayleigh count；
+- first scatter position；
+- last scatter position。
 
-### Task 7.4: Detect detector plane crossing
+### M7.4 判断探测面穿越
 
-The detector plane is:
+探测面：
 
 ```text
 z = -73 mm
 ```
 
-Crossing condition:
+条件：
 
 ```text
 preStep.z > detector_z
@@ -1087,84 +934,70 @@ postStep.z <= detector_z
 direction.z < 0
 ```
 
-### Task 7.5: Compute crossing point by linear interpolation
+### M7.5 线性插值穿越点
 
-Compute the detector crossing point from the pre-step and post-step positions.
+```text
+t = (detector_z - pre_z) / (post_z - pre_z)
+det_x = pre_x + t * (post_x - pre_x)
+det_y = pre_y + t * (post_y - pre_y)
+```
 
-The crossing point must lie within:
+接受范围：
 
 ```text
 53 mm <= det_x <= 161 mm
 -50 mm <= det_y <= 50 mm
 ```
 
-### Task 7.6: Record detector hit
+### M7.6 记录 detector hit
 
-When a primary gamma crosses the detector plane within bounds, record:
+记录：
 
 - `det_x`
 - `det_y`
 - `det_z`
 - `det_energy`
-- `det_dir_x`
-- `det_dir_y`
-- `det_dir_z`
+- `det_dir_x/y/z`
 
-Prevent duplicate hit recording for the same event if the same primary track crosses the plane more than once.
+同一 event 只允许记录一次有效 hit。
 
-## Done when
+## 完成标准
 
-- Only primary gamma tracks contribute to event records.
-- PMMA Compton and Rayleigh scatter counts are updated correctly.
-- First and last scatter positions are updated correctly.
-- Detector hits are recorded only for valid plane crossings within bounds.
-- Events not reaching the detector remain unhit.
-- No CSV file is written yet unless M8 has already been implemented separately.
+- 只有 primary gamma 更新 event record。
+- PMMA 内 Compton/Rayleigh 计数正确。
+- first/last scatter 更新正确。
+- detector hit 只在有效穿越且落入边界时记录。
+- 未到达探测器的 event 保持 unhit。
+- 不写 CSV，除非 M8 已另行实现。
 
-## Do
+## 不做
 
-- Use process names `compt` and `Rayl`.
-- Use post-step point for scatter position.
-- Use linear interpolation for detector crossing.
-- Use the detector bounds from `DetectorConstruction` or a shared config object.
-- Keep step logic narrow and explicit.
+- 不统计 secondary gamma。
+- 不统计 tungsten、air、world 相互作用。
+- 不把 photoelectric effect 算作散射。
+- 不输出完整轨迹。
+- 不添加探测器响应。
 
-## Do not
-
-- Do not count secondary gamma tracks.
-- Do not count scatter in tungsten, air, or world.
-- Do not count photoelectric effect as scatter.
-- Do not output unhit events.
-- Do not change the CSV schema.
-- Do not implement detector material response.
-- Do not write full trajectory output.
-
-## Suggested Codex prompt
+## 推荐 Codex prompt
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
-Implement Milestone 7 only: Stepping logic.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
+Implement Milestone 7 only: stepping logic.
 Only process primary gamma tracks. Count PMMA-internal Compton and Rayleigh scatters using post-step positions, and detect detector plane crossing at z=-73 mm using linear interpolation and detector bounds.
 Do not count secondary particles, tungsten interactions, air/world interactions, or photoelectric effect.
-Do not change the CSV schema, do not add detector response, and do not output full trajectories.
-After implementation, summarize files changed and describe how to inspect scatter and detector-hit state.
+Do not change CSV schema, add detector response, or output full trajectories.
+After implementation, summarize changed files and how to inspect event state.
 ```
 
 ---
 
-# Milestone 8: CSV output in single-thread mode
+# M8：单线程 CSV 输出
 
-## Goal
+## 目标
 
-Implement CSV output for single-thread mode.
+实现单线程 CSV 输出。该阶段创建输出目录、写 header，并对每个被探测 primary gamma 写一行。多线程临时文件与合并推迟到 M9。
 
-This milestone should create the output file, write the correct header, and write one row per detected primary gamma.
-
-Multi-thread temporary files and merging are deferred to Milestone 9.
-
-## Files to create or modify
-
-Modify:
+## 修改文件
 
 - `include/CsvWriter.hh`
 - `src/CsvWriter.cc`
@@ -1172,178 +1005,135 @@ Modify:
 - `src/RunAction.cc`
 - `include/EventAction.hh`
 - `src/EventAction.cc`
-- `include/SimulationConfig.hh` if file naming helpers are added
-- `src/SimulationConfig.cc` if file naming helpers are added
+- 必要时调整 `SimulationConfig`
 
-## Tasks
+## 任务
 
-### Task 8.1: Implement output directory creation
+### M8.1 创建输出目录
 
-Use configured output directory:
+使用：
 
 ```text
 /output/directory results
 ```
 
-Default:
+默认 `results/`。目录不存在时创建；失败时报错停止。
 
-```text
-results/
-```
+### M8.2 单线程文件命名
 
-If the directory does not exist, create it.
-
-If creation fails, report a clear error and stop.
-
-### Task 8.2: Implement file naming for single-thread mode
-
-Use file names from `spec.md`.
-
-Mono compact:
+mono compact：
 
 ```text
 results/hits_profile_{profile_id}_mono_{energy}keV_seed{seed}.csv
 ```
 
-Mono debug:
+mono debug：
 
 ```text
 results/hits_profile_{profile_id}_mono_{energy}keV_seed{seed}_debug.csv
 ```
 
-Spectrum compact:
+spectrum compact：
 
 ```text
 results/hits_profile_{profile_id}_spectrum_seed{seed}.csv
 ```
 
-Spectrum debug:
+spectrum debug：
 
 ```text
 results/hits_profile_{profile_id}_spectrum_seed{seed}_debug.csv
 ```
 
-### Task 8.3: Implement compact header
-
-Compact header:
+### M8.3 compact header
 
 ```csv
 initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
 ```
 
-### Task 8.4: Implement debug header
-
-Debug header:
+### M8.4 debug header
 
 ```csv
 event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
 ```
 
-### Task 8.5: Write only detected events
+### M8.5 只写被探测 event
 
-At end of event:
+- hit 为 true：写一行；
+- hit 为 false：不写。
 
-- if primary gamma reached detector: write one row
-- if not detected: write nothing
+### M8.6 writer 生命周期
 
-### Task 8.6: Connect writer lifecycle
+`RunAction`：
 
-`RunAction` should manage writer lifecycle:
+- run begin 打开 writer；
+- run end 关闭 writer。
 
-- open writer at run start
-- close writer at run end
+`EventAction` 通过受控接口写行。
 
-`EventAction` should write event rows through the writer or a controlled interface.
+## 完成标准
 
-## Done when
+- 单线程 debug 模式写出 debug header。
+- 单线程 compact 模式写出 compact header。
+- 只写 detected primary gamma。
+- 字段顺序完全符合 `spec.md`。
+- 单位为 mm 和 keV。
+- 未实现多线程合并。
 
-- Single-thread `debug` mode writes a CSV file with debug header.
-- Single-thread `compact` mode writes a CSV file with compact header.
-- Only detected primary gamma events are written.
-- No extra columns are added.
-- Output units follow the project convention: mm and keV.
-- Multi-thread merge is not implemented yet.
+## 不做
 
-## Do
+- 不实现 multi-thread merge。
+- 不让多个线程共享一个 `std::ofstream`。
+- 不增加 CSV 列。
+- 不输出未探测 event。
 
-- Preserve exact field order.
-- Write one row per detected primary gamma.
-- Use NaN for missing scatter positions.
-- Keep debug and compact modes separate.
-- Keep output directory creation explicit.
-
-## Do not
-
-- Do not implement multi-thread merge in this milestone.
-- Do not let multiple threads share one `std::ofstream`.
-- Do not add `run_id`, `profile_id`, `energy_mode`, or `random_seed` as CSV columns.
-- Do not output unhit events.
-- Do not change field names.
-- Do not add post-processing analysis.
-
-## Suggested Codex prompt
+## 推荐 Codex prompt
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
-Implement Milestone 8 only: CSV output in single-thread mode.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
+Implement Milestone 8 only: single-thread CSV output.
 Create CsvWriter, write exact debug and compact headers, generate file names from profile_id, energy mode, mono energy, seed, and debug mode, and write one row only for detected primary gamma events.
-Do not implement multi-thread merging, do not share ofstream across threads, and do not add columns beyond the specified CSV schema.
-After implementation, summarize files changed and how to test single-thread debug and compact output.
+Do not implement multi-thread merging, share ofstream across threads, or add CSV columns.
+After implementation, summarize changed files and single-thread output tests.
 ```
 
 ---
 
-# Milestone 9: Multi-thread output merge
+# M9：多线程输出合并
 
-## Goal
+## 目标
 
-Implement multi-thread-safe CSV output.
+实现多线程安全 CSV 输出。每个 worker 线程写独立临时 CSV，master 在 run 结束合并。
 
-Each worker thread must write its own temporary CSV file. The master must merge thread files at the end of the run.
-
-## Files to create or modify
-
-Modify:
+## 修改文件
 
 - `include/CsvWriter.hh`
 - `src/CsvWriter.cc`
 - `include/RunAction.hh`
 - `src/RunAction.cc`
-- `include/EventAction.hh` if writer access needs adjustment
-- `src/EventAction.cc` if writer access needs adjustment
-- `include/SimulationConfig.hh` if helper methods are needed
-- `src/SimulationConfig.cc` if helper methods are needed
+- 必要时调整 `EventAction` 与 `SimulationConfig`
 
-## Tasks
+## 任务
 
-### Task 9.1: Create temporary output directory
+### M9.1 创建临时目录
 
-Thread temporary files must be placed in:
-
-```text
-results/tmp/
-```
-
-or under the configured output directory:
+线程临时文件放在：
 
 ```text
 {outputDirectory}/tmp/
 ```
 
-If creation fails, report a clear error and stop.
+默认：
 
-### Task 9.2: Implement per-thread temporary file naming
+```text
+results/tmp/
+```
 
-Temporary files should include:
+创建失败时报错停止。
 
-- profile ID
-- energy mode
-- mono energy if mono mode
-- seed
-- debug suffix if debug mode
-- thread ID
+### M9.2 临时文件命名
 
-Examples:
+示例：
 
 ```text
 results/tmp/hits_profile_P001_mono_160keV_seed12345_thread0.csv
@@ -1351,92 +1141,84 @@ results/tmp/hits_profile_P001_mono_160keV_seed12345_thread1.csv
 results/tmp/hits_profile_P001_mono_160keV_seed12345_debug_thread0.csv
 ```
 
-### Task 9.3: Ensure each worker writes independently
+文件名应包含：
 
-Each worker thread must own or access only its own writer/file.
+- profile ID；
+- energy mode；
+- mono energy，若 mono；
+- seed；
+- debug suffix，若 debug；
+- thread ID。
 
-No multiple worker threads may write to the same `std::ofstream`.
+### M9.3 每个 worker 独立写入
 
-### Task 9.4: Merge temporary files on master
+每个 worker 只写自己的文件。不得多个 worker 共享同一个 `std::ofstream`。
 
-At run end, the master should merge temporary files into the final output file.
+### M9.4 master 合并
 
-Rules:
+run end 时 master 合并临时文件到最终 CSV。
 
-- keep only one header
-- preserve all data rows
-- report clear error if any expected temp file cannot be read
-- report clear error if final output file cannot be written
+规则：
 
-### Task 9.5: Delete or preserve temp files based on mode
+- 最终文件只保留一个 header；
+- 保留全部数据行；
+- 任一临时文件无法读取时报错；
+- 最终文件无法写入时报错。
 
-After successful merge:
+### M9.5 临时文件处理
 
-- compact mode: delete corresponding temp files
-- debug mode: preserve corresponding temp files
+合并成功后：
 
-If merge fails:
+- compact：删除对应临时文件；
+- debug：保留对应临时文件。
 
-- preserve all temporary files
-- report error
+合并失败：
 
-### Task 9.6: Preserve single-thread behavior
+- 保留所有临时文件；
+- 报错。
 
-Single-thread output should still work.
+### M9.6 保持单线程行为
 
-Implementation may use the same per-thread file path even for thread 0 if this simplifies the design, but final behavior must match expected output file naming.
+单线程输出仍应可用。实现可以内部也使用 thread0 临时文件再合并，但用户可见最终文件名必须符合 `spec.md`。
 
-## Done when
+## 完成标准
 
-- Multi-thread compact run writes per-thread temporary CSV files.
-- Master merges temporary CSV files into one final compact CSV file.
-- Only one header appears in the final file.
-- Compact mode deletes temp files after successful merge.
-- Debug mode preserves temp files after successful merge.
-- Merge failure preserves temp files and reports an error.
-- No shared `std::ofstream` is used across threads.
+- 多线程 compact 运行产生线程临时 CSV。
+- master 合并出最终 compact CSV。
+- 最终文件只有一个 header。
+- compact 合并成功后删除临时文件。
+- debug 合并成功后保留临时文件。
+- 合并失败保留临时文件并报错。
+- 无共享输出流。
 
-## Do
+## 不做
 
-- Use thread-local or per-thread writer ownership.
-- Keep merge logic on master.
-- Keep compact/debug behavior exactly as specified.
-- Keep headers identical to Milestone 8.
-- Preserve final file naming rules.
+- worker 不直接写最终文件。
+- worker 不执行合并。
+- merge failure 不删除临时文件。
+- 不在 compact 输出中添加 thread ID 列。
+- 不改变 CSV schema。
 
-## Do not
-
-- Do not allow worker threads to write to the final file directly.
-- Do not share one `std::ofstream` between threads.
-- Do not merge from worker threads.
-- Do not delete temp files on merge failure.
-- Do not add columns to identify thread ID in compact output.
-- Do not change single-thread CSV schema.
-
-## Suggested Codex prompt
+## 推荐 Codex prompt
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
-Implement Milestone 9 only: Multi-thread output merge.
-Each worker thread must write an independent temporary CSV file under results/tmp, and the master must merge them at run end with only one header.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
+Implement Milestone 9 only: multi-thread output merge.
+Each worker thread must write an independent temporary CSV under results/tmp, and the master must merge them at run end with only one header.
 Compact mode should delete temp files after successful merge; debug mode should preserve temp files. Merge failure must preserve temp files and report an error.
-Do not let multiple threads share an ofstream, do not let workers write directly to the final output file, and do not change the CSV schema.
-After implementation, summarize files changed and provide single-thread and multi-thread test commands.
+Do not let multiple threads share an ofstream, workers write directly to final output, or change CSV schema.
+After implementation, summarize changed files and single-/multi-thread test commands.
 ```
 
 ---
 
-# Milestone 10: Macros, README alignment, and acceptance tests
+# M10：宏文件、README 与验收
 
-## Goal
+## 目标
 
-Complete first-version project usability materials and acceptance checks.
+补齐第一版可用性材料：运行宏、可视化宏、示例数据、README 和验收清单。
 
-This milestone should ensure the project can be built, run, visualized, and checked against the first-version requirements.
-
-## Files to create or modify
-
-Create or modify:
+## 创建或修改文件
 
 - `macros/run.mac`
 - `macros/run_mt.mac`
@@ -1444,13 +1226,13 @@ Create or modify:
 - `data/collimator_profiles.csv`
 - `data/spectrum.csv`
 - `README.md`
-- optional `tests/` or `docs/acceptance_checklist.md` if useful
+- 可选 `docs/acceptance_checklist.md`
 
-## Tasks
+## 任务
 
-### Task 10.1: Create `macros/run.mac`
+### M10.1 `macros/run.mac`
 
-Single-thread minimal test macro:
+单线程最小测试：
 
 ```text
 /run/numberOfThreads 1
@@ -1470,15 +1252,15 @@ Single-thread minimal test macro:
 /run/beamOn 1000
 ```
 
-Expected output:
+期望输出：
 
 ```text
 results/hits_profile_P001_mono_160keV_seed12345_debug.csv
 ```
 
-### Task 10.2: Create `macros/run_mt.mac`
+### M10.2 `macros/run_mt.mac`
 
-Multi-thread formal run test macro:
+多线程正式运行测试：
 
 ```text
 /run/numberOfThreads 8
@@ -1498,26 +1280,26 @@ Multi-thread formal run test macro:
 /run/beamOn 100000
 ```
 
-Expected output:
+期望输出：
 
 ```text
 results/hits_profile_P001_mono_160keV_seed12345.csv
 ```
 
-### Task 10.3: Create `macros/vis.mac`
+### M10.3 `macros/vis.mac`
 
-Visualization macro should support checking:
+可视化宏应支持检查：
 
-- PMMA phantom
-- optional air defect
-- two pentagonal tungsten jaws
-- detector helper plane
-- source position
-- small number of gamma tracks
+- PMMA 模体；
+- 空气缺陷开关；
+- 两块五边形钨准直器 jaw；
+- 探测面辅助体；
+- 源位置；
+- 少量 gamma 轨迹。
 
-### Task 10.4: Create placeholder collimator profile data
+### M10.4 占位准直器 profile
 
-Create `data/collimator_profiles.csv` containing placeholder `P001`:
+`data/collimator_profiles.csv` 包含占位 `P001`：
 
 ```csv
 profile_id,jaw_id,vertex_id,x_mm,z_mm
@@ -1533,146 +1315,151 @@ P001,jaw_1,3,164,-20
 P001,jaw_1,4,109,-20
 ```
 
-Clearly state that this is placeholder geometry and not a real collimator profile.
+必须说明：该 profile 只是编译、可视化和输出流程测试用占位几何，不代表真实准直器。
 
-### Task 10.5: Create sample spectrum data
+### M10.5 示例 spectrum
 
-Create `data/spectrum.csv` with a small valid example.
+`data/spectrum.csv` 提供一个合法示例。除非后续替换为真实能谱，否则仅用于测试 spectrum 模式。
 
-The file is only a placeholder for testing spectrum mode unless a real spectrum is later provided.
+### M10.6 README
 
-### Task 10.6: Update README
+README 至少包含：
 
-README must include:
+1. 项目简介；
+2. 软件环境；
+3. 编译命令；
+4. 单线程运行命令；
+5. 多线程运行命令；
+6. 可视化运行命令；
+7. 宏命令说明；
+8. 准直器 profile CSV 格式；
+9. spectrum CSV 格式；
+10. 输出 CSV 字段；
+11. debug 与 compact 模式区别；
+12. 占位 profile 警告；
+13. 第一版限制。
 
-1. project overview
-2. software environment
-3. build commands
-4. single-thread run command
-5. multi-thread run command
-6. visualization run command
-7. macro command summary
-8. collimator profile CSV format
-9. spectrum CSV format
-10. output CSV fields
-11. debug vs compact mode
-12. placeholder profile warning
-13. first-version limitations
+编译命令示例：
 
-### Task 10.7: Add acceptance checklist
+```bash
+mkdir build
+cd build
+cmake ..
+make -j
+```
 
-Document checks for:
+运行命令示例：
 
-- geometry visualization
-- single-thread debug run
-- multi-thread compact run
-- invalid profile handling
-- CSV header correctness
-- temp file cleanup behavior
+```bash
+./MSS macros/run.mac
+./MSS macros/run_mt.mac
+./MSS macros/vis.mac
+```
 
-## Done when
+若从 `build/` 目录运行，需要 README 说明宏路径是否为 `../macros/run.mac`，或者在构建后复制宏文件到运行目录。该点必须与实际 CMake 行为一致。
 
-- `./BackscatterSim macros/run.mac` produces the expected debug CSV.
-- `./BackscatterSim macros/run_mt.mac` produces the expected compact CSV.
-- `macros/vis.mac` supports geometry and track visualization.
-- README commands match actual project behavior.
-- Placeholder data files are present.
-- Acceptance checklist matches the project specification.
+### M10.7 验收清单
 
-## Do
+记录检查项：
 
-- Keep macros aligned with `spec.md`.
-- Keep README factual and command-oriented.
-- Clearly mark placeholder data as placeholder.
-- Include exact build and run commands.
-- Include expected output file names.
+- 几何可视化；
+- 单线程 debug 输出；
+- 多线程 compact 输出；
+- 非法 profile 报错；
+- CSV header 正确；
+- 临时文件清理行为正确。
 
-## Do not
+## 完成标准
 
-- Do not add post-processing Python analysis scripts.
-- Do not add image reconstruction.
-- Do not add real detector material response.
-- Do not add profile batch scanning.
-- Do not add first-version features not present in `spec.md`.
-- Do not claim placeholder profile represents real collimator geometry.
+- `./MSS macros/run.mac` 或 README 中指定的等价路径生成预期 debug CSV。
+- `./MSS macros/run_mt.mac` 或 README 中指定的等价路径生成预期 compact CSV。
+- `macros/vis.mac` 可用于几何和轨迹检查。
+- README 命令与实际行为一致。
+- 占位数据文件存在。
+- 验收清单与 `spec.md` 一致。
 
-## Suggested Codex prompt
+## 不做
+
+- 不添加 Python 后处理脚本。
+- 不添加图像重建。
+- 不添加真实探测器响应。
+- 不添加 profile 批处理。
+- 不声称占位 profile 是真实准直器几何。
+
+## 推荐 Codex prompt
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
-Implement Milestone 10 only: Macros, README alignment, and acceptance tests.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
+Implement Milestone 10 only: macros, README alignment, and acceptance tests.
 Create run.mac, run_mt.mac, vis.mac, placeholder collimator_profiles.csv, sample spectrum.csv, and update README with build/run instructions, macro commands, CSV schemas, debug/compact distinction, and first-version limitations.
-Do not add post-processing scripts, image reconstruction, detector material response, or profile batch scanning.
-After implementation, summarize files changed and list the acceptance tests to run.
+Use project/executable name MSS. Do not add post-processing scripts, reconstruction, detector response, or profile batch scanning.
+After implementation, summarize changed files and acceptance tests.
 ```
 
 ---
 
-# Deferred work
+# 5. Deferred work
 
-The following items are explicitly outside the first implementation sequence.
+以下内容明确不属于第一版实现序列。除非未来 `spec.md` 或新的里程碑明确要求，Codex 不得实现。
 
-Codex must not implement these unless a future milestone or updated `spec.md` explicitly requests them.
+## 5.1 延后仿真功能
 
-## Deferred simulation features
+- 图像重建；
+- 真实探测器材料响应；
+- 探测器能量沉积 scoring；
+- 源准直器建模；
+- 源位置宏命令；
+- 探测器边界宏命令；
+- 全散射轨迹输出；
+- 自动扫描所有 collimator profile；
+- 真实准直器 profile 生成逻辑。
 
-- Image reconstruction
-- Real detector material response
-- Detector energy deposition scoring
-- Source collimator modeling
-- Source position macro commands
-- Detector boundary macro commands
-- Full scatter trajectory output
-- Automatic scanning over all collimator profiles
-- Real collimator profile generation logic
+## 5.2 延后数据与分析功能
 
-## Deferred data and analysis features
+- 真实测量能谱文件；
+- 真实准直器 profile 坐标；
+- Python 后处理脚本；
+- 多重散射比例图；
+- 能谱分布图；
+- 探测面 x 分布图；
+- profile 对比图；
+- 会议论文图表生成。
 
-- Real measured spectrum file
-- Real collimator profile coordinates
-- Python post-processing scripts
-- Multiple-scatter ratio plots
-- Energy distribution plots
-- Detector x-distribution plots
-- Profile comparison plots
-- Conference-paper figure generation
+## 5.3 延后工程功能
 
-## Deferred engineering features
-
-- Unit test framework
-- CI configuration
-- Containerized build environment
-- Performance benchmarking
-- Large-scale batch run manager
-- Metadata database for simulation campaigns
+- 单元测试框架；
+- CI 配置；
+- 容器化构建环境；
+- 性能基准；
+- 大规模批运行管理；
+- 仿真 campaign 元数据数据库。
 
 ---
 
-# Suggested overall Codex workflow
+# 6. 总体 Codex 工作流
 
-Use this workflow after all planning files are present:
+规划文件就绪后，建议先让 Codex 做一次只读检查：
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
 Do not write code yet.
-Summarize the implementation order from milestones.md and identify any ambiguity that blocks Milestone 0.
+Summarize the implementation order and identify ambiguities that block Milestone 0.
 ```
 
-Then proceed milestone by milestone:
+然后逐阶段推进：
 
 ```text
-Read spec.md, architecture.md, and milestones.md.
+Read docs/spec.md, docs/architecture.md, docs/decisions.md, and docs/milestones.md.
 Implement Milestone 0 only.
 Do not implement Milestone 1 or later.
-After implementation, summarize changed files, how to build, and what remains deferred.
+After implementation, summarize changed files, how to build, and deferred work.
 ```
 
-After each milestone:
+每个里程碑完成后：
 
 ```text
-Review the previous implementation against milestones.md.
+Review the previous implementation against docs/milestones.md.
 Check whether it implemented anything beyond the requested milestone.
 If yes, identify the extra changes and suggest whether to revert them.
 Do not write new code unless asked.
 ```
-

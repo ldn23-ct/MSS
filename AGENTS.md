@@ -1,250 +1,457 @@
 # AGENTS.md
 
-## Project Overview
+本文件面向 Codex，用于约束 `MSS` 项目的代码生成、修改和审查行为。
 
-This repository is a Geant4-based Monte Carlo simulation project for studying multiple scattering signals in a slit-collimated gamma-ray imaging / detection setup.
+`MSS` 是一个 Geant4 gamma 背散射 Monte Carlo 仿真项目。第一版目标是生成用于多重散射统计分析的事件级 CSV 数据，不实现图像重建、真实探测器响应或后处理分析。
 
-The project goal is not only to remove multiple scattering as noise, but to analyze whether multiple-scattered photons can provide useful signal information under specific geometrical and material conditions.
+---
 
-Current target experiment:
+## 1. 必须先阅读的文档
 
-- Phantom material: PMMA
-- Defect: cylindrical air void
-- Defect diameter: 10 mm
-- Defect depth: 10 mm
-- Main comparison condition: slit collimator aperture 1 mm vs 2 mm
-- Main research question: whether a larger slit aperture increases the usable contribution of multiple-scattered photons and improves defect detectability.
+在任何代码修改前，先阅读以下文件：
 
-## Primary Documents
+1. `docs/spec.md`
+2. `docs/decisions.md`
+3. `docs/architecture.md`
+4. `docs/milestones.md`
 
-Before making architectural or behavioral changes, read the following documents:
-
-- `docs/spec.md`: project specification and simulation requirements
-- `docs/architecture.md`: software architecture and module responsibilities
-- `docs/decisions.md`: accepted design decisions and rationale
-- `docs/milestones.md`: implementation milestones and task boundaries
-- `README.md`: build, run, and usage instructions
-
-If a requested change conflicts with these documents, do not silently override them. Explain the conflict and propose a minimal change.
-
-## Development Environment
-
-Assume the following environment unless explicitly updated:
-
-- OS: Ubuntu 24.04
-- Geant4: 11.2.0
-- Build system: CMake
-- Compiler: system default GCC on Ubuntu 24.04
-- Language: C++ for simulation code
-- Shell: bash
-
-Do not introduce additional external dependencies unless necessary and explicitly justified.
-
-## Build Commands
-
-Use an out-of-source build.
-
-Typical build procedure:
-
-```bash
-cmake -S . -B build
-cmake --build build -j
-```
-
-Do not place generated build files in the repository root.
-
-## Run Commands
-
-Prefer macro-driven execution.
-
-Example pattern:
-
-```bash
-./build/<executable_name> macros/<macro_name>.mac
-```
-
-If the executable name is unknown, inspect `CMakeLists.txt` before assuming it.
-
-Default output directory:
+文档优先级如下：
 
 ```text
-results/
+docs/spec.md
+  > docs/decisions.md
+  > docs/architecture.md
+  > docs/milestones.md
+  > existing code
 ```
 
-## Testing and Validation
+如果现有代码与上述文档冲突，应以文档为准，并在总结中指出冲突。不得静默修改已接受的设计决策。
 
-When modifying code, prefer the smallest relevant validation step.
+---
 
-At minimum, check:
+## 2. 项目基本约束
 
-1. The project configures successfully with CMake.
-2. The project builds successfully.
-3. A minimal macro run completes without crashing.
-4. Output files are created in the expected directory.
-5. Units in output files remain consistent:
-   - length: mm
-   - energy: keV
+| 项目 | 要求 |
+|---|---|
+| 项目名 | `MSS` |
+| CMake project 名 | `MSS` |
+| 可执行文件名 | `MSS` |
+| 语言标准 | C++17 |
+| Geant4 版本 | 11.2.0 |
+| 目标系统 | Ubuntu 24.04 |
+| 构建系统 | CMake |
+| 输出格式 | CSV |
 
-For geometry-related changes, ensure that geometry visualization or overlap checks are available when possible.
+不得重新引入旧项目名 `BackscatterSim`。
 
-For multithreading changes, verify that:
+---
 
-- worker temporary outputs are merged correctly;
-- temporary files are removed after successful merge in normal mode;
-- temporary files are preserved in debug mode.
+## 3. 第一版范围
 
-## Output Rules
+### 必须实现
 
-The simulation output should focus on photons reaching the detector.
+第一版只实现：
 
-Each output row should represent one detected primary gamma-related record, depending on the current scoring design.
+- gamma 背散射几何；
+- PMMA 模体与可选空气缺陷；
+- 外部 CSV 定义的两块钨准直器 jaw；
+- mono / spectrum 两种 primary gamma 能量模式；
+- primary gamma 在 PMMA 内的 Compton / Rayleigh 散射计数；
+- 理想探测平面穿越判断；
+- 只输出到达探测器的 primary gamma；
+- 单线程 debug CSV；
+- 多线程 per-thread 临时 CSV 与 master 合并。
 
-Default compact output should avoid unnecessary identifiers such as:
+### 禁止主动实现
 
-- `run_id`
-- `event_id`
-- `track_id`
+除非 `docs/spec.md` 或新的里程碑明确要求，不得实现：
 
-These may be enabled only in debug mode if needed for diagnosis.
+- 图像重建；
+- 真实探测器材料响应；
+- 探测器能量沉积 scoring；
+- source collimator；
+- 自动遍历所有 collimator profile；
+- 全散射轨迹输出；
+- Python 后处理分析脚本；
+- 会议论文作图脚本；
+- 源位置宏命令；
+- 探测器边界宏命令；
+- PMMA 尺寸宏命令；
+- 空气缺陷尺寸宏命令。
 
-Default units:
+---
 
-- positions and lengths: mm
-- energy: keV
+## 4. 坐标系与物理定义
 
-Do not add unit columns unless the project specification is updated.
+必须使用固定右手坐标系：
 
-## Debug and Compact Modes
+| 坐标轴 | 定义 |
+|---|---|
+| `z` | PMMA 深度方向，PMMA 前表面指向内部为 `+z` |
+| `x` | 横向方向，对应准直器主要限束方向和探测面后处理坐标 |
+| `y` | 准直器狭缝 / 钨板拉伸方向 |
 
-Default behavior:
+几何关系：
 
-- single-thread mode: debug-friendly behavior is acceptable;
-- multithread mode: compact output is preferred by default.
+```text
+source and detector side: z < 0
+PMMA front surface:      z = 0
+PMMA interior:           z > 0
+```
 
-Debug mode may preserve additional diagnostic information, including intermediate files and detailed identifiers.
+被探测 gamma 是从 PMMA 返回 `z < 0`，并穿越探测平面的 primary gamma。
 
-Normal mode should keep output compact and remove temporary files after successful merging.
+---
 
-## Macro Command Expectations
+## 5. 固定几何参数
 
-Prefer exposing simulation configuration through Geant4 macro commands instead of hardcoding parameters.
+除非 `docs/spec.md` 更新，不得修改以下常量。
 
-Expected configurable items include:
+### PMMA
 
-- output directory
-- debug / compact output mode
-- air defect on / off switch
-- source configuration
-- detector or scoring configuration
-- slit collimator aperture
-- placeholder profile selection
+```text
+material: G4_PLEXIGLASS
+size:     200 mm × 200 mm × 65 mm
+center:   (0, 0, 32.5 mm)
+z range:  [0, 65] mm
+```
 
-Do not hardcode experimental parameters if they are part of the scan condition.
+### 空气缺陷
 
-## Geometry Responsibilities
+```text
+material: G4_AIR
+shape:    cylinder
+radius:   5 mm
+length:   10 mm
+axis:     z
+center:   (0, 0, 55 mm)
+z range:  [50, 60] mm
+```
 
-Geometry code should make the following components explicit and easy to locate:
+空气缺陷作为 PMMA 的 daughter volume，不使用 Boolean subtraction。
 
-- world volume
-- PMMA phantom
-- cylindrical air defect
-- slit collimator
-- detector boundary
-- source geometry
+### 源
 
-Avoid mixing geometry construction, output writing, and run control logic in the same class unless the architecture document explicitly allows it.
+```text
+particle: gamma
+position: (0, 0, -185 mm)
+beam:     target-plane disk sampling
+plane:    z = 0 mm
+spot:     radius 1.5 mm
+```
 
-## Source and Detector Rules
+### 探测平面
 
-The source geometry should be implemented in code, not only described in comments.
+```text
+z = -73 mm
+x = [53, 161] mm
+y = [-50, 50] mm
+```
 
-The detector boundary and scoring region should also be implemented explicitly in code.
+探测器是理想计数平面。可视化辅助体不能被实现为真实 detector response 或 sensitive detector。
 
-When modifying detector logic, preserve the meaning of detector strips / channels. In this project, detector strip position may correspond to different depth-related response regions, not merely arbitrary image pixels.
+---
 
-## Physics and Scattering Analysis
+## 6. 准直器约束
 
-Do not treat all scattered photons as unwanted noise by default.
+准直器由外部 CSV 定义。
 
-When adding analysis features, preserve the ability to distinguish at least:
+```csv
+profile_id,jaw_id,vertex_id,x_mm,z_mm
+```
 
-- unscattered photons;
-- single-scattered photons;
-- multiple-scattered photons;
-- total detected photons.
+约束：
 
-If exact scattering order is not yet implemented, add a clear placeholder or TODO rather than pretending the value is available.
+- 每个 profile 必须包含 `jaw_0` 和 `jaw_1`；
+- 每个 jaw 必须有 5 个顶点；
+- `vertex_id` 必须为 `0..4`，不得缺失或重复；
+- `x_mm` 和 `z_mm` 是全局坐标；
+- 不得额外叠加 `collimator_center_z`；
+- 不需要检查 `z_mm` 是否位于 `[-28, -20] mm`；
+- 非法 profile 必须 fail fast，不得静默修复。
 
-## Coding Style
+每块 jaw 必须使用 `G4ExtrudedSolid` 构建。
 
-Use clear C++ class boundaries.
+坐标映射：
 
-Prefer names that reflect physical or simulation meaning.
+| 输入物理坐标 | `G4ExtrudedSolid` local 坐标 |
+|---|---|
+| global `x` | local `x` |
+| global `z` | local `y` |
+| global `y` | local `z` extrusion direction |
 
-Avoid large, monolithic classes.
+挤出方向对应全局 `y`，总长度 `120 mm`，即 `y = [-60, 60] mm`。
 
-Do not perform broad refactoring unless the task explicitly asks for it.
+---
 
-When changing existing code:
+## 7. 物理过程约束
 
-1. Identify the smallest files that need modification.
-2. Explain the intended change.
-3. Modify only the necessary scope.
-4. Build or provide the exact reason validation could not be run.
+必须使用：
 
-## Documentation Rules
+```cpp
+G4EmLivermorePhysics
+```
 
-When changing behavior, update the relevant document:
+全局 production cut：
 
-- project requirements -> `docs/spec.md`
-- architecture/module boundaries -> `docs/architecture.md`
-- accepted design choice -> `docs/decisions.md`
-- implementation task status -> `docs/milestones.md`
-- user-facing build/run instructions -> `README.md`
+```text
+0.1 mm
+```
 
-Do not let code and documentation drift apart.
+只统计 primary gamma 在 PMMA 内发生的：
 
-## Forbidden Actions
+```text
+compt
+Rayl
+```
 
-Do not:
+不得统计：
 
-- rewrite the whole project without being asked;
-- replace Geant4 with another simulation framework;
-- introduce Python as a required runtime dependency for the Geant4 simulation core;
-- add large external libraries without justification;
-- hardcode scan parameters that should be controlled by macros;
-- silently change output units;
-- silently change output schema;
-- remove debug information without preserving a debug mode;
-- delete existing documentation unless explicitly instructed;
-- assume detector strip index is equivalent to image pixel position without checking the project documents;
-- fabricate physics results that were not produced by simulation.
+- photoelectric effect；
+- tungsten collimator 内相互作用；
+- air defect 内相互作用；
+- World 内相互作用；
+- secondary gamma 或其他 secondary particle 相互作用。
 
-## Task Execution Style
+primary gamma 判断条件：
 
-For implementation tasks, work in small steps.
+```text
+particle_name == gamma
+track_id == 1
+parent_id == 0
+```
 
-Before coding, inspect the relevant files.
+---
 
-For nontrivial changes, provide:
+## 8. 输出规则
 
-1. files to be modified;
-2. intended behavior change;
-3. validation command;
-4. expected output or acceptance condition.
+### 事件定义
 
-If the task is ambiguous, ask for clarification before changing code.
+```text
+1 event = 1 primary gamma
+1 CSV row = 1 detected primary gamma
+```
 
-If a requested change has multiple valid designs, prefer the design already recorded in `docs/decisions.md`.
+未到达探测面的 event 不输出。
 
-## Commit / Patch Expectations
+即使 `scatter_count_total = 0`，只要 primary gamma 到达探测面并落在探测器边界内，也应输出。
 
-When presenting changes, summarize:
+### 多重散射定义
 
-- what changed;
-- why it changed;
-- how to build;
-- how to run;
-- how to validate.
+```text
+is_multiple_scatter = scatter_count_total >= 2
+```
 
-Avoid vague summaries such as "improved code" or "fixed issues".
+若没有 PMMA 内散射，first / last scatter position 输出 `NaN`。
+
+### CSV 单位
+
+| 类型 | 单位 |
+|---|---|
+| 长度 | mm |
+| 能量 | keV |
+
+不得在 CSV 字段名中新增单位后缀，除非 `docs/spec.md` 更新。
+
+---
+
+## 9. CSV schema 不得更改
+
+### compact header
+
+```csv
+initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
+```
+
+### debug header
+
+```csv
+event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
+```
+
+不得新增、删除、重排字段。
+
+run-level 元数据应写入文件名，不写入每一行 CSV。
+
+---
+
+## 10. 输出模式与多线程规则
+
+`/output/debug` 需要区分：
+
+- 用户未显式设置；
+- 用户显式设置 `true`；
+- 用户显式设置 `false`。
+
+推荐实现：
+
+```cpp
+std::optional<bool> debug_override = std::nullopt;
+```
+
+默认解析规则：
+
+| 情况 | 输出模式 |
+|---|---|
+| 单线程且未显式设置 `/output/debug` | debug |
+| 多线程且未显式设置 `/output/debug` | compact |
+| 显式设置 `/output/debug true` | debug |
+| 显式设置 `/output/debug false` | compact |
+
+多线程输出必须使用：
+
+```text
+worker thread CSV files + master merge
+```
+
+禁止多个 worker threads 共享同一个 `std::ofstream`。
+
+compact 模式下，合并成功后删除对应临时 CSV。debug 模式下，合并成功后保留对应临时 CSV。合并失败时保留所有临时文件并报错。
+
+---
+
+## 11. 必须支持的宏命令
+
+```text
+/geometry/collimatorProfileFile data/collimator_profiles.csv
+/geometry/collimatorProfileId P001
+/geometry/enableAirDefect true
+
+/source/energyMode mono
+/source/monoEnergy 160 keV
+/source/spectrumFile data/spectrum.csv
+
+/run/randomSeed 12345
+/run/numberOfThreads 8
+
+/output/directory results
+/output/debug false
+```
+
+不得改名。不得新增第一版范围外的几何宏命令。
+
+---
+
+## 12. 模块边界
+
+应保持以下职责分离：
+
+| 模块 | 职责 |
+|---|---|
+| `DetectorConstruction` | 构建 World、PMMA、空气缺陷、探测面可视化辅助体，并调用准直器构建模块 |
+| `CollimatorProfileReader` | 读取并验证 collimator profile CSV |
+| `CollimatorBuilder` | 将已验证 profile 转换为 Geant4 tungsten jaw 几何 |
+| `PhysicsList` | 注册 Livermore EM physics 和 production cut |
+| `PrimaryGeneratorAction` | 每个 event 生成一个 primary gamma |
+| `SpectrumSampler` | 读取 spectrum CSV 并按 CDF 采样能量 |
+| `EventAction` | 保存单个 event 的初始能量、散射摘要和探测命中信息 |
+| `SteppingAction` | 判断 PMMA 内散射和探测平面穿越 |
+| `CsvWriter` | 写 CSV、管理 thread-local 文件、执行合并 |
+| `RunAction` | 管理 seed、输出模式、文件命名、writer 生命周期和 run-end merge |
+| `SimulationConfig` | 保存运行配置 |
+| `SimulationMessenger` | 提供宏命令接口 |
+
+禁止把 CSV 写入逻辑放进 `SteppingAction`。禁止把 profile CSV 解析逻辑直接塞进 `CollimatorBuilder`。
+
+---
+
+## 13. 里程碑执行规则
+
+按 `docs/milestones.md` 分阶段实现。
+
+Codex 每次只能实现用户指定的一个 milestone。不得主动实现后续 milestone。
+
+每次完成后必须总结：
+
+```text
+- changed files
+- implemented behavior
+- build/test commands used or recommended
+- intentionally deferred work
+```
+
+如果发现前一 milestone 的实现有问题，应先说明问题，再进行最小必要修改。
+
+---
+
+## 14. 构建与运行命令
+
+典型构建命令：
+
+```bash
+mkdir -p build
+cd build
+cmake ..
+make -j
+```
+
+单线程测试：
+
+```bash
+./MSS macros/run.mac
+```
+
+多线程测试：
+
+```bash
+./MSS macros/run_mt.mac
+```
+
+可视化测试：
+
+```bash
+./MSS macros/vis.mac
+```
+
+若实际运行目录要求从 repository root 调用，应在 README 中明确说明。
+
+---
+
+## 15. Git 与生成文件规则
+
+不得把以下内容提交到 git：
+
+```text
+build/
+results/*.csv
+results/tmp/
+*.root
+*.o
+*.so
+*.dylib
+*.dll
+.DS_Store
+```
+
+可以保留：
+
+```text
+results/.gitkeep
+data/collimator_profiles.csv
+data/spectrum.csv
+macros/*.mac
+```
+
+`data/collimator_profiles.csv` 和 `data/spectrum.csv` 若只是占位数据，必须在 README 或注释中明确标注为 placeholder。
+
+---
+
+## 16. Codex 输出要求
+
+修改代码时：
+
+- 保持改动最小；
+- 不要重排无关代码；
+- 不要格式化整个仓库；
+- 不要改动 CSV schema；
+- 不要改变物理常量；
+- 不要把中文文档翻译成英文，除非用户明确要求；
+- 类名、文件名、宏命令、CSV 字段名保持英文；
+- 说明文字和文档可以使用中文。
+
+如果遇到歧义：
+
+1. 先查 `docs/spec.md`；
+2. 再查 `docs/decisions.md`；
+3. 若仍无法判断，暂停并列出阻塞点；
+4. 不要自行扩大第一版范围。

@@ -4,7 +4,7 @@
 
 | 项目 | 内容 |
 |---|---|
-| 项目名称 | BackscatterSim |
+| 项目名称 | MSS |
 | 仿真类型 | gamma 背散射 Geant4 仿真 |
 | Geant4 版本 | 11.2.0 |
 | 操作系统 | Ubuntu 24.04 |
@@ -816,7 +816,7 @@ auto* runManager = G4RunManagerFactory::CreateRunManager(G4RunManagerType::Defau
 建议项目结构：
 
 ```text
-BackscatterSim/
+MSS/
 ├── CMakeLists.txt
 ├── README.md
 ├── include/
@@ -1063,19 +1063,19 @@ make -j
 4. 单线程测试运行方式：
 
 ```bash
-./BackscatterSim macros/run.mac
+./MSS macros/run.mac
 ```
 
 5. 多线程运行方式：
 
 ```bash
-./BackscatterSim macros/run_mt.mac
+./MSS macros/run_mt.mac
 ```
 
 6. 可视化运行方式：
 
 ```bash
-./BackscatterSim macros/vis.mac
+./MSS macros/vis.mac
 ```
 
 7. 宏命令说明。
@@ -1107,7 +1107,7 @@ make -j
 命令：
 
 ```bash
-./BackscatterSim macros/run.mac
+./MSS macros/run.mac
 ```
 
 要求：
@@ -1126,7 +1126,7 @@ results/hits_profile_P001_mono_160keV_seed12345_debug.csv
 命令：
 
 ```bash
-./BackscatterSim macros/run_mt.mac
+./MSS macros/run_mt.mac
 ```
 
 要求：
