@@ -1,0 +1,64 @@
+# -----------------
+# 操作系统缓存
+# -----------------
+.DS_Store
+Thumbs.db
+
+# -----------------
+# VSCode 配置
+# -----------------
+.vscode/
+.history/
+
+# -----------------
+# Python
+# -----------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.env
+.venv/
+venv/
+Pipfile.lock
+poetry.lock
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# -----------------
+# C / C++
+# -----------------
+# 编译输出
+*.o
+*.obj
+*.so
+*.dll
+*.exe
+*.out
+*.a
+*.lib
+
+# CMake
+build/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# -----------------
+# 日志 & 临时文件
+# -----------------
+*.log
+*.tmp
+*.bak
+*.swp
+
+# -----------------
+# 数据 & 图像
+# -----------------
+*.npy
+*.png
