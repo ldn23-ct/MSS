@@ -1,6 +1,8 @@
 #include "ActionInitialization.hh"
 #include "DetectorConstruction.hh"
 #include "PhysicsList.hh"
+#include "SimulationConfig.hh"
+#include "SimulationMessenger.hh"
 
 #include "G4RunManager.hh"
 #include "G4RunManagerFactory.hh"
@@ -15,9 +17,13 @@ int main(int argc, char** argv)
     auto runManager = std::unique_ptr<G4RunManager>(
         G4RunManagerFactory::CreateRunManager(G4RunManagerType::Default));
 
-    runManager->SetUserInitialization(new DetectorConstruction);
+    auto config = std::make_shared<SimulationConfig>();
+
+    runManager->SetUserInitialization(new DetectorConstruction(config));
     runManager->SetUserInitialization(new PhysicsList);
-    runManager->SetUserInitialization(new ActionInitialization);
+    runManager->SetUserInitialization(new ActionInitialization(config));
+
+    SimulationMessenger messenger(config);
 
     auto* uiManager = G4UImanager::GetUIpointer();
     if (argc > 1) {

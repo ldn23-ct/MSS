@@ -20,6 +20,8 @@ add_executable(MSS
     src/PhysicsList.cc
     src/PrimaryGeneratorAction.cc
     src/RunAction.cc
+    src/SimulationConfig.cc
+    src/SimulationMessenger.cc
     src/SpectrumSampler.cc
     src/SteppingAction.cc
 )

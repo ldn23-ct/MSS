@@ -7,6 +7,14 @@
 #include "G4SystemOfUnits.hh"
 #include "G4ThreeVector.hh"
 
+#include <utility>
+
+DetectorConstruction::DetectorConstruction(
+    std::shared_ptr<const SimulationConfig> config)
+    : config_(std::move(config))
+{
+}
+
 G4VPhysicalVolume* DetectorConstruction::Construct()
 {
     auto* nist = G4NistManager::Instance();
