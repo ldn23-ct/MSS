@@ -3,6 +3,7 @@
 
 #include <fstream>
 #include <string>
+#include <vector>
 
 struct EventRecord;
 
@@ -19,6 +20,12 @@ class CsvWriter {
     void Close();
 
     bool IsOpen() const;
+
+    static const char* Header(bool debugOutput);
+    static void MergeFiles(const std::vector<std::string>& inputFilePaths,
+                           const std::string& outputFilePath,
+                           bool debugOutput,
+                           bool deleteInputFiles);
 
   private:
     std::ofstream output_;

@@ -17,8 +17,14 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
+
+void ReportRunError(const std::string& message)
+{
+    G4Exception("RunAction", "MSSRun001", FatalException, message.c_str());
+}
 
 bool IsConfigOwnerThread()
 {
@@ -29,9 +35,17 @@ bool IsConfigOwnerThread()
 #endif
 }
 
-void ReportRunError(const std::string& message)
+int GetWorkerThreadId()
 {
-    G4Exception("RunAction", "MSSRun001", FatalException, message.c_str());
+#ifdef G4MULTITHREADED
+    const int threadId = G4Threading::G4GetThreadId();
+    if (threadId < 0) {
+        ReportRunError("Worker thread ID is not available.");
+    }
+    return threadId;
+#else
+    return 0;
+#endif
 }
 
 std::string FormatEnergyForFileName(double energy_keV)
@@ -45,8 +59,8 @@ std::string FormatEnergyForFileName(double energy_keV)
     return stream.str();
 }
 
-std::filesystem::path BuildOutputFilePath(const SimulationConfig& config,
-                                          bool debugOutput)
+std::string BuildOutputBaseName(const SimulationConfig& config,
+                                bool debugOutput)
 {
     std::ostringstream fileName;
     fileName << "hits_profile_" << config.collimatorProfileId << '_';
@@ -62,31 +76,63 @@ std::filesystem::path BuildOutputFilePath(const SimulationConfig& config,
     if (debugOutput) {
         fileName << "_debug";
     }
-    fileName << ".csv";
 
-    return std::filesystem::path(config.outputDirectory) / fileName.str();
+    return fileName.str();
 }
 
-void EnsureOutputDirectory(const std::string& outputDirectory)
+std::filesystem::path BuildOutputFilePath(const SimulationConfig& config,
+                                          bool debugOutput)
+{
+    return std::filesystem::path(config.outputDirectory)
+           / (BuildOutputBaseName(config, debugOutput) + ".csv");
+}
+
+std::filesystem::path BuildTempDirectoryPath(const SimulationConfig& config)
+{
+    return std::filesystem::path(config.outputDirectory) / "tmp";
+}
+
+std::filesystem::path BuildTempFilePath(const SimulationConfig& config,
+                                        bool debugOutput,
+                                        int threadId)
+{
+    std::ostringstream fileName;
+    fileName << BuildOutputBaseName(config, debugOutput)
+             << "_thread" << threadId << ".csv";
+    return BuildTempDirectoryPath(config) / fileName.str();
+}
+
+void EnsureDirectory(const std::filesystem::path& directory,
+                     const std::string& description)
 {
     try {
-        const std::filesystem::path directory(outputDirectory);
         if (std::filesystem::exists(directory)) {
             if (!std::filesystem::is_directory(directory)) {
-                ReportRunError("Output path '" + outputDirectory
+                ReportRunError(description + " path '" + directory.string()
                                + "' exists but is not a directory.");
             }
             return;
         }
 
         if (!std::filesystem::create_directories(directory)) {
-            ReportRunError("Failed to create output directory '"
-                           + outputDirectory + "'.");
+            ReportRunError("Failed to create " + description + " directory '"
+                           + directory.string() + "'.");
         }
     } catch (const std::filesystem::filesystem_error& error) {
-        ReportRunError("Failed to prepare output directory '" + outputDirectory
-                       + "': " + error.what());
+        ReportRunError("Failed to prepare " + description + " directory '"
+                       + directory.string() + "': " + error.what());
     }
+}
+
+std::vector<std::string> BuildTempFilePaths(const SimulationConfig& config,
+                                            bool debugOutput)
+{
+    std::vector<std::string> paths;
+    paths.reserve(static_cast<std::size_t>(config.numberOfThreads));
+    for (int threadId = 0; threadId < config.numberOfThreads; ++threadId) {
+        paths.push_back(BuildTempFilePath(config, debugOutput, threadId).string());
+    }
+    return paths;
 }
 
 } // namespace
@@ -100,34 +146,51 @@ RunAction::RunAction(std::shared_ptr<SimulationConfig> config,
 
 void RunAction::BeginOfRunAction(const G4Run*)
 {
-    if (config_ != nullptr && IsConfigOwnerThread()) {
+    if (config_ == nullptr) {
+        ReportRunError("SimulationConfig is not available.");
+    }
+
+    if (IsConfigOwnerThread()) {
         config_->numberOfThreads = GetEffectiveNumberOfThreads();
         config_->Validate();
 
-        if (config_->numberOfThreads > 1) {
-            ReportRunError("Milestone 8 supports only single-thread CSV output; "
-                           "multi-thread temporary CSV and merge are deferred "
-                           "to Milestone 9.");
-        }
-
         G4Random::setTheSeed(config_->randomSeed);
 
-        const bool debugOutput = config_->ResolveDebugOutput();
-        EnsureOutputDirectory(config_->outputDirectory);
+        EnsureDirectory(std::filesystem::path(config_->outputDirectory),
+                        "output");
 
-        if (csvWriter_ == nullptr) {
-            ReportRunError("CsvWriter is not available.");
+        if (config_->numberOfThreads > 1) {
+            EnsureDirectory(BuildTempDirectoryPath(*config_),
+                            "temporary output");
         }
+    }
 
-        const auto outputPath = BuildOutputFilePath(*config_, debugOutput);
+    if (csvWriter_ != nullptr) {
+        config_->Validate();
+        const bool debugOutput = config_->ResolveDebugOutput();
+        const auto outputPath =
+            config_->numberOfThreads > 1
+                ? BuildTempFilePath(*config_, debugOutput, GetWorkerThreadId())
+                : BuildOutputFilePath(*config_, debugOutput);
         csvWriter_->Open(outputPath.string(), debugOutput);
     }
 }
 
 void RunAction::EndOfRunAction(const G4Run*)
 {
-    if (csvWriter_ != nullptr && IsConfigOwnerThread()) {
+    if (csvWriter_ != nullptr) {
         csvWriter_->Close();
+    }
+
+    if (config_ != nullptr && IsConfigOwnerThread()
+        && config_->numberOfThreads > 1) {
+        const bool debugOutput = config_->ResolveDebugOutput();
+        const auto outputPath = BuildOutputFilePath(*config_, debugOutput);
+        const auto tempFilePaths = BuildTempFilePaths(*config_, debugOutput);
+        CsvWriter::MergeFiles(tempFilePaths,
+                              outputPath.string(),
+                              debugOutput,
+                              !debugOutput);
     }
 }
 

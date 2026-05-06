@@ -6,6 +6,8 @@
 #include "G4SystemOfUnits.hh"
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <string>
@@ -119,4 +121,82 @@ void CsvWriter::Close()
 bool CsvWriter::IsOpen() const
 {
     return output_.is_open();
+}
+
+const char* CsvWriter::Header(bool debugOutput)
+{
+    return debugOutput ? kDebugHeader : kCompactHeader;
+}
+
+void CsvWriter::MergeFiles(const std::vector<std::string>& inputFilePaths,
+                           const std::string& outputFilePath,
+                           bool debugOutput,
+                           bool deleteInputFiles)
+{
+    if (inputFilePaths.empty()) {
+        ReportCsvError("No temporary CSV files were provided for merge.");
+    }
+
+    std::ofstream output(outputFilePath);
+    if (!output.is_open()) {
+        ReportCsvError("Failed to open merged CSV output file '"
+                       + outputFilePath + "'.");
+    }
+
+    const std::string expectedHeader = Header(debugOutput);
+    output << expectedHeader << '\n';
+    if (!output) {
+        ReportCsvError("Failed to write merged CSV header to '"
+                       + outputFilePath + "'.");
+    }
+
+    for (const auto& inputFilePath : inputFilePaths) {
+        std::ifstream input(inputFilePath);
+        if (!input.is_open()) {
+            ReportCsvError("Failed to open temporary CSV file '"
+                           + inputFilePath + "' for merge.");
+        }
+
+        std::string line;
+        if (!std::getline(input, line)) {
+            ReportCsvError("Temporary CSV file '" + inputFilePath
+                           + "' is empty.");
+        }
+        if (line != expectedHeader) {
+            ReportCsvError("Temporary CSV file '" + inputFilePath
+                           + "' has an unexpected header.");
+        }
+
+        while (std::getline(input, line)) {
+            output << line << '\n';
+            if (!output) {
+                ReportCsvError("Failed while writing merged CSV output file '"
+                               + outputFilePath + "'.");
+            }
+        }
+
+        if (input.bad()) {
+            ReportCsvError("Failed while reading temporary CSV file '"
+                           + inputFilePath + "'.");
+        }
+    }
+
+    output.close();
+    if (!output) {
+        ReportCsvError("Failed to close merged CSV output file '"
+                       + outputFilePath + "'.");
+    }
+
+    if (!deleteInputFiles) {
+        return;
+    }
+
+    for (const auto& inputFilePath : inputFilePaths) {
+        std::error_code error;
+        const bool removed = std::filesystem::remove(inputFilePath, error);
+        if (error || !removed) {
+            ReportCsvError("Failed to delete temporary CSV file '"
+                           + inputFilePath + "'.");
+        }
+    }
 }
