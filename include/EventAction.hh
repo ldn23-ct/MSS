@@ -4,6 +4,9 @@
 #include "G4ThreeVector.hh"
 #include "G4UserEventAction.hh"
 
+#include <memory>
+
+class CsvWriter;
 class G4Event;
 
 struct ScatterSummary {
@@ -37,7 +40,7 @@ struct EventRecord {
 
 class EventAction : public G4UserEventAction {
   public:
-    EventAction() = default;
+    explicit EventAction(std::shared_ptr<CsvWriter> csvWriter = nullptr);
     ~EventAction() override = default;
 
     void BeginOfEventAction(const G4Event* event) override;
@@ -57,6 +60,7 @@ class EventAction : public G4UserEventAction {
     void RecordScatter(const G4ThreeVector& position);
 
     EventRecord record_;
+    std::shared_ptr<CsvWriter> csvWriter_;
 };
 
 #endif

@@ -1,8 +1,11 @@
 #include "EventAction.hh"
 
+#include "CsvWriter.hh"
+
 #include "G4Event.hh"
 
 #include <limits>
+#include <utility>
 
 namespace {
 
@@ -24,6 +27,11 @@ bool ScatterSummary::IsMultipleScatter() const
     return scatter_count_total >= 2;
 }
 
+EventAction::EventAction(std::shared_ptr<CsvWriter> csvWriter)
+    : csvWriter_(std::move(csvWriter))
+{
+}
+
 void EventAction::BeginOfEventAction(const G4Event* event)
 {
     ResetRecord(event != nullptr ? event->GetEventID() : -1);
@@ -31,6 +39,9 @@ void EventAction::BeginOfEventAction(const G4Event* event)
 
 void EventAction::EndOfEventAction(const G4Event*)
 {
+    if (record_.hit.detected && csvWriter_ != nullptr) {
+        csvWriter_->WriteRow(record_);
+    }
 }
 
 void EventAction::SetInitialEnergy(double energy_keV)

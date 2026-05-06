@@ -7,6 +7,7 @@
 
 #include <memory>
 
+class CsvWriter;
 struct SimulationConfig;
 
 class ActionInitialization : public G4VUserActionInitialization {
@@ -20,6 +21,7 @@ class ActionInitialization : public G4VUserActionInitialization {
 
   private:
     std::shared_ptr<SimulationConfig> config_;
+    std::shared_ptr<CsvWriter> csvWriter_;
     DetectorPlaneConfig detectorPlaneConfig_;
 };
 

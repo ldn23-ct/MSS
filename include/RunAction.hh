@@ -5,12 +5,14 @@
 
 #include <memory>
 
+class CsvWriter;
 class G4Run;
 struct SimulationConfig;
 
 class RunAction : public G4UserRunAction {
   public:
-    explicit RunAction(std::shared_ptr<SimulationConfig> config);
+    RunAction(std::shared_ptr<SimulationConfig> config,
+              std::shared_ptr<CsvWriter> csvWriter);
     ~RunAction() override = default;
 
     void BeginOfRunAction(const G4Run* run) override;
@@ -20,6 +22,7 @@ class RunAction : public G4UserRunAction {
 
   private:
     std::shared_ptr<SimulationConfig> config_;
+    std::shared_ptr<CsvWriter> csvWriter_;
 };
 
 #endif
