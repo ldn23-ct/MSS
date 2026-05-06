@@ -26,13 +26,19 @@ void ReportProfileError(const std::string& message)
 
 std::string Trim(const std::string& value)
 {
-    const auto begin = value.find_first_not_of(" \t\r\n");
+    std::string text = value;
+    const std::string utf8Bom = "\xEF\xBB\xBF";
+    if (text.rfind(utf8Bom, 0) == 0) {
+        text.erase(0, utf8Bom.size());
+    }
+
+    const auto begin = text.find_first_not_of(" \t\r\n");
     if (begin == std::string::npos) {
         return "";
     }
 
-    const auto end = value.find_last_not_of(" \t\r\n");
-    return value.substr(begin, end - begin + 1);
+    const auto end = text.find_last_not_of(" \t\r\n");
+    return text.substr(begin, end - begin + 1);
 }
 
 std::vector<std::string> SplitCsvLine(const std::string& line)
