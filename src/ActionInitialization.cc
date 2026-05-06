@@ -7,8 +7,11 @@
 
 #include <utility>
 
-ActionInitialization::ActionInitialization(std::shared_ptr<SimulationConfig> config)
-    : config_(std::move(config))
+ActionInitialization::ActionInitialization(
+    std::shared_ptr<SimulationConfig> config,
+    const DetectorPlaneConfig& detectorPlaneConfig)
+    : config_(std::move(config)),
+      detectorPlaneConfig_(detectorPlaneConfig)
 {
 }
 
@@ -23,5 +26,5 @@ void ActionInitialization::Build() const
     auto* eventAction = new EventAction;
     SetUserAction(new PrimaryGeneratorAction(config_, eventAction));
     SetUserAction(eventAction);
-    SetUserAction(new SteppingAction);
+    SetUserAction(new SteppingAction(eventAction, detectorPlaneConfig_));
 }

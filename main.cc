@@ -19,9 +19,12 @@ int main(int argc, char** argv)
 
     auto config = std::make_shared<SimulationConfig>();
 
-    runManager->SetUserInitialization(new DetectorConstruction(config));
+    auto* detectorConstruction = new DetectorConstruction(config);
+    runManager->SetUserInitialization(detectorConstruction);
     runManager->SetUserInitialization(new PhysicsList);
-    runManager->SetUserInitialization(new ActionInitialization(config));
+    runManager->SetUserInitialization(
+        new ActionInitialization(config,
+                                 detectorConstruction->GetDetectorPlaneConfig()));
 
     SimulationMessenger messenger(config);
 
