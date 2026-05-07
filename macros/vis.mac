@@ -1,0 +1,28 @@
+/run/numberOfThreads 1
+/run/randomSeed 12345
+
+/geometry/collimatorProfileFile data/collimator_profiles.csv
+/geometry/collimatorProfileId P001
+/geometry/enableAirDefect true
+
+/source/energyMode mono
+/source/monoEnergy 160 keV
+
+/output/directory results
+/output/debug true
+
+/run/initialize
+
+/vis/open OGL
+/vis/viewer/set/autoRefresh false
+/vis/drawVolume
+/vis/viewer/set/viewpointThetaPhi 70 20
+/vis/viewer/set/style surface
+/vis/scene/add/axes 0 0 0 100 mm
+/vis/scene/add/trajectories smooth
+/vis/scene/endOfEventAction accumulate
+/tracking/storeTrajectory 1
+
+/run/beamOn 20
+
+/vis/viewer/flush

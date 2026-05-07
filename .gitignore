@@ -71,3 +71,7 @@ compile_commands.json
 *.png
 *.csv
 !data/collimator_profiles.csv
+!data/spectrum.csv
+results/*.csv
+results/tmp/
+*.root

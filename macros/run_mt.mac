@@ -1,0 +1,15 @@
+/run/numberOfThreads 8
+/run/randomSeed 12345
+
+/geometry/collimatorProfileFile data/collimator_profiles.csv
+/geometry/collimatorProfileId P001
+/geometry/enableAirDefect true
+
+/source/energyMode mono
+/source/monoEnergy 160 keV
+
+/output/directory results
+/output/debug false
+
+/run/initialize
+/run/beamOn 100000
