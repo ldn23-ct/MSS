@@ -13,16 +13,16 @@
 
 /run/initialize
 
-/vis/open OGL
+/vis/open OGL 600x600-0+0
 /vis/viewer/set/autoRefresh false
 /vis/drawVolume
 /vis/viewer/set/viewpointThetaPhi 70 20
 /vis/viewer/set/style surface
+/vis/viewer/zoom 1.5
 /vis/scene/add/axes 0 0 0 100 mm
 /vis/scene/add/trajectories smooth
 /vis/scene/endOfEventAction accumulate
 /tracking/storeTrajectory 1
 
 /run/beamOn 20
-
 /vis/viewer/flush

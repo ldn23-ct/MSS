@@ -1,5 +1,5 @@
 /run/numberOfThreads 8
-/run/randomSeed 12345
+/run/randomSeed 111
 
 /geometry/collimatorProfileFile data/collimator_profiles.csv
 /geometry/collimatorProfileId P001
@@ -12,4 +12,4 @@
 /output/debug false
 
 /run/initialize
-/run/beamOn 100000
+/run/beamOn 10000000

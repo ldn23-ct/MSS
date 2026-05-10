@@ -8,6 +8,7 @@
 #include "G4RunManagerFactory.hh"
 #include "G4UIExecutive.hh"
 #include "G4UImanager.hh"
+#include "G4VisExecutive.hh"
 
 #include <memory>
 #include <string>
@@ -28,6 +29,9 @@ int main(int argc, char** argv)
 
     SimulationMessenger messenger(config);
 
+    auto* visManager = new G4VisExecutive();
+    visManager -> Initialize();
+
     auto* uiManager = G4UImanager::GetUIpointer();
     if (argc > 1) {
         const std::string command = "/control/execute ";
@@ -37,5 +41,6 @@ int main(int argc, char** argv)
         ui->SessionStart();
     }
 
+    delete visManager;
     return 0;
 }

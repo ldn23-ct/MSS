@@ -6,7 +6,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Geant4 REQUIRED)
+option(WITH_GEANT4_UIVIS "Build with Geant4 UI and Vis drivers" ON)
+
+if(WITH_GEANT4_UIVIS)
+    find_package(Geant4 REQUIRED ui_all vis_all)
+else()
+    find_package(Geant4 REQUIRED)
+endif()
 include(${Geant4_USE_FILE})
 
 add_executable(MSS
