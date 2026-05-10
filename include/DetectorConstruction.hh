@@ -24,6 +24,7 @@ class DetectorConstruction : public G4VUserDetectorConstruction {
 
     G4VPhysicalVolume* Construct() override;
     const std::array<DetectorPlaneConfig, 2>& GetDetectorPlaneConfigs() const;
+    double GetPmmaThicknessMm() const;
 
   private:
     std::shared_ptr<const SimulationConfig> config_;

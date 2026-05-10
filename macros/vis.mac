@@ -3,8 +3,8 @@
 
 /geometry/collimatorProfileFile data/collimator_profiles.csv
 /geometry/collimatorProfileId P001
-/geometry/enableCollimator true
-/geometry/enableAirDefect true
+/geometry/enableCollimator false
+/geometry/enableAirDefect false
 
 /source/energyMode mono
 /source/monoEnergy 160 keV

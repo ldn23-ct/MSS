@@ -59,19 +59,47 @@ std::string FormatEnergyForFileName(double energy_keV)
     return stream.str();
 }
 
+std::string FormatLengthForFileName(double value_mm)
+{
+    if (!std::isfinite(value_mm) || value_mm <= 0.0) {
+        ReportRunError("PMMA thickness must be positive and finite.");
+    }
+
+    std::ostringstream stream;
+    stream << std::fixed << std::setprecision(6) << value_mm;
+    std::string text = stream.str();
+    while (!text.empty() && text.back() == '0') {
+        text.pop_back();
+    }
+    if (!text.empty() && text.back() == '.') {
+        text.pop_back();
+    }
+    for (char& character : text) {
+        if (character == '.') {
+            character = 'p';
+        }
+    }
+    return text;
+}
+
 std::string BuildOutputBaseName(const SimulationConfig& config,
-                                bool debugOutput)
+                                bool debugOutput,
+                                double pmmaThicknessMm)
 {
     std::ostringstream fileName;
     fileName << "hits_profile_" << config.collimatorProfileId << '_';
     if (config.energyMode == "mono") {
         fileName << "mono_" << FormatEnergyForFileName(config.monoEnergy_keV)
-                 << "keV_seed" << config.randomSeed;
+                 << "keV_";
     } else if (config.energyMode == "spectrum") {
-        fileName << "spectrum_seed" << config.randomSeed;
+        fileName << "spectrum_";
     } else {
         ReportRunError("energyMode must be either 'mono' or 'spectrum'.");
     }
+
+    fileName << (config.enableAirDefect ? "defect_on" : "defect_off")
+             << "_thick_" << FormatLengthForFileName(pmmaThicknessMm)
+             << "mm_seed" << config.randomSeed;
 
     if (debugOutput) {
         fileName << "_debug";
@@ -81,10 +109,12 @@ std::string BuildOutputBaseName(const SimulationConfig& config,
 }
 
 std::filesystem::path BuildOutputFilePath(const SimulationConfig& config,
-                                          bool debugOutput)
+                                          bool debugOutput,
+                                          double pmmaThicknessMm)
 {
     return std::filesystem::path(config.outputDirectory)
-           / (BuildOutputBaseName(config, debugOutput) + ".csv");
+           / (BuildOutputBaseName(config, debugOutput, pmmaThicknessMm)
+              + ".csv");
 }
 
 std::filesystem::path BuildTempDirectoryPath(const SimulationConfig& config)
@@ -94,10 +124,11 @@ std::filesystem::path BuildTempDirectoryPath(const SimulationConfig& config)
 
 std::filesystem::path BuildTempFilePath(const SimulationConfig& config,
                                         bool debugOutput,
-                                        int threadId)
+                                        int threadId,
+                                        double pmmaThicknessMm)
 {
     std::ostringstream fileName;
-    fileName << BuildOutputBaseName(config, debugOutput)
+    fileName << BuildOutputBaseName(config, debugOutput, pmmaThicknessMm)
              << "_thread" << threadId << ".csv";
     return BuildTempDirectoryPath(config) / fileName.str();
 }
@@ -125,12 +156,16 @@ void EnsureDirectory(const std::filesystem::path& directory,
 }
 
 std::vector<std::string> BuildTempFilePaths(const SimulationConfig& config,
-                                            bool debugOutput)
+                                            bool debugOutput,
+                                            double pmmaThicknessMm)
 {
     std::vector<std::string> paths;
     paths.reserve(static_cast<std::size_t>(config.numberOfThreads));
     for (int threadId = 0; threadId < config.numberOfThreads; ++threadId) {
-        paths.push_back(BuildTempFilePath(config, debugOutput, threadId).string());
+        paths.push_back(BuildTempFilePath(config,
+                                          debugOutput,
+                                          threadId,
+                                          pmmaThicknessMm).string());
     }
     return paths;
 }
@@ -138,9 +173,11 @@ std::vector<std::string> BuildTempFilePaths(const SimulationConfig& config,
 } // namespace
 
 RunAction::RunAction(std::shared_ptr<SimulationConfig> config,
-                     std::shared_ptr<CsvWriter> csvWriter)
+                     std::shared_ptr<CsvWriter> csvWriter,
+                     double pmmaThicknessMm)
     : config_(std::move(config)),
-      csvWriter_(std::move(csvWriter))
+      csvWriter_(std::move(csvWriter)),
+      pmmaThicknessMm_(pmmaThicknessMm)
 {
 }
 
@@ -170,8 +207,13 @@ void RunAction::BeginOfRunAction(const G4Run*)
         const bool debugOutput = config_->ResolveDebugOutput();
         const auto outputPath =
             config_->numberOfThreads > 1
-                ? BuildTempFilePath(*config_, debugOutput, GetWorkerThreadId())
-                : BuildOutputFilePath(*config_, debugOutput);
+                ? BuildTempFilePath(*config_,
+                                    debugOutput,
+                                    GetWorkerThreadId(),
+                                    pmmaThicknessMm_)
+                : BuildOutputFilePath(*config_,
+                                      debugOutput,
+                                      pmmaThicknessMm_);
         csvWriter_->Open(outputPath.string(), debugOutput);
     }
 }
@@ -185,8 +227,10 @@ void RunAction::EndOfRunAction(const G4Run*)
     if (config_ != nullptr && IsConfigOwnerThread()
         && config_->numberOfThreads > 1) {
         const bool debugOutput = config_->ResolveDebugOutput();
-        const auto outputPath = BuildOutputFilePath(*config_, debugOutput);
-        const auto tempFilePaths = BuildTempFilePaths(*config_, debugOutput);
+        const auto outputPath =
+            BuildOutputFilePath(*config_, debugOutput, pmmaThicknessMm_);
+        const auto tempFilePaths =
+            BuildTempFilePaths(*config_, debugOutput, pmmaThicknessMm_);
         CsvWriter::MergeFiles(tempFilePaths,
                               outputPath.string(),
                               debugOutput,

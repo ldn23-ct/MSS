@@ -13,7 +13,8 @@ struct SimulationConfig;
 class ActionInitialization : public G4VUserActionInitialization {
   public:
     ActionInitialization(std::shared_ptr<SimulationConfig> config,
-                         const std::array<DetectorPlaneConfig, 2>& detectorPlaneConfigs);
+                         const std::array<DetectorPlaneConfig, 2>& detectorPlaneConfigs,
+                         double pmmaThicknessMm);
     ~ActionInitialization() override = default;
 
     void BuildForMaster() const override;
@@ -22,6 +23,7 @@ class ActionInitialization : public G4VUserActionInitialization {
   private:
     std::shared_ptr<SimulationConfig> config_;
     std::array<DetectorPlaneConfig, 2> detectorPlaneConfigs_;
+    double pmmaThicknessMm_;
 };
 
 #endif

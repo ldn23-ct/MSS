@@ -6,6 +6,7 @@
 
 #include "G4Box.hh"
 #include "G4Colour.hh"
+#include "G4Exception.hh"
 #include "G4LogicalVolume.hh"
 #include "G4NistManager.hh"
 #include "G4PVPlacement.hh"
@@ -14,6 +15,8 @@
 #include "G4Tubs.hh"
 #include "G4VisAttributes.hh"
 
+#include <iomanip>
+#include <sstream>
 #include <string>
 #include <utility>
 
@@ -23,14 +26,50 @@ constexpr double kWorldHalfLength = 500.0;
 
 constexpr double kPmmaSizeX = 200.0;
 constexpr double kPmmaSizeY = 200.0;
-constexpr double kPmmaSizeZ = 65.0;
-constexpr double kPmmaCenterZ = 32.5;
+// constexpr double kPmmaThicknessMm = 65.0;
+constexpr double kPmmaThicknessMm = 20.0;
 
 constexpr double kAirDefectRadius = 5.0;
 constexpr double kAirDefectHalfLength = 5.0;
 constexpr double kAirDefectCenterZ = 55.0;
 
 constexpr double kDetectorPlaneThickness = 0.1;
+
+void ReportGeometryError(const std::string& message)
+{
+    G4Exception("DetectorConstruction",
+                "MSSGeometry001",
+                FatalException,
+                message.c_str());
+}
+
+std::string FormatGeometryLength(double value_mm)
+{
+    std::ostringstream stream;
+    stream << std::setprecision(12) << value_mm;
+    return stream.str();
+}
+
+void ValidateAirDefectFits(double pmmaThickness_mm)
+{
+    const double defectMinZ_mm = kAirDefectCenterZ - kAirDefectHalfLength;
+    const double defectMaxZ_mm = kAirDefectCenterZ + kAirDefectHalfLength;
+    if (defectMinZ_mm >= 0.0 && defectMaxZ_mm <= pmmaThickness_mm) {
+        return;
+    }
+
+    std::ostringstream message;
+    message << "Air defect does not fit inside PMMA: PMMA thickness is "
+            << FormatGeometryLength(pmmaThickness_mm)
+            << " mm with z range [0, "
+            << FormatGeometryLength(pmmaThickness_mm)
+            << "] mm, but the air defect z range is ["
+            << FormatGeometryLength(defectMinZ_mm)
+            << ", "
+            << FormatGeometryLength(defectMaxZ_mm)
+            << "] mm.";
+    ReportGeometryError(message.str());
+}
 
 void BuildDetectorPlaneVis(const DetectorPlaneConfig& config,
                            const std::string& suffix,
@@ -80,6 +119,15 @@ DetectorConstruction::DetectorConstruction(
 
 G4VPhysicalVolume* DetectorConstruction::Construct()
 {
+    const double pmmaThickness_mm = GetPmmaThicknessMm();
+    const double pmmaHalfZ_mm = 0.5 * pmmaThickness_mm;
+    const double pmmaCenterZ_mm = pmmaHalfZ_mm;
+    const bool enableAirDefect =
+        config_ == nullptr || config_->enableAirDefect;
+    if (enableAirDefect) {
+        ValidateAirDefectFits(pmmaThickness_mm);
+    }
+
     auto* nist = G4NistManager::Instance();
     auto* worldMaterial = nist->FindOrBuildMaterial("G4_Galactic");
     auto* pmmaMaterial = nist->FindOrBuildMaterial("G4_PLEXIGLASS");
@@ -104,12 +152,12 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
     auto* pmmaSolid = new G4Box("PMMASolid",
                                 0.5 * kPmmaSizeX * mm,
                                 0.5 * kPmmaSizeY * mm,
-                                0.5 * kPmmaSizeZ * mm);
+                                pmmaHalfZ_mm * mm);
     auto* pmmaLogical =
         new G4LogicalVolume(pmmaSolid, pmmaMaterial, "PMMALogical");
 
     new G4PVPlacement(nullptr,
-                      G4ThreeVector(0.0, 0.0, kPmmaCenterZ * mm),
+                      G4ThreeVector(0.0, 0.0, pmmaCenterZ_mm * mm),
                       pmmaLogical,
                       "PMMAPhysical",
                       worldLogical,
@@ -117,7 +165,7 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
                       0,
                       true);
 
-    if (config_ == nullptr || config_->enableAirDefect) {
+    if (enableAirDefect) {
         auto* airDefectSolid = new G4Tubs("AirDefectSolid",
                                           0.0,
                                           kAirDefectRadius * mm,
@@ -133,7 +181,7 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
                           G4ThreeVector(
                               0.0,
                               0.0,
-                              (kAirDefectCenterZ - kPmmaCenterZ) * mm),
+                              (kAirDefectCenterZ - pmmaCenterZ_mm) * mm),
                           airDefectLogical,
                           "AirDefectPhysical",
                           pmmaLogical,
@@ -176,4 +224,9 @@ const std::array<DetectorPlaneConfig, 2>&
 DetectorConstruction::GetDetectorPlaneConfigs() const
 {
     return detectorPlaneConfigs_;
+}
+
+double DetectorConstruction::GetPmmaThicknessMm() const
+{
+    return kPmmaThicknessMm;
 }

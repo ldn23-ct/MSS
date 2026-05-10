@@ -12,7 +12,8 @@ struct SimulationConfig;
 class RunAction : public G4UserRunAction {
   public:
     RunAction(std::shared_ptr<SimulationConfig> config,
-              std::shared_ptr<CsvWriter> csvWriter);
+              std::shared_ptr<CsvWriter> csvWriter,
+              double pmmaThicknessMm);
     ~RunAction() override = default;
 
     void BeginOfRunAction(const G4Run* run) override;
@@ -23,6 +24,7 @@ class RunAction : public G4UserRunAction {
   private:
     std::shared_ptr<SimulationConfig> config_;
     std::shared_ptr<CsvWriter> csvWriter_;
+    double pmmaThicknessMm_;
 };
 
 #endif

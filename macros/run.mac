@@ -1,10 +1,10 @@
 /run/numberOfThreads 1
-/run/randomSeed 12345
+/run/randomSeed 123
 
 /geometry/collimatorProfileFile data/collimator_profiles.csv
 /geometry/collimatorProfileId P001
 /geometry/enableCollimator true
-/geometry/enableAirDefect true
+/geometry/enableAirDefect false
 
 /source/energyMode mono
 /source/monoEnergy 160 keV
