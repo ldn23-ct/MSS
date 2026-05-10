@@ -22,7 +22,8 @@ constexpr const char* kCompactHeader =
 
 constexpr const char* kDebugHeader =
     "event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,"
-    "initial_energy,det_x,det_y,det_energy,scatter_count_total,"
+    "initial_energy,initial_dir_x,initial_dir_y,initial_dir_z,"
+    "det_x,det_y,det_energy,scatter_count_total,"
     "compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,"
     "first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,"
     "last_scatter_z";
@@ -91,8 +92,15 @@ void CsvWriter::WriteRow(const EventRecord& record)
                 << FormatNumber(hit.det_dir.z()) << ',';
     }
 
-    output_ << FormatNumber(record.initial_energy_keV) << ','
-            << FormatNumber(hit.det_x) << ','
+    output_ << FormatNumber(record.initial_energy_keV) << ',';
+
+    if (debugOutput_) {
+        output_ << FormatNumber(record.initial_dir.x()) << ','
+                << FormatNumber(record.initial_dir.y()) << ','
+                << FormatNumber(record.initial_dir.z()) << ',';
+    }
+
+    output_ << FormatNumber(hit.det_x) << ','
             << FormatNumber(hit.det_y) << ','
             << FormatNumber(hit.det_energy_keV) << ','
             << scatter.scatter_count_total << ','

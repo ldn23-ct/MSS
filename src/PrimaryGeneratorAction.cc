@@ -1,6 +1,5 @@
 #include "PrimaryGeneratorAction.hh"
 
-#include "EventAction.hh"
 #include "SimulationConfig.hh"
 
 #include "G4Event.hh"
@@ -33,10 +32,8 @@ void ReportPrimaryGeneratorError(const std::string& message)
 } // namespace
 
 PrimaryGeneratorAction::PrimaryGeneratorAction(
-    std::shared_ptr<const SimulationConfig> config,
-    EventAction* eventAction)
+    std::shared_ptr<const SimulationConfig> config)
     : config_(std::move(config)),
-      eventAction_(eventAction),
       particleGun_(std::make_unique<G4ParticleGun>(1))
 {
     particleGun_->SetParticleDefinition(G4Gamma::GammaDefinition());
@@ -53,9 +50,6 @@ void PrimaryGeneratorAction::GeneratePrimaries(G4Event* event)
     config_->Validate();
 
     const double energy_keV = SelectInitialEnergyKeV();
-    if (eventAction_ != nullptr) {
-        eventAction_->SetInitialEnergy(energy_keV);
-    }
     particleGun_->SetParticleEnergy(energy_keV * keV);
     particleGun_->SetParticlePosition(G4ThreeVector(0.0, 0.0, kSourceZ_mm * mm));
 
@@ -68,8 +62,8 @@ void PrimaryGeneratorAction::GeneratePrimaries(G4Event* event)
     const G4ThreeVector targetPosition(targetX_mm * mm,
                                        targetY_mm * mm,
                                        kTargetPlaneZ_mm * mm);
-    particleGun_->SetParticleMomentumDirection(
-        (targetPosition - sourcePosition).unit());
+    const G4ThreeVector initialDirection = (targetPosition - sourcePosition).unit();
+    particleGun_->SetParticleMomentumDirection(initialDirection);
 
     particleGun_->GeneratePrimaryVertex(event);
 }

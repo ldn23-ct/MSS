@@ -3,21 +3,21 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 struct XZPoint {
     double x_mm = 0.0;
     double z_mm = 0.0;
 };
 
-struct PentagonJawProfile {
+struct PolygonJawProfile {
     std::string jaw_id;
-    std::array<XZPoint, 5> vertices;
+    std::vector<XZPoint> vertices;
 };
 
 struct CollimatorProfile {
     std::string profile_id;
-    PentagonJawProfile jaw0;
-    PentagonJawProfile jaw1;
+    std::array<PolygonJawProfile, 3> jaws;
 };
 
 class CollimatorProfileReader {

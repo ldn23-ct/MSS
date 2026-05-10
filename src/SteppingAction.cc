@@ -41,13 +41,23 @@ const G4VProcess* GetPostStepProcess(const G4StepPoint* postStepPoint)
                : nullptr;
 }
 
+bool IsInsideDetectorPlane(double detX_mm,
+                           double detY_mm,
+                           const DetectorPlaneConfig& config)
+{
+    return detX_mm >= config.x_min_mm
+           && detX_mm <= config.x_max_mm
+           && detY_mm >= config.y_min_mm
+           && detY_mm <= config.y_max_mm;
+}
+
 } // namespace
 
 SteppingAction::SteppingAction(
     EventAction* eventAction,
-    const DetectorPlaneConfig& detectorPlaneConfig)
+    const std::array<DetectorPlaneConfig, 2>& detectorPlaneConfigs)
     : eventAction_(eventAction),
-      detectorPlaneConfig_(detectorPlaneConfig)
+      detectorPlaneConfigs_(detectorPlaneConfigs)
 {
 }
 
@@ -89,32 +99,36 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
     const auto postPosition = postStepPoint->GetPosition();
     const auto direction = preStepPoint->GetMomentumDirection();
 
-    const double detectorZ = detectorPlaneConfig_.z_mm * mm;
-    if (prePosition.z() <= detectorZ
-        || postPosition.z() > detectorZ
-        || direction.z() >= 0.0) {
+    if (direction.z() >= 0.0) {
         return;
     }
 
-    const double t =
-        (detectorZ - prePosition.z()) / (postPosition.z() - prePosition.z());
-    const double detX = prePosition.x() + t * (postPosition.x() - prePosition.x());
-    const double detY = prePosition.y() + t * (postPosition.y() - prePosition.y());
+    for (const auto& detectorPlaneConfig : detectorPlaneConfigs_) {
+        const double detectorZ = detectorPlaneConfig.z_mm * mm;
+        if (prePosition.z() <= detectorZ || postPosition.z() > detectorZ) {
+            continue;
+        }
 
-    const double detX_mm = detX / mm;
-    const double detY_mm = detY / mm;
-    if (detX_mm < detectorPlaneConfig_.x_min_mm
-        || detX_mm > detectorPlaneConfig_.x_max_mm
-        || detY_mm < detectorPlaneConfig_.y_min_mm
-        || detY_mm > detectorPlaneConfig_.y_max_mm) {
+        const double t = (detectorZ - prePosition.z())
+                         / (postPosition.z() - prePosition.z());
+        const double detX =
+            prePosition.x() + t * (postPosition.x() - prePosition.x());
+        const double detY =
+            prePosition.y() + t * (postPosition.y() - prePosition.y());
+
+        const double detX_mm = detX / mm;
+        const double detY_mm = detY / mm;
+        if (!IsInsideDetectorPlane(detX_mm, detY_mm, detectorPlaneConfig)) {
+            continue;
+        }
+
+        DetectorHitRecord hit;
+        hit.det_x = detX_mm;
+        hit.det_y = detY_mm;
+        hit.det_z = detectorPlaneConfig.z_mm;
+        hit.det_energy_keV = postStepPoint->GetKineticEnergy() / keV;
+        hit.det_dir = direction;
+        eventAction_->RecordDetectorHit(hit);
         return;
     }
-
-    DetectorHitRecord hit;
-    hit.det_x = detX_mm;
-    hit.det_y = detY_mm;
-    hit.det_z = detectorPlaneConfig_.z_mm;
-    hit.det_energy_keV = postStepPoint->GetKineticEnergy() / keV;
-    hit.det_dir = direction;
-    eventAction_->RecordDetectorHit(hit);
 }

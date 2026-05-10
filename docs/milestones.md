@@ -85,7 +85,7 @@ After implementation, summarize:
 | M1 | 运行配置与宏命令 | 中央配置对象与 UI command 层 |
 | M2 | 准直器 profile 读取器 | CSV reader 与 validator |
 | M3 | 基础几何 | World、PMMA、空气缺陷、探测面辅助体 |
-| M4 | 准直器几何 | 由 profile 构建两块钨五边形 jaw |
+| M4 | 准直器几何 | 由 profile 构建三块凸多边形 jaw 及镜像 jaw |
 | M5 | primary generator 与 spectrum sampler | mono/spectrum gamma 源与锥束目标面采样 |
 | M6 | event 状态模型 | 单 event 的散射与探测记录结构 |
 | M7 | stepping 逻辑 | PMMA 散射计数与探测面穿越判断 |
@@ -245,6 +245,7 @@ After implementation, summarize changed files and exact build commands.
 struct SimulationConfig {
     std::string collimatorProfileFile = "data/collimator_profiles.csv";
     std::string collimatorProfileId = "P001";
+    bool enableCollimator = true;
     bool enableAirDefect = true;
 
     std::string energyMode = "mono";
@@ -257,6 +258,8 @@ struct SimulationConfig {
     std::string outputDirectory = "results";
     std::optional<bool> debugOutputOverride = std::nullopt;
 };
+
+std::array<DetectorPlaneConfig, 2> detectorPlanes;
 ```
 
 说明：`debugOutputOverride` 用于区分 `/output/debug` 未设置和显式设置。最终模式在 `RunAction` 中根据线程数解析。
@@ -268,6 +271,7 @@ struct SimulationConfig {
 ```text
 /geometry/collimatorProfileFile data/collimator_profiles.csv
 /geometry/collimatorProfileId P001
+/geometry/enableCollimator true
 /geometry/enableAirDefect true
 
 /source/energyMode mono
@@ -363,15 +367,14 @@ struct XZPoint {
     double z_mm;
 };
 
-struct PentagonJawProfile {
+struct PolygonJawProfile {
     std::string jaw_id;
-    std::array<XZPoint, 5> vertices;
+    std::vector<XZPoint> vertices;
 };
 
 struct CollimatorProfile {
     std::string profile_id;
-    PentagonJawProfile jaw0;
-    PentagonJawProfile jaw1;
+    std::array<PolygonJawProfile, 3> jaws;
 };
 ```
 
@@ -398,12 +401,12 @@ profile_id,jaw_id,vertex_id,x_mm,z_mm
 
 报错条件：
 
-- 不是恰好两块 jaw；
-- jaw ID 不是 `jaw_0` 和 `jaw_1`；
-- 某 jaw 不是五个顶点；
+- 不是恰好三块 jaw；
+- jaw ID 不是 `jaw_0`、`jaw_1`、`jaw_2`；
+- 某 jaw 少于 3 个顶点；
 - `vertex_id` 缺失；
 - `vertex_id` 重复；
-- `vertex_id` 超出 `0..4`。
+- `vertex_id` 不是从 `0` 到 `N-1` 的连续整数。
 
 ### M2.5 验证数值
 
@@ -420,7 +423,7 @@ profile_id,jaw_id,vertex_id,x_mm,z_mm
 - 计算有符号面积；
 - 拒绝零面积；
 - 验证凸性；
-- 拒绝非凸五边形。
+- 拒绝非凸多边形和连续共线点。
 
 不需要检查 z 坐标是否落在 `[-28, -20] mm`。
 
@@ -430,7 +433,7 @@ profile_id,jaw_id,vertex_id,x_mm,z_mm
 - 错误 profile ID 有清晰错误。
 - 缺失/重复 vertex ID 有清晰错误。
 - 非有限坐标有清晰错误。
-- 零面积和非凸五边形有清晰错误。
+- 零面积、非凸多边形和连续共线点有清晰错误。
 - 不构建 Geant4 geometry。
 
 ## 不做
@@ -512,27 +515,27 @@ struct DetectorPlaneConfig {
 
 ### M3.5 探测面辅助体
 
-在 `z = -73 mm` 添加可视化辅助体，范围为：
+在 `z = -73 mm` 添加两个可视化辅助体，范围为：
 
 ```text
-x = [53, 161] mm
-y = [-50, 50] mm
+original: x = [53, 161] mm, y = [-50, 50] mm
+mirror:   x = [-161, -53] mm, y = [-50, 50] mm
 ```
 
-该辅助体不作为真实探测器响应，不应设置为 sensitive detector。
+这些辅助体不作为真实探测器响应，不应设置为 sensitive detector。
 
 ### M3.6 可视化属性
 
 - World 可不可见。
 - PMMA 可见或半透明。
 - 空气缺陷启用时可见。
-- 探测面辅助体可见。
+- 原始探测面和镜像探测面辅助体可见。
 
 ## 完成标准
 
-- 可视化中能看到 PMMA、空气缺陷和探测面辅助体。
+- 可视化中能看到 PMMA、空气缺陷、原始探测面和镜像探测面辅助体。
 - 空气缺陷开关有效。
-- 探测面位置与范围正确。
+- 原始探测面和镜像探测面位置与范围正确。
 - 未构建钨准直器。
 
 ## 不做
@@ -559,7 +562,7 @@ After implementation, summarize changed files and visual checks.
 
 ## 目标
 
-把 M2 的 profile reader 与 M3 的 DetectorConstruction 连接起来，使用 `G4ExtrudedSolid` 构建两块钨准直器 jaw。
+把 M2 的 profile reader 与 M3 的 DetectorConstruction 连接起来，使用 `G4ExtrudedSolid` 构建三块原始钨准直器 jaw 和三块镜像 jaw。
 
 ## 修改文件
 
@@ -623,14 +626,15 @@ G4_W
 
 - 从 config 读取 profile 文件路径。
 - 从 config 读取 profile ID。
-- 用 `CollimatorProfileReader` 读取并验证。
-- 用 `CollimatorBuilder` 构建两块 jaw。
+- 当 `enableCollimator == true` 时，用 `CollimatorProfileReader` 读取并验证。
+- 当 `enableCollimator == true` 时，用 `CollimatorBuilder` 构建三块原始 jaw 和三块镜像 jaw。
+- 当 `enableCollimator == false` 时，不读取 profile，也不构建 tungsten jaw。
 
 ## 完成标准
 
-- 合法 `P001` 生成两块钨 jaw。
+- 合法 `P001` 生成三块原始钨 jaw 和三块镜像 jaw。
 - 非法 profile 仍在 reader 阶段报错停止。
-- 可视化中可见两块五边形钨板。
+- 可视化中可见三块原始凸多边形钨板和三块镜像钨板。
 - 使用 CSV 全局 x-z 坐标，不额外加 z 偏移。
 - 未实现探测面穿越或输出逻辑。
 
@@ -726,9 +730,9 @@ energy_keV,weight
 normalize((x_target, y_target, 0) - (0, 0, -185))
 ```
 
-### M5.5 初始能量交给 event state
+### M5.5 初始能量与方向交给 event state
 
-为 M6 提供接口，把 `initial_energy_keV` 写入 `EventAction`。
+通过 Geant4 primary vertex 保留 `initial_energy_keV` 和初始单位方向，供 `EventAction::BeginOfEventAction` 读取。
 
 ## 完成标准
 
@@ -945,8 +949,8 @@ det_y = pre_y + t * (post_y - pre_y)
 接受范围：
 
 ```text
-53 mm <= det_x <= 161 mm
--50 mm <= det_y <= 50 mm
+original detector: 53 mm <= det_x <= 161 mm, -50 mm <= det_y <= 50 mm
+mirror detector: -161 mm <= det_x <= -53 mm, -50 mm <= det_y <= 50 mm
 ```
 
 ### M7.6 记录 detector hit
@@ -1054,7 +1058,7 @@ initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh
 ### M8.4 debug header
 
 ```csv
-event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
+event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,initial_dir_x,initial_dir_y,initial_dir_z,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
 ```
 
 ### M8.5 只写被探测 event
@@ -1084,7 +1088,7 @@ event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,d
 
 - 不实现 multi-thread merge。
 - 不让多个线程共享一个 `std::ofstream`。
-- 不增加 CSV 列。
+- 不增加 compact CSV 列；debug CSV 只按 `spec.md` 定义输出。
 - 不输出未探测 event。
 
 ## 推荐 Codex prompt
@@ -1240,6 +1244,7 @@ After implementation, summarize changed files and single-/multi-thread test comm
 
 /geometry/collimatorProfileFile data/collimator_profiles.csv
 /geometry/collimatorProfileId P001
+/geometry/enableCollimator true
 /geometry/enableAirDefect true
 
 /source/energyMode mono
@@ -1268,6 +1273,7 @@ results/hits_profile_P001_mono_160keV_seed12345_debug.csv
 
 /geometry/collimatorProfileFile data/collimator_profiles.csv
 /geometry/collimatorProfileId P001
+/geometry/enableCollimator true
 /geometry/enableAirDefect true
 
 /source/energyMode mono
@@ -1292,8 +1298,9 @@ results/hits_profile_P001_mono_160keV_seed12345.csv
 
 - PMMA 模体；
 - 空气缺陷开关；
-- 两块五边形钨准直器 jaw；
-- 探测面辅助体；
+- 三块原始凸多边形钨准直器 jaw；
+- 三块镜像钨准直器 jaw；
+- 原始探测面和镜像探测面辅助体；
 - 源位置；
 - 少量 gamma 轨迹。
 
@@ -1313,6 +1320,10 @@ P001,jaw_1,1,109,-28
 P001,jaw_1,2,164,-28
 P001,jaw_1,3,164,-20
 P001,jaw_1,4,109,-20
+P001,jaw_2,0,21,-28
+P001,jaw_2,1,29,-28
+P001,jaw_2,2,29,-113
+P001,jaw_2,3,21,-113
 ```
 
 必须说明：该 profile 只是编译、可视化和输出流程测试用占位几何，不代表真实准直器。

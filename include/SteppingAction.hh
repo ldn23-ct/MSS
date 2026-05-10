@@ -5,20 +5,22 @@
 
 #include "G4UserSteppingAction.hh"
 
+#include <array>
+
 class EventAction;
 class G4Step;
 
 class SteppingAction : public G4UserSteppingAction {
   public:
     SteppingAction(EventAction* eventAction,
-                   const DetectorPlaneConfig& detectorPlaneConfig);
+                   const std::array<DetectorPlaneConfig, 2>& detectorPlaneConfigs);
     ~SteppingAction() override = default;
 
     void UserSteppingAction(const G4Step* step) override;
 
   private:
     EventAction* eventAction_ = nullptr;
-    DetectorPlaneConfig detectorPlaneConfig_;
+    std::array<DetectorPlaneConfig, 2> detectorPlaneConfigs_;
 };
 
 #endif

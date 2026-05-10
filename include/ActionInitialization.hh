@@ -5,6 +5,7 @@
 
 #include "G4VUserActionInitialization.hh"
 
+#include <array>
 #include <memory>
 
 struct SimulationConfig;
@@ -12,7 +13,7 @@ struct SimulationConfig;
 class ActionInitialization : public G4VUserActionInitialization {
   public:
     ActionInitialization(std::shared_ptr<SimulationConfig> config,
-                         const DetectorPlaneConfig& detectorPlaneConfig);
+                         const std::array<DetectorPlaneConfig, 2>& detectorPlaneConfigs);
     ~ActionInitialization() override = default;
 
     void BuildForMaster() const override;
@@ -20,7 +21,7 @@ class ActionInitialization : public G4VUserActionInitialization {
 
   private:
     std::shared_ptr<SimulationConfig> config_;
-    DetectorPlaneConfig detectorPlaneConfig_;
+    std::array<DetectorPlaneConfig, 2> detectorPlaneConfigs_;
 };
 
 #endif

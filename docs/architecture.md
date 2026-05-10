@@ -52,6 +52,8 @@ struct DetectorPlaneConfig {
     double y_min_mm = -50.0;
     double y_max_mm = 50.0;
 };
+
+std::array<DetectorPlaneConfig, 2> detectorPlanes;
 ```
 
 ```cpp
@@ -60,15 +62,14 @@ struct XZPoint {
     double z_mm;
 };
 
-struct PentagonJawProfile {
+struct PolygonJawProfile {
     std::string jaw_id;
-    std::array<XZPoint, 5> vertices;
+    std::vector<XZPoint> vertices;
 };
 
 struct CollimatorProfile {
     std::string profile_id;
-    PentagonJawProfile jaw0;
-    PentagonJawProfile jaw1;
+    std::array<PolygonJawProfile, 3> jaws;
 };
 ```
 
@@ -100,6 +101,7 @@ struct EventRecord {
     int track_id = 1;
     int parent_id = 0;
     double initial_energy_keV = 0.0;
+    G4ThreeVector initial_dir;
     ScatterSummary scatter;
     DetectorHitRecord hit;
 };
@@ -215,6 +217,7 @@ main()
 ```text
 /geometry/collimatorProfileFile data/collimator_profiles.csv
 /geometry/collimatorProfileId P001
+/geometry/enableCollimator true
 /geometry/enableAirDefect true
 
 /source/energyMode mono
@@ -241,6 +244,7 @@ main()
 struct GeometryConfig {
     std::string collimator_profile_file = "data/collimator_profiles.csv";
     std::string collimator_profile_id = "P001";
+    bool enable_collimator = true;
     bool enable_air_defect = true;
 };
 
@@ -270,9 +274,9 @@ struct RunConfig {
 
 初始化阶段应完成：
 
-1. `DetectorConstruction` 构建 World、PMMA、可选空气缺陷、准直器和探测面可视化辅助体。
-2. `CollimatorProfileReader` 读取并验证指定 profile。
-3. `CollimatorBuilder` 将 profile 转换为 Geant4 钨准直器几何。
+1. `DetectorConstruction` 构建 World、PMMA、可选空气缺陷、可选准直器和探测面可视化辅助体。
+2. 准直器启用时，`CollimatorProfileReader` 读取并验证指定 profile。
+3. 准直器启用时，`CollimatorBuilder` 将 profile 转换为 Geant4 钨准直器几何。
 4. `PhysicsList` 注册 `G4EmLivermorePhysics` 并设置 production cut。
 5. 源、输出与线程配置处于有效状态。
 
@@ -352,7 +356,7 @@ EndOfEventAction
 - 构建 World。
 - 构建 PMMA 模体。
 - 根据 `enable_air_defect` 构建或省略空气缺陷。
-- 调用 `CollimatorProfileReader` 与 `CollimatorBuilder` 构建准直器。
+- 根据 `enable_collimator` 决定是否调用 `CollimatorProfileReader` 与 `CollimatorBuilder` 构建准直器。
 - 构建探测面的可视化辅助几何。
 - 暴露探测器边界配置，供 `SteppingAction` 使用。
 
@@ -364,7 +368,12 @@ PMMALogical
 AirDefectLogical
 CollimatorJaw0Logical
 CollimatorJaw1Logical
+CollimatorJaw2Logical
+CollimatorJaw0MirrorLogical
+CollimatorJaw1MirrorLogical
+CollimatorJaw2MirrorLogical
 DetectorPlaneVisLogical
+DetectorPlaneVisMirrorLogical
 ```
 
 `SteppingAction` 不应依赖可视化属性或 placement 顺序判断物理含义。
@@ -386,13 +395,13 @@ profile_id,jaw_id,vertex_id,x_mm,z_mm
 - 文件无法打开。
 - 指定 `profile_id` 不存在。
 - 缺少必要列。
-- 指定 profile 中不是两块 jaw。
-- jaw ID 不是 `jaw_0` 与 `jaw_1`。
-- 某块 jaw 不是五个顶点。
-- `vertex_id` 缺失、重复或超出 `0..4`。
+- 指定 profile 中不是三块 jaw。
+- jaw ID 不是 `jaw_0`、`jaw_1`、`jaw_2`。
+- 某块 jaw 少于 3 个顶点。
+- `vertex_id` 不是从 `0` 到 `N-1` 的连续整数，或缺失、重复。
 - 坐标为空、非数值、NaN 或 Inf。
 - 多边形面积为 0。
-- 五边形非凸。
+- 多边形非凸或含连续共线点。
 
 该类只验证数据，不创建 Geant4 solid。
 
@@ -407,6 +416,8 @@ profile_id,jaw_id,vertex_id,x_mm,z_mm
 - 映射关系为：global x → local x，global z → local y。
 - local z 为拉伸方向，半长 `60 mm`。
 - 旋转使拉伸方向对应全局 y 方向。
+- 每个 profile 构建 3 块原始 jaw，并构建 3 块关于 `x = 0` 镜像的 jaw。
+- 镜像 jaw 使用 `x' = -x, z' = z`；构建前可统一顶点方向，但不得改变几何形状。
 - 不额外叠加 `collimator_center_z`。
 
 该类不解析 CSV，也不决定使用哪个 profile。
@@ -434,7 +445,7 @@ profile_id,jaw_id,vertex_id,x_mm,z_mm
 - 束斑半径：`1.5 mm`。
 - 能量模式：`mono` 或 `spectrum`。
 
-采样初始能量后，应将 `initial_energy_keV` 写入事件状态。
+采样初始能量和目标平面方向后，应通过 Geant4 primary vertex 保存到 event；`EventAction::BeginOfEventAction` 从 event 读取 `initial_energy_keV` 和初始单位方向。
 
 不得写 CSV，也不得判断探测面穿越。
 
@@ -533,11 +544,11 @@ det_y = pre_y + t * (post_y - pre_y)
 hit 接受范围：
 
 ```text
-53 mm <= det_x <= 161 mm
--50 mm <= det_y <= 50 mm
+original detector: 53 mm <= det_x <= 161 mm, -50 mm <= det_y <= 50 mm
+mirror detector: -161 mm <= det_x <= -53 mm, -50 mm <= det_y <= 50 mm
 ```
 
-同一 event 一旦记录有效 detector hit，后续穿越不应再产生额外 CSV 行。实现上可以记录后忽略重复 hit，也可以在记录后停止该 primary track；若停止 track，需确保不影响已记录数据。
+同一 event 一旦在任一探测区域记录有效 detector hit，后续穿越不应再产生额外 CSV 行。CSV 不新增 detector ID，镜像命中时 `det_x` 保留负的全局 x 坐标。
 
 ### 5.9 `CsvWriter`
 
@@ -562,7 +573,7 @@ initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh
 debug header：
 
 ```csv
-event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
+event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,initial_dir_x,initial_dir_y,initial_dir_z,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
 ```
 
 ### 5.10 `RunAction`
@@ -603,7 +614,7 @@ Macro commands
 
 ```text
 PrimaryGeneratorAction
-  └── initial energy
+  └── Geant4 primary vertex: initial energy + initial direction
         ↓
 EventAction::EventRecord
         ↑

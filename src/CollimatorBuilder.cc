@@ -13,7 +13,8 @@
 #include "G4TwoVector.hh"
 #include "G4VisAttributes.hh"
 
-#include <array>
+#include <algorithm>
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -21,8 +22,36 @@ namespace {
 
 constexpr double kJawHalfLengthY = 60.0;
 
-std::vector<G4TwoVector> BuildPolygon(
-    const std::array<XZPoint, 5>& vertices)
+double SignedArea(const std::vector<XZPoint>& vertices)
+{
+    double areaTwice = 0.0;
+    for (std::size_t i = 0; i < vertices.size(); ++i) {
+        const auto& current = vertices[i];
+        const auto& next = vertices[(i + 1) % vertices.size()];
+        areaTwice += current.x_mm * next.z_mm - next.x_mm * current.z_mm;
+    }
+
+    return 0.5 * areaTwice;
+}
+
+std::vector<XZPoint> BuildVertices(const PolygonJawProfile& jaw, bool mirrorX)
+{
+    std::vector<XZPoint> vertices;
+    vertices.reserve(jaw.vertices.size());
+
+    for (const auto& vertex : jaw.vertices) {
+        vertices.push_back({mirrorX ? -vertex.x_mm : vertex.x_mm,
+                            vertex.z_mm});
+    }
+
+    if (SignedArea(vertices) < 0.0) {
+        std::reverse(vertices.begin(), vertices.end());
+    }
+
+    return vertices;
+}
+
+std::vector<G4TwoVector> BuildPolygon(const std::vector<XZPoint>& vertices)
 {
     std::vector<G4TwoVector> polygon;
     polygon.reserve(vertices.size());
@@ -34,13 +63,18 @@ std::vector<G4TwoVector> BuildPolygon(
     return polygon;
 }
 
-void BuildJaw(const PentagonJawProfile& jaw,
-              const std::string& index,
+void BuildJaw(const PolygonJawProfile& jaw,
+              std::size_t index,
+              bool mirrorX,
               G4LogicalVolume* parentLogical,
               G4Material* tungstenMaterial)
 {
-    const auto polygon = BuildPolygon(jaw.vertices);
-    auto* solid = new G4ExtrudedSolid("CollimatorJaw" + index + "Solid",
+    const std::string suffix =
+        std::to_string(index) + (mirrorX ? "Mirror" : "");
+    const auto vertices = BuildVertices(jaw, mirrorX);
+    const auto polygon = BuildPolygon(vertices);
+
+    auto* solid = new G4ExtrudedSolid("CollimatorJaw" + suffix + "Solid",
                                       polygon,
                                       kJawHalfLengthY * mm,
                                       G4TwoVector(),
@@ -50,7 +84,7 @@ void BuildJaw(const PentagonJawProfile& jaw,
 
     auto* logical = new G4LogicalVolume(solid,
                                         tungstenMaterial,
-                                        "CollimatorJaw" + index + "Logical");
+                                        "CollimatorJaw" + suffix + "Logical");
 
     auto* rotation = new G4RotationMatrix();
     rotation->rotateX(-90.0 * deg);
@@ -58,7 +92,7 @@ void BuildJaw(const PentagonJawProfile& jaw,
     new G4PVPlacement(rotation,
                       G4ThreeVector(),
                       logical,
-                      "CollimatorJaw" + index + "Physical",
+                      "CollimatorJaw" + suffix + "Physical",
                       parentLogical,
                       false,
                       0,
@@ -75,6 +109,8 @@ void CollimatorBuilder::Build(const CollimatorProfile& profile,
                               G4LogicalVolume* parentLogical,
                               G4Material* tungstenMaterial) const
 {
-    BuildJaw(profile.jaw0, "0", parentLogical, tungstenMaterial);
-    BuildJaw(profile.jaw1, "1", parentLogical, tungstenMaterial);
+    for (std::size_t i = 0; i < profile.jaws.size(); ++i) {
+        BuildJaw(profile.jaws[i], i, false, parentLogical, tungstenMaterial);
+        BuildJaw(profile.jaws[i], i, true, parentLogical, tungstenMaterial);
+    }
 }

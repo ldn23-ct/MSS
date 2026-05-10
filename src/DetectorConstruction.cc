@@ -14,6 +14,7 @@
 #include "G4Tubs.hh"
 #include "G4VisAttributes.hh"
 
+#include <string>
 #include <utility>
 
 namespace {
@@ -31,6 +32,44 @@ constexpr double kAirDefectCenterZ = 55.0;
 
 constexpr double kDetectorPlaneThickness = 0.1;
 
+void BuildDetectorPlaneVis(const DetectorPlaneConfig& config,
+                           const std::string& suffix,
+                           G4LogicalVolume* worldLogical,
+                           G4Material* worldMaterial)
+{
+    const double detectorCenterX =
+        0.5 * (config.x_min_mm + config.x_max_mm);
+    const double detectorCenterY =
+        0.5 * (config.y_min_mm + config.y_max_mm);
+    const double detectorSizeX = config.x_max_mm - config.x_min_mm;
+    const double detectorSizeY = config.y_max_mm - config.y_min_mm;
+
+    auto* detectorPlaneSolid =
+        new G4Box("DetectorPlaneVis" + suffix + "Solid",
+                  0.5 * detectorSizeX * mm,
+                  0.5 * detectorSizeY * mm,
+                  0.5 * kDetectorPlaneThickness * mm);
+    auto* detectorPlaneLogical =
+        new G4LogicalVolume(detectorPlaneSolid,
+                            worldMaterial,
+                            "DetectorPlaneVis" + suffix + "Logical");
+
+    new G4PVPlacement(nullptr,
+                      G4ThreeVector(detectorCenterX * mm,
+                                    detectorCenterY * mm,
+                                    config.z_mm * mm),
+                      detectorPlaneLogical,
+                      "DetectorPlaneVis" + suffix + "Physical",
+                      worldLogical,
+                      false,
+                      0,
+                      true);
+
+    auto* detectorVis = new G4VisAttributes(G4Colour(1.0, 0.1, 0.1, 0.45));
+    detectorVis->SetForceSolid(true);
+    detectorPlaneLogical->SetVisAttributes(detectorVis);
+}
+
 } // namespace
 
 DetectorConstruction::DetectorConstruction(
@@ -45,7 +84,6 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
     auto* worldMaterial = nist->FindOrBuildMaterial("G4_Galactic");
     auto* pmmaMaterial = nist->FindOrBuildMaterial("G4_PLEXIGLASS");
     auto* airMaterial = nist->FindOrBuildMaterial("G4_AIR");
-    auto* tungstenMaterial = nist->FindOrBuildMaterial("G4_W");
 
     auto* worldSolid = new G4Box("WorldSolid",
                                  kWorldHalfLength * mm,
@@ -108,47 +146,21 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
         airDefectLogical->SetVisAttributes(airVis);
     }
 
-    const double detectorCenterX =
-        0.5 * (detectorPlaneConfig_.x_min_mm
-               + detectorPlaneConfig_.x_max_mm);
-    const double detectorCenterY =
-        0.5 * (detectorPlaneConfig_.y_min_mm
-               + detectorPlaneConfig_.y_max_mm);
-    const double detectorSizeX =
-        detectorPlaneConfig_.x_max_mm - detectorPlaneConfig_.x_min_mm;
-    const double detectorSizeY =
-        detectorPlaneConfig_.y_max_mm - detectorPlaneConfig_.y_min_mm;
-
-    auto* detectorPlaneSolid =
-        new G4Box("DetectorPlaneVisSolid",
-                  0.5 * detectorSizeX * mm,
-                  0.5 * detectorSizeY * mm,
-                  0.5 * kDetectorPlaneThickness * mm);
-    auto* detectorPlaneLogical =
-        new G4LogicalVolume(detectorPlaneSolid,
-                            worldMaterial,
-                            "DetectorPlaneVisLogical");
-
-    new G4PVPlacement(nullptr,
-                      G4ThreeVector(detectorCenterX * mm,
-                                    detectorCenterY * mm,
-                                    detectorPlaneConfig_.z_mm * mm),
-                      detectorPlaneLogical,
-                      "DetectorPlaneVisPhysical",
-                      worldLogical,
-                      false,
-                      0,
-                      true);
-
     auto* pmmaVis = new G4VisAttributes(G4Colour(0.9, 0.9, 0.95, 0.35));
     pmmaVis->SetForceSolid(true);
     pmmaLogical->SetVisAttributes(pmmaVis);
 
-    auto* detectorVis = new G4VisAttributes(G4Colour(1.0, 0.1, 0.1, 0.45));
-    detectorVis->SetForceSolid(true);
-    detectorPlaneLogical->SetVisAttributes(detectorVis);
+    BuildDetectorPlaneVis(detectorPlaneConfigs_[0],
+                          "",
+                          worldLogical,
+                          worldMaterial);
+    BuildDetectorPlaneVis(detectorPlaneConfigs_[1],
+                          "Mirror",
+                          worldLogical,
+                          worldMaterial);
 
-    if (config_ != nullptr) {
+    if (config_ != nullptr && config_->enableCollimator) {
+        auto* tungstenMaterial = nist->FindOrBuildMaterial("G4_W");
         const CollimatorProfile profile =
             CollimatorProfileReader().ReadProfile(config_->collimatorProfileFile,
                                                   config_->collimatorProfileId);
@@ -160,7 +172,8 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
     return worldPhysical;
 }
 
-const DetectorPlaneConfig& DetectorConstruction::GetDetectorPlaneConfig() const
+const std::array<DetectorPlaneConfig, 2>&
+DetectorConstruction::GetDetectorPlaneConfigs() const
 {
-    return detectorPlaneConfig_;
+    return detectorPlaneConfigs_;
 }

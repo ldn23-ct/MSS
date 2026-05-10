@@ -19,11 +19,11 @@ void ReportConfigError(const std::string& message)
 
 void SimulationConfig::Validate() const
 {
-    if (collimatorProfileFile.empty()) {
+    if (enableCollimator && collimatorProfileFile.empty()) {
         ReportConfigError("collimatorProfileFile must not be empty.");
     }
 
-    if (collimatorProfileId.empty()) {
+    if (enableCollimator && collimatorProfileId.empty()) {
         ReportConfigError("collimatorProfileId must not be empty.");
     }
 

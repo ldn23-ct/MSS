@@ -34,6 +34,7 @@ struct EventRecord {
     int track_id = 1;
     int parent_id = 0;
     double initial_energy_keV = 0.0;
+    G4ThreeVector initial_dir;
     ScatterSummary scatter;
     DetectorHitRecord hit;
 };
@@ -46,7 +47,6 @@ class EventAction : public G4UserEventAction {
     void BeginOfEventAction(const G4Event* event) override;
     void EndOfEventAction(const G4Event* event) override;
 
-    void SetInitialEnergy(double energy_keV);
     void RecordComptonScatter(const G4ThreeVector& position);
     void RecordRayleighScatter(const G4ThreeVector& position);
     void RecordDetectorHit(const DetectorHitRecord& hit);

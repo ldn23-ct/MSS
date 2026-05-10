@@ -29,6 +29,7 @@ class SimulationMessenger : public G4UImessenger {
 
     std::unique_ptr<G4UIcmdWithAString> collimatorProfileFileCommand_;
     std::unique_ptr<G4UIcmdWithAString> collimatorProfileIdCommand_;
+    std::unique_ptr<G4UIcmdWithABool> enableCollimatorCommand_;
     std::unique_ptr<G4UIcmdWithABool> enableAirDefectCommand_;
 
     std::unique_ptr<G4UIcmdWithAString> energyModeCommand_;

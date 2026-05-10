@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <sstream>
 #include <string>
@@ -15,6 +16,8 @@
 namespace {
 
 constexpr double kGeometryTolerance = 1.0e-12;
+constexpr std::array<const char*, 3> kExpectedJawIds = {
+    "jaw_0", "jaw_1", "jaw_2"};
 
 void ReportProfileError(const std::string& message)
 {
@@ -111,8 +114,10 @@ int ParseVertexId(const std::string& text, int lineNumber)
                            + std::to_string(lineNumber) + ".");
     }
 
-    if (parsed < 0 || parsed > 4) {
-        ReportProfileError("vertex_id must be in 0..4 on line "
+    if (parsed < 0
+        || parsed > static_cast<long>(std::numeric_limits<int>::max())) {
+        ReportProfileError("vertex_id must be a non-negative integer within "
+                           "the supported range on line "
                            + std::to_string(lineNumber) + ".");
     }
 
@@ -139,6 +144,17 @@ double ParseFiniteDouble(const std::string& text,
     return parsed;
 }
 
+int JawIndex(const std::string& jawId)
+{
+    for (std::size_t i = 0; i < kExpectedJawIds.size(); ++i) {
+        if (jawId == kExpectedJawIds[i]) {
+            return static_cast<int>(i);
+        }
+    }
+
+    return -1;
+}
+
 double Cross(const XZPoint& a, const XZPoint& b, const XZPoint& c)
 {
     const double ab_x = b.x_mm - a.x_mm;
@@ -148,7 +164,7 @@ double Cross(const XZPoint& a, const XZPoint& b, const XZPoint& c)
     return ab_x * bc_z - ab_z * bc_x;
 }
 
-double SignedArea(const std::array<XZPoint, 5>& vertices)
+double SignedArea(const std::vector<XZPoint>& vertices)
 {
     double areaTwice = 0.0;
     for (std::size_t i = 0; i < vertices.size(); ++i) {
@@ -160,8 +176,13 @@ double SignedArea(const std::array<XZPoint, 5>& vertices)
     return 0.5 * areaTwice;
 }
 
-void ValidateConvexPentagon(const PentagonJawProfile& jaw)
+void ValidateConvexPolygon(const PolygonJawProfile& jaw)
 {
+    if (jaw.vertices.size() < 3) {
+        ReportProfileError("Jaw '" + jaw.jaw_id
+                           + "' must contain at least 3 vertices.");
+    }
+
     const double area = SignedArea(jaw.vertices);
     if (std::abs(area) <= kGeometryTolerance) {
         ReportProfileError("Jaw '" + jaw.jaw_id + "' has zero polygon area.");
@@ -175,7 +196,7 @@ void ValidateConvexPentagon(const PentagonJawProfile& jaw)
 
         if (std::abs(cross) <= kGeometryTolerance) {
             ReportProfileError("Jaw '" + jaw.jaw_id
-                               + "' is not a strictly convex pentagon.");
+                               + "' contains collinear consecutive vertices.");
         }
 
         const int sign = cross > 0.0 ? 1 : -1;
@@ -183,15 +204,14 @@ void ValidateConvexPentagon(const PentagonJawProfile& jaw)
             expectedSign = sign;
         } else if (sign != expectedSign) {
             ReportProfileError("Jaw '" + jaw.jaw_id
-                               + "' is not a convex pentagon.");
+                               + "' is not a convex polygon.");
         }
     }
 }
 
 struct JawAccumulator {
-    PentagonJawProfile profile;
-    std::array<bool, 5> seen = {false, false, false, false, false};
-    int count = 0;
+    std::string jaw_id;
+    std::map<int, XZPoint> vertices_by_id;
 };
 
 void StoreVertex(JawAccumulator& jaw,
@@ -199,33 +219,39 @@ void StoreVertex(JawAccumulator& jaw,
                  const XZPoint& point,
                  int lineNumber)
 {
-    if (jaw.seen[vertexId]) {
+    const auto inserted = jaw.vertices_by_id.emplace(vertexId, point);
+    if (!inserted.second) {
         ReportProfileError("Duplicate vertex_id " + std::to_string(vertexId)
-                           + " for jaw '" + jaw.profile.jaw_id + "' on line "
+                           + " for jaw '" + jaw.jaw_id + "' on line "
                            + std::to_string(lineNumber) + ".");
     }
-
-    jaw.profile.vertices[vertexId] = point;
-    jaw.seen[vertexId] = true;
-    ++jaw.count;
 }
 
-void ValidateCompleteJaw(const JawAccumulator& jaw)
+PolygonJawProfile BuildCompleteJaw(const JawAccumulator& jaw)
 {
-    if (jaw.count != 5) {
-        ReportProfileError("Jaw '" + jaw.profile.jaw_id
-                           + "' must contain exactly 5 vertices.");
+    const std::size_t vertexCount = jaw.vertices_by_id.size();
+    if (vertexCount < 3) {
+        ReportProfileError("Jaw '" + jaw.jaw_id
+                           + "' must contain at least 3 vertices.");
     }
 
-    for (std::size_t vertexId = 0; vertexId < jaw.seen.size(); ++vertexId) {
-        if (!jaw.seen[vertexId]) {
-            ReportProfileError("Jaw '" + jaw.profile.jaw_id
+    PolygonJawProfile profile;
+    profile.jaw_id = jaw.jaw_id;
+    profile.vertices.reserve(vertexCount);
+
+    for (std::size_t vertexId = 0; vertexId < vertexCount; ++vertexId) {
+        const auto found = jaw.vertices_by_id.find(static_cast<int>(vertexId));
+        if (found == jaw.vertices_by_id.end()) {
+            ReportProfileError("Jaw '" + jaw.jaw_id
                                + "' is missing vertex_id "
                                + std::to_string(vertexId) + ".");
         }
+
+        profile.vertices.push_back(found->second);
     }
 
-    ValidateConvexPentagon(jaw.profile);
+    ValidateConvexPolygon(profile);
+    return profile;
 }
 
 } // namespace
@@ -256,10 +282,10 @@ CollimatorProfile CollimatorProfileReader::ReadProfile(
 
     const auto headerIndex = BuildHeaderIndex(SplitCsvLine(line));
 
-    JawAccumulator jaw0;
-    jaw0.profile.jaw_id = "jaw_0";
-    JawAccumulator jaw1;
-    jaw1.profile.jaw_id = "jaw_1";
+    std::array<JawAccumulator, 3> jaws;
+    for (std::size_t i = 0; i < jaws.size(); ++i) {
+        jaws[i].jaw_id = kExpectedJawIds[i];
+    }
 
     bool foundProfile = false;
     int lineNumber = 1;
@@ -286,20 +312,22 @@ CollimatorProfile CollimatorProfileReader::ReadProfile(
         const std::string zText =
             RequiredField(fields, headerIndex, "z_mm", lineNumber);
 
+        const int jawIndex = JawIndex(jawId);
+        if (jawIndex < 0) {
+            ReportProfileError("Invalid jaw_id '" + jawId + "' on line "
+                               + std::to_string(lineNumber)
+                               + "; expected jaw_0, jaw_1, or jaw_2.");
+        }
+
         const int vertexId = ParseVertexId(vertexText, lineNumber);
         const XZPoint point = {
             ParseFiniteDouble(xText, "x_mm", lineNumber),
             ParseFiniteDouble(zText, "z_mm", lineNumber)};
 
-        if (jawId == "jaw_0") {
-            StoreVertex(jaw0, vertexId, point, lineNumber);
-        } else if (jawId == "jaw_1") {
-            StoreVertex(jaw1, vertexId, point, lineNumber);
-        } else {
-            ReportProfileError("Invalid jaw_id '" + jawId + "' on line "
-                               + std::to_string(lineNumber)
-                               + "; expected jaw_0 or jaw_1.");
-        }
+        StoreVertex(jaws[static_cast<std::size_t>(jawIndex)],
+                    vertexId,
+                    point,
+                    lineNumber);
     }
 
     if (!foundProfile) {
@@ -307,12 +335,11 @@ CollimatorProfile CollimatorProfileReader::ReadProfile(
                            + "' was not found in '" + filePath + "'.");
     }
 
-    ValidateCompleteJaw(jaw0);
-    ValidateCompleteJaw(jaw1);
-
     CollimatorProfile profile;
     profile.profile_id = profileId;
-    profile.jaw0 = jaw0.profile;
-    profile.jaw1 = jaw1.profile;
+    for (std::size_t i = 0; i < profile.jaws.size(); ++i) {
+        profile.jaws[i] = BuildCompleteJaw(jaws[i]);
+    }
+
     return profile;
 }

@@ -7,6 +7,7 @@
 struct SimulationConfig {
     std::string collimatorProfileFile = "data/collimator_profiles.csv";
     std::string collimatorProfileId = "P001";
+    bool enableCollimator = true;
     bool enableAirDefect = true;
 
     std::string energyMode = "mono";

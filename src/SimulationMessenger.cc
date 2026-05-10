@@ -3,6 +3,7 @@
 #include "SimulationConfig.hh"
 
 #include "G4Exception.hh"
+#include "G4ApplicationState.hh"
 #ifdef G4MULTITHREADED
 #include "G4MTRunManager.hh"
 #endif
@@ -106,14 +107,22 @@ SimulationMessenger::SimulationMessenger(std::shared_ptr<SimulationConfig> confi
     collimatorProfileFileCommand_ =
         std::make_unique<G4UIcmdWithAString>("/geometry/collimatorProfileFile", this);
     collimatorProfileFileCommand_->SetGuidance("Set collimator profile CSV file.");
+    collimatorProfileFileCommand_->AvailableForStates(G4State_PreInit);
 
     collimatorProfileIdCommand_ =
         std::make_unique<G4UIcmdWithAString>("/geometry/collimatorProfileId", this);
     collimatorProfileIdCommand_->SetGuidance("Set selected collimator profile ID.");
+    collimatorProfileIdCommand_->AvailableForStates(G4State_PreInit);
+
+    enableCollimatorCommand_ =
+        std::make_unique<G4UIcmdWithABool>("/geometry/enableCollimator", this);
+    enableCollimatorCommand_->SetGuidance("Enable or disable tungsten collimator construction.");
+    enableCollimatorCommand_->AvailableForStates(G4State_PreInit);
 
     enableAirDefectCommand_ =
         std::make_unique<G4UIcmdWithABool>("/geometry/enableAirDefect", this);
     enableAirDefectCommand_->SetGuidance("Enable or disable the air defect.");
+    enableAirDefectCommand_->AvailableForStates(G4State_PreInit);
 
     energyModeCommand_ =
         std::make_unique<G4UIcmdWithAString>("/source/energyMode", this);
@@ -156,6 +165,9 @@ void SimulationMessenger::SetNewValue(G4UIcommand* command, G4String newValue)
         config_->collimatorProfileFile = Trim(newValue);
     } else if (command == collimatorProfileIdCommand_.get()) {
         config_->collimatorProfileId = Trim(newValue);
+    } else if (command == enableCollimatorCommand_.get()) {
+        config_->enableCollimator =
+            enableCollimatorCommand_->GetNewBoolValue(newValue);
     } else if (command == enableAirDefectCommand_.get()) {
         config_->enableAirDefect =
             enableAirDefectCommand_->GetNewBoolValue(newValue);

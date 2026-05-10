@@ -3,6 +3,7 @@
 
 /geometry/collimatorProfileFile data/collimator_profiles.csv
 /geometry/collimatorProfileId P001
+/geometry/enableCollimator true
 /geometry/enableAirDefect true
 
 /source/energyMode mono

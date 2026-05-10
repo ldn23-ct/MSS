@@ -3,6 +3,7 @@
 
 #include "G4VUserDetectorConstruction.hh"
 
+#include <array>
 #include <memory>
 
 class G4VPhysicalVolume;
@@ -22,11 +23,13 @@ class DetectorConstruction : public G4VUserDetectorConstruction {
     ~DetectorConstruction() override = default;
 
     G4VPhysicalVolume* Construct() override;
-    const DetectorPlaneConfig& GetDetectorPlaneConfig() const;
+    const std::array<DetectorPlaneConfig, 2>& GetDetectorPlaneConfigs() const;
 
   private:
     std::shared_ptr<const SimulationConfig> config_;
-    DetectorPlaneConfig detectorPlaneConfig_;
+    std::array<DetectorPlaneConfig, 2> detectorPlaneConfigs_ = {
+        DetectorPlaneConfig{},
+        DetectorPlaneConfig{-73.0, -161.0, -53.0, -50.0, 50.0}};
 };
 
 #endif

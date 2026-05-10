@@ -3,8 +3,13 @@
 #include "CsvWriter.hh"
 
 #include "G4Event.hh"
+#include "G4Exception.hh"
+#include "G4PrimaryParticle.hh"
+#include "G4PrimaryVertex.hh"
+#include "G4SystemOfUnits.hh"
 
 #include <limits>
+#include <string>
 #include <utility>
 
 namespace {
@@ -13,6 +18,11 @@ G4ThreeVector NanPosition()
 {
     const double nan = std::numeric_limits<double>::quiet_NaN();
     return G4ThreeVector(nan, nan, nan);
+}
+
+void ReportEventError(const std::string& message)
+{
+    G4Exception("EventAction", "MSSEvent001", FatalException, message.c_str());
 }
 
 } // namespace
@@ -35,6 +45,28 @@ EventAction::EventAction(std::shared_ptr<CsvWriter> csvWriter)
 void EventAction::BeginOfEventAction(const G4Event* event)
 {
     ResetRecord(event != nullptr ? event->GetEventID() : -1);
+
+    if (event == nullptr) {
+        ReportEventError("Cannot read initial primary state from a null event.");
+    }
+
+    const auto* vertex = event->GetPrimaryVertex(0);
+    if (vertex == nullptr) {
+        ReportEventError("Event has no primary vertex; initial primary state is unavailable.");
+    }
+
+    const auto* primary = vertex->GetPrimary(0);
+    if (primary == nullptr) {
+        ReportEventError("Primary vertex has no primary particle; initial primary state is unavailable.");
+    }
+
+    const G4ThreeVector momentum(primary->GetPx(), primary->GetPy(), primary->GetPz());
+    if (momentum.mag2() == 0.0) {
+        ReportEventError("Primary particle has zero momentum; initial direction is unavailable.");
+    }
+
+    record_.initial_energy_keV = primary->GetKineticEnergy() / keV;
+    record_.initial_dir = momentum.unit();
 }
 
 void EventAction::EndOfEventAction(const G4Event*)
@@ -42,11 +74,6 @@ void EventAction::EndOfEventAction(const G4Event*)
     if (record_.hit.detected && csvWriter_ != nullptr) {
         csvWriter_->WriteRow(record_);
     }
-}
-
-void EventAction::SetInitialEnergy(double energy_keV)
-{
-    record_.initial_energy_keV = energy_keV;
 }
 
 void EventAction::RecordComptonScatter(const G4ThreeVector& position)

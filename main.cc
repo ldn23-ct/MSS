@@ -25,7 +25,7 @@ int main(int argc, char** argv)
     runManager->SetUserInitialization(new PhysicsList);
     runManager->SetUserInitialization(
         new ActionInitialization(config,
-                                 detectorConstruction->GetDetectorPlaneConfig()));
+                                 detectorConstruction->GetDetectorPlaneConfigs()));
 
     SimulationMessenger messenger(config);
 

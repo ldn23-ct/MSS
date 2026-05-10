@@ -11,9 +11,9 @@
 
 ActionInitialization::ActionInitialization(
     std::shared_ptr<SimulationConfig> config,
-    const DetectorPlaneConfig& detectorPlaneConfig)
+    const std::array<DetectorPlaneConfig, 2>& detectorPlaneConfigs)
     : config_(std::move(config)),
-      detectorPlaneConfig_(detectorPlaneConfig)
+      detectorPlaneConfigs_(detectorPlaneConfigs)
 {
 }
 
@@ -27,7 +27,7 @@ void ActionInitialization::Build() const
     auto csvWriter = std::make_shared<CsvWriter>();
     SetUserAction(new RunAction(config_, csvWriter));
     auto* eventAction = new EventAction(csvWriter);
-    SetUserAction(new PrimaryGeneratorAction(config_, eventAction));
+    SetUserAction(new PrimaryGeneratorAction(config_));
     SetUserAction(eventAction);
-    SetUserAction(new SteppingAction(eventAction, detectorPlaneConfig_));
+    SetUserAction(new SteppingAction(eventAction, detectorPlaneConfigs_));
 }

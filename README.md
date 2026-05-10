@@ -58,7 +58,7 @@ results/hits_profile_P001_mono_160keV_seed12345.csv
 ./build/MSS macros/vis.mac
 ```
 
-`vis.mac` 用于检查 PMMA、空气缺陷、两块钨准直器 jaw、探测面辅助体和少量 gamma 轨迹。需要可用的 Geant4 可视化驱动和图形环境。
+`vis.mac` 用于检查 PMMA、空气缺陷、3 块原始钨准直器 jaw、3 块镜像钨准直器 jaw、两个探测面辅助体和少量 gamma 轨迹。需要可用的 Geant4 可视化驱动和图形环境。
 
 ## 宏命令
 
@@ -68,6 +68,7 @@ results/hits_profile_P001_mono_160keV_seed12345.csv
 |---|---|
 | `/geometry/collimatorProfileFile data/collimator_profiles.csv` | 准直器 profile CSV |
 | `/geometry/collimatorProfileId P001` | 本次运行使用的 profile ID |
+| `/geometry/enableCollimator true` | 是否读取 profile 并构建钨准直器，默认 `true` |
 | `/geometry/enableAirDefect true` | 是否构建 PMMA 内空气缺陷 |
 | `/source/energyMode mono` | 能量模式，`mono` 或 `spectrum` |
 | `/source/monoEnergy 160 keV` | 单能模式 primary gamma 能量 |
@@ -90,12 +91,15 @@ P001,jaw_0,0,21,-20
 
 约束：
 
-- 每个 profile 必须包含 `jaw_0` 和 `jaw_1`。
-- 每个 jaw 必须有 `vertex_id` 为 `0..4` 的 5 个顶点，不能缺失或重复。
+- 每个 profile 必须包含 `jaw_0`、`jaw_1` 和 `jaw_2`。
+- 每个 jaw 是全局 x-z 平面内的凸多边形，至少 3 个顶点。
+- 每个 jaw 的 `vertex_id` 必须是 `0..N-1` 的连续整数，不能缺失或重复。
 - `x_mm` 和 `z_mm` 是全局坐标，单位 mm。
+- `/geometry/enableCollimator false` 时不会读取 profile，也不会构建原始或镜像钨准直器。
+- 启用准直器时，程序会同时构建原始准直器和关于 `x=0` 的镜像准直器。
 - 非法 profile 会 fail fast。
 
-当前 `data/collimator_profiles.csv` 中的 `P001` 用于运行、可视化和输出链路检查。除非另有确认，不应把它当作真实准直器几何。
+当前 `data/collimator_profiles.csv` 中的 `P001` 是 placeholder，仅用于编译、可视化和输出链路检查，不代表真实准直器几何。
 
 spectrum CSV 格式：
 
@@ -110,6 +114,13 @@ energy_keV,weight
 
 只输出到达探测平面边界内的 primary gamma。未到达探测面的 event 不输出。
 
+探测区域固定为：
+
+- 原始探测器：`z=-73 mm`，`x=[53,161] mm`，`y=[-50,50] mm`。
+- 镜像探测器：`z=-73 mm`，`x=[-161,-53] mm`，`y=[-50,50] mm`。
+
+CSV schema 不区分 detector ID；镜像探测器命中时 `det_x` 保留负的全局 x 坐标。
+
 compact header：
 
 ```csv
@@ -119,7 +130,7 @@ initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh
 debug header：
 
 ```csv
-event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
+event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,initial_dir_x,initial_dir_y,initial_dir_z,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
 ```
 
 单位约定：
@@ -133,7 +144,7 @@ event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,d
 
 ## Debug 与 Compact
 
-debug 模式包含 event、track、parent、探测面 z 和探测方向字段，适合单线程调试。
+debug 模式包含 event、track、parent、探测面 z、探测方向和 primary 初始方向字段，适合单线程调试。
 
 compact 模式只包含后处理统计所需字段，适合多线程正式运行。
 
