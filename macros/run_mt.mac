@@ -2,12 +2,12 @@
 /run/randomSeed 111
 
 /geometry/collimatorProfileFile data/collimator_profiles.csv
-/geometry/collimatorProfileId P001
+/geometry/collimatorProfileId P002
 /geometry/enableCollimator true
-/geometry/enableAirDefect true
+/geometry/enableAirDefect false
 
 /source/energyMode mono
-/source/monoEnergy 160 keV
+/source/monoEnergy 225 keV
 
 /output/directory results
 /output/debug false

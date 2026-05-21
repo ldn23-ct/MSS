@@ -26,12 +26,13 @@ constexpr double kWorldHalfLength = 500.0;
 
 constexpr double kPmmaSizeX = 200.0;
 constexpr double kPmmaSizeY = 200.0;
-// constexpr double kPmmaThicknessMm = 65.0;
-constexpr double kPmmaThicknessMm = 20.0;
+constexpr double kPmmaThicknessMm = 65.0;
+// constexpr double kPmmaThicknessMm = 20.0;
 
 constexpr double kAirDefectRadius = 5.0;
 constexpr double kAirDefectHalfLength = 5.0;
-constexpr double kAirDefectCenterZ = 55.0;
+// constexpr double kAirDefectCenterZ = 55.0;
+constexpr double kAirDefectCenterZ = 45.0;
 
 constexpr double kDetectorPlaneThickness = 0.1;
 

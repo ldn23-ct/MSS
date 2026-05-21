@@ -1,216 +1,811 @@
-# Geant4 背散射仿真项目规格书
+# 第二版车辆侧向背散射 ROI 仿真项目规格书
 
-## 0. 项目基本信息
+## 0. 文档定位
+
+本文档定义第二版车辆侧向背散射 ROI Geant4 仿真项目的正式需求规格。
+
+第二版项目不是第一版项目的小修补。第一版文件、代码和文档仅作为历史参考，用于复用项目组织经验、CSV 输出链路经验和多线程输出经验；第二版的几何对象、扫描方式、事件字段和配置入口以本文档为准。
+
+第二版项目同时服务两条需求线：
+
+| 需求线 | 目标 |
+|---|---|
+| A 线：项目摸底 | 判断固定车辆 ROI + 移动成像头条件下，原始探测器二维响应是否包含可解释结构信息。 |
+| B 线：论文数据 | 记录被探测 primary gamma 的散射阶次、过程计数、first / last scatter 空间位置和区域归因，用于多重散射性质分析。 |
+
+本文档不定义后处理绘图、不定义图像重建算法、不定义真实探测器响应模型。
+
+---
+
+## 1. 项目基本信息
 
 | 项目 | 内容 |
 |---|---|
-| 项目名称 | MSS |
-| 仿真类型 | gamma 背散射 Geant4 仿真 |
-| Geant4 版本 | 11.2.0 |
-| 操作系统 | Ubuntu 24.04 |
-| 编译器 | Ubuntu 24.04 系统默认 GCC |
-| 构建系统 | CMake |
+| 项目名称 | MSS 第二版 |
+| 仿真类型 | 车辆侧向背散射 gamma Geant4 仿真 |
+| 主要对象 | 车辆侧向 ROI 模型 |
+| 扫描方式 | 固定车辆 ROI，移动成像头组件 |
+| 成像头组成 | 射线源 + 狭缝准直器 + 虚拟探测器平面 |
+| 粒子 | gamma |
+| 事件定义 | 1 event = 1 primary gamma |
+| 输出格式 | `events.csv` + `metadata.yaml` |
+| 主配置入口 | YAML |
+| 车辆几何配置 | `vehicle_roi_v03.yaml` |
+| 运行配置 | `simulation_config_v2.yaml` |
 | C++ 标准 | C++17 |
-| 输出格式 | CSV |
-| 主要用途 | 支持准直器开口 / 轮廓变化下的多重散射统计分析 |
-| 主要使用者 | 用户本人 + Codex 代码生成系统 |
+| 构建系统 | CMake |
 
 ---
 
-## 1. 项目目标
+## 2. 第二版总体目标
 
-本项目用于搭建一个可运行、可调参、可扩展的 Geant4 背散射仿真程序。
+第二版目标是建立一个可运行、可配置、可检查的车辆侧向背散射仿真程序。
 
-核心目标是：
+核心仿真对象为：
 
-> 在背散射几何下，研究不同准直器轮廓 / 开口条件下，到达探测器的 primary gamma 中，PMMA 内 Compton / Rayleigh 多重散射计数占比及其空间分布。
+```text
+固定车辆 ROI 模型
++ 移动成像头组件
++ 斜入射有限焦点笔形束
++ 狭缝准直器
++ 单个虚拟探测平面
+```
 
-第一阶段不进行图像重建，不进行真实探测器响应建模，仅生成可用于后处理分析的事件级 CSV 数据。
+程序需要输出被探测 primary gamma 的事件级统计量，用于后处理生成：
+
+- 探测器二维响应图；
+- normal / abnormal 差异图；
+- 探测能量分布；
+- 单散射 / 多重散射比例；
+- Compton / Rayleigh 过程贡献；
+- first / last scatter 空间分布；
+- first / last scatter region 归因；
+- 位姿级和扫描级响应图。
+
+第二版不要求在 Geant4 程序内完成图像重建或统计图生成。
 
 ---
 
-## 2. 坐标系定义
+## 3. 坐标系
 
-采用右手坐标系。
+第二版采用统一 global 坐标系。
 
-| 坐标轴 | 定义 |
+| 坐标轴 | 含义 |
 |---|---|
-| z 轴 | PMMA 模体深度方向；PMMA 前表面指向内部为 +z |
-| x 轴 | 横向方向；对应准直器主要限束方向；也对应探测面上的后处理像素划分方向 |
-| y 轴 | 准直器狭缝 / 钨板拉伸方向；本项目中不是主要分析维度 |
+| `x` | 车辆长度方向 / 成像头横向扫描相关方向，`+x` 指向车尾，`-x` 指向车头。 |
+| `y` | 车辆高度方向，同时也是狭缝准直器 jaw 拉伸方向。 |
+| `z` | 侧向入射深度方向，`z = 0` 为近侧车辆外表面，`+z` 指向车内和远侧车体。 |
 
-背散射几何关系：
+车辆 ROI 本地原点定义为：
 
 ```text
-source and detector side: z < 0
-PMMA front surface:      z = 0
-PMMA interior:           z > 0
+O = B 柱中心线在近侧车体外表面的投影点
+O = (x = 0, y = 0, z = 0)
 ```
 
-入射 gamma 从 `z < 0` 区域射向 PMMA，初始方向大体沿 `+z`。被探测 gamma 是在 PMMA 内发生散射后返回 `z < 0` 区域，并穿过探测面边界的 primary gamma。
+背散射关系为：
+
+```text
+source / detector side: z < 0
+near-side vehicle surface: z = 0
+vehicle interior / far side: z > 0
+```
+
+被探测 primary gamma 是从车辆 ROI 方向返回成像头侧，并沿 `-z` 方向穿越虚拟探测器平面的 gamma。
 
 ---
 
-## 3. 几何系统
+## 4. 配置文件体系
 
-### 3.1 World
+第二版使用两个 YAML 文件作为主配置入口。
 
-| 参数 | 数值 |
-|---|---:|
-| 形状 | 立方体 |
-| 尺寸 | 1000 mm × 1000 mm × 1000 mm |
-| 中心 | `(0, 0, 0)` |
-| x 范围 | `[-500, 500] mm` |
-| y 范围 | `[-500, 500] mm` |
-| z 范围 | `[-500, 500] mm` |
-| 材料 | `G4_Galactic` |
-
-World 材料使用 Geant4 NIST 内置真空材料：
-
-```cpp
-G4Material* worldMat = nist->FindOrBuildMaterial("G4_Galactic");
+```text
+vehicle_roi_v03.yaml
+simulation_config_v2.yaml
 ```
+
+### 4.1 `vehicle_roi_v03.yaml`
+
+该文件负责描述车辆 ROI：
+
+- VehicleROI 总范围；
+- 几何组件；
+- host / daughter 关系；
+- normal / abnormal insert；
+- material；
+- region_id；
+- AABB；
+- placement 信息；
+- overlap 检查需要的元数据。
+
+### 4.2 `simulation_config_v2.yaml`
+
+该文件负责描述仿真运行条件：
+
+- run 参数；
+- source 参数；
+- collimator 参数；
+- detector 参数；
+- pose / scan 参数；
+- physics 参数；
+- output 参数；
+- normal / abnormal 模型选择。
+
+宏命令可作为调试接口，但第二版正式配置不以 Geant4 macro 为主入口。
 
 ---
 
-### 3.2 PMMA 模体
+## 5. `simulation_config_v2.yaml` 规格
 
-| 参数 | 数值 |
-|---|---:|
-| 材料 | `G4_PLEXIGLASS` |
-| 形状 | 长方体 |
-| x 尺寸 | 200 mm |
-| y 尺寸 | 200 mm |
-| z 厚度 | 65 mm |
-| 前表面中心 | `(0, 0, 0)` |
-| 模体中心 | `(0, 0, 32.5 mm)` |
-| x 范围 | `[-100, 100] mm` |
-| y 范围 | `[-100, 100] mm` |
-| z 范围 | `[0, 65] mm` |
+### 5.1 顶层结构
 
-材料定义：
+```yaml
+schema_version: 2
 
-```cpp
-G4Material* pmmaMat = nist->FindOrBuildMaterial("G4_PLEXIGLASS");
+run:
+  random_seed: 12345
+  number_of_threads: 8
+  n_primary_per_pose: 10000
+  debug: false
+
+vehicle:
+  geometry_file: data/vehicle_roi_v03.yaml
+  model_type: normal
+  selected_target_component: null
+  abnormal_material: G4_POLYETHYLENE
+
+pose:
+  mode: list
+
+  list:
+    head_offset_x_mm: [0]
+    head_offset_y_mm: [0]
+
+  grid:
+    x_offsets_mm: []
+    y_offsets_mm: []
+
+source:
+  particle: gamma
+  energy_mode: mono
+  mono_energy_keV: 160.0
+  spectrum_file: data/spectrum.csv
+
+  source_pos_zero_mm: [0.0, 0.0, -185.0]
+  incident_theta_deg: 45.0
+  focal_spot_diameter_mm: 5.0
+
+collimator:
+  enable: true
+  profile_file: data/collimator_profiles.csv
+  profile_id: P001
+  jaw_extrusion_length_y_mm: 120.0
+
+detector:
+  detector_z_zero_mm: -73.0
+  detector_x_range_zero_mm: [53.0, 161.0]
+  detector_y_range_zero_mm: [-50.0, 50.0]
+  accept_direction: negative_z
+
+physics:
+  physics_list: G4EmLivermorePhysics
+  production_cut_mm: 0.1
+
+output:
+  output_directory: results
+  events_csv_name: events.csv
+  metadata_yaml_name: metadata.yaml
+  thread_tmp_directory: tmp
 ```
+
+### 5.2 样例值说明
+
+样例配置中的：
+
+```yaml
+source_pos_zero_mm: [0.0, 0.0, -185.0]
+detector_z_zero_mm: -73.0
+detector_x_range_zero_mm: [53.0, 161.0]
+detector_y_range_zero_mm: [-50.0, 50.0]
+```
+
+来自第一版链路验证用数值。它们仅作为第二版程序构建、可视化和端到端输出测试的默认样例，不作为第二版最终成像头几何的不可修改物理常量。
 
 ---
 
-### 3.3 空气缺陷
+## 6. 车辆 ROI 模型
 
-空气缺陷用于模拟 PMMA 内部圆柱空气孔。
+### 6.1 总体范围
 
-| 参数 | 数值 |
-|---|---:|
-| 材料 | `G4_AIR` |
-| 形状 | 圆柱体 |
-| 半径 | 5 mm |
-| 直径 | 10 mm |
-| 长度 | 10 mm |
-| 轴向 | z 轴 |
-| 中心 | `(0, 0, 55 mm)` |
-| z 范围 | `[50, 60] mm` |
-
-实现方式：
+第二版车辆 ROI 模型使用 `vehicle_roi_v03.yaml` 描述。默认 ROI 范围为：
 
 ```text
-World
-└── PMMA box
-    └── Air cylinder defect
+x ∈ [-900, 1300] mm
+y ∈ [0, 1250] mm
+z ∈ [0, 1450] mm
 ```
 
-即空气圆柱作为 PMMA 的 daughter volume 放入 PMMA 内部，不使用布尔减法。
-
-Geant4 固体可使用：
-
-```cpp
-G4Tubs(
-    "AirDefectSolid",
-    0.0,
-    5.0 * mm,
-    5.0 * mm,
-    0.0,
-    360.0 * deg
-);
-```
-
-空气缺陷支持宏命令开关：
+对应 VehicleROI box：
 
 ```text
-/geometry/enableAirDefect true
-/geometry/enableAirDefect false
+center = [200, 625, 725] mm
+size   = [2200, 1250, 1450] mm
+material = G4_AIR
+region_id = vehicle_background_air
 ```
 
-| 值 | 行为 |
+### 6.2 建模原则
+
+车辆 ROI 模型采用基本 Geant4 几何体，不追求 CAD 级还原。
+
+要求：
+
+- 车辆 ROI 在所有 scan pose 中保持固定；
+- 所有实体 volume 不允许 overlap；
+- 相邻材料层允许贴边；
+- insert 必须完全位于唯一宿主 volume 内；
+- normal / abnormal 几何完全一致，只替换指定 insert 的 material 和 region_id；
+- 未被具体结构占据的车辆 ROI 空隙由 VehicleROI 空气母体承载，region_id 为 `vehicle_background_air`。
+
+### 6.3 主要结构
+
+车辆 ROI 至少包含：
+
+- 近侧车门；
+- 远侧车门；
+- 近侧 / 远侧车窗；
+- 近侧 / 远侧 B 柱；
+- 近侧 / 远侧 C 柱；
+- 乘员舱空气；
+- 前排 / 后排座椅；
+- 后备箱空气；
+- 可选 abnormal insert。
+
+### 6.4 normal / abnormal 规则
+
+`vehicle.model_type` 支持：
+
+```text
+normal
+abnormal
+```
+
+normal 运行：
+
+```text
+insert material = host material
+insert region_id = host region_id
+```
+
+abnormal 运行：
+
+```text
+selected_target_component 对应 insert:
+  material = abnormal_material
+  region_id = target
+
+其他 insert:
+  material = host material
+  region_id = host region_id
+```
+
+第一阶段每个 abnormal run 只启用一个 selected target component。
+
+若：
+
+```yaml
+vehicle:
+  model_type: abnormal
+  selected_target_component: null
+```
+
+则配置读取阶段应报错停止。
+
+若：
+
+```yaml
+vehicle:
+  model_type: normal
+  selected_target_component: null
+```
+
+则按 normal baseline 运行。
+
+### 6.5 材料
+
+默认材料表：
+
+| 语义 | Geant4 材料 |
 |---|---|
-| `true` | 构建空气圆柱缺陷 |
-| `false` | 构建均匀 PMMA 模体 |
+| 空气 | `G4_AIR` |
+| 钢 / 高强钢代理 | `G4_Fe` |
+| 车窗玻璃 | `G4_GLASS_PLATE` |
+| 门内饰 / PP 类塑料 | `G4_POLYPROPYLENE` |
+| 低密度座椅泡沫 | `Vehicle_PU_Foam` |
+| 默认 abnormal target | `G4_POLYETHYLENE` |
+| 可选高 Z target | `G4_W` |
 
----
-
-### 3.4 源几何
-
-| 参数 | 数值 |
-|---|---:|
-| 源类型 | 点源 |
-| 粒子类型 | gamma |
-| 源位置 | `(0, 0, -185 mm)` |
-| 束型 | 锥束 |
-| 源准直器 | 不模拟 |
-| 目标平面 | PMMA 前表面，`z = 0 mm` |
-| 束斑形状 | 圆形 |
-| 束斑直径 | 3 mm |
-| 束斑半径 | 1.5 mm |
-
-锥束采用目标平面采样法：
-
-1. 在 `z = 0 mm` 平面内，以 `(0,0,0)` 为中心、半径 `1.5 mm` 的圆盘内均匀采样目标点：
-
-```text
-(x_target, y_target, 0)
-```
-
-2. primary gamma 初始方向为：
-
-```text
-normalize((x_target, y_target, 0) - (0, 0, -185))
-```
-
-源几何第一版固定写入代码，不提供宏命令修改。
-
----
-
-### 3.5 探测器
-
-探测器为理想计数面，不模拟真实探测器材料响应。
-
-| 参数 | 数值 |
-|---|---:|
-| 类型 | 理想探测平面 |
-| 探测面 z | `-73 mm` |
-| 原始探测器 x 边界 | `[53, 161] mm` |
-| 镜像探测器 x 边界 | `[-161, -53] mm` |
-| y 边界 | `[-50, 50] mm` |
-| 是否分条带 | 否 |
-| 是否真实模拟探测器材料 | 否 |
-
-探测器边界第一版固定写入代码，不提供宏命令修改。
-
-建议代码中集中定义：
+`Vehicle_PU_Foam` 为自定义材料：
 
 ```cpp
-struct DetectorPlaneConfig {
-    double z_mm = -73.0;
-    double x_min_mm = 53.0;
-    double x_max_mm = 161.0;
-    double y_min_mm = -50.0;
-    double y_max_mm = 50.0;
-};
-
-std::array<DetectorPlaneConfig, 2> detectorPlanes;
+auto* foam = new G4Material("Vehicle_PU_Foam", 0.055*g/cm3, 4);
+foam->AddElement(nist->FindOrBuildElement("C"), 0.60);
+foam->AddElement(nist->FindOrBuildElement("H"), 0.08);
+foam->AddElement(nist->FindOrBuildElement("O"), 0.28);
+foam->AddElement(nist->FindOrBuildElement("N"), 0.04);
 ```
 
-记录条件：
+### 6.6 region_id
+
+几何构建时必须为每个 logical volume 或 placement 建立 region_id 映射。
+
+常用 region_id 包括：
+
+```text
+vehicle_background_air
+near_door_outer_metal
+near_door_cavity_air
+near_door_reinforcement
+near_door_inner_metal
+near_door_trim
+far_door_trim
+far_door_inner_metal
+far_door_cavity_air
+far_door_reinforcement
+far_door_outer_metal
+near_window_glass
+far_window_glass
+near_b_pillar_metal
+near_c_pillar_metal
+far_b_pillar_metal
+far_c_pillar_metal
+cabin_air
+seat_foam
+seat_frame_metal
+rear_trunk_air
+target
+other
+none
+```
+
+---
+
+## 7. 成像头模型
+
+### 7.1 总体定义
+
+第二版成像头是刚性组件组：
+
+```text
+ImagingHead = Source + SlitCollimator + VirtualDetectorPlane
+```
+
+成像头整体在 `x-y` 平面内离散平移。
+
+车辆 ROI 不随 pose 移动。
+
+成像头内 source、collimator、detector 共享同一个 offset：
+
+```text
+head_offset = (head_offset_x, head_offset_y, 0)
+```
+
+### 7.2 零位姿 global 坐标 + offset
+
+所有成像头组件首先以零位姿 global 坐标给出。
+
+实际坐标为：
+
+```text
+x_actual = x_zero + head_offset_x
+y_actual = y_zero + head_offset_y
+z_actual = z_zero
+```
+
+第二版暂不支持：
+
+- 成像头旋转；
+- 成像头 z 方向移动；
+- 连续运动；
+- 运动模糊；
+- 时间相关积分。
+
+---
+
+## 8. 扫描 pose
+
+### 8.1 pose 字段
+
+每个扫描状态由以下量定义：
+
+```text
+pose_id
+head_offset_x_mm
+head_offset_y_mm
+```
+
+`pose_id` 不由用户直接写入，而是由 offset 自动生成。
+
+### 8.2 offset 取值限制
+
+第一阶段仅支持整数 mm offset。
+
+暂不支持小数 offset。
+
+### 8.3 pose_id 编码规则
+
+编码规则：
+
+```text
+0      -> 0
+正整数 -> 原始十进制数字
+负整数 -> m + 绝对值
+```
+
+格式：
+
+```text
+pose_x{encoded_x}_y{encoded_y}
+```
+
+示例：
+
+| `head_offset_x_mm` | `head_offset_y_mm` | `pose_id` |
+|---:|---:|---|
+| `0` | `0` | `pose_x0_y0` |
+| `2` | `1` | `pose_x2_y1` |
+| `-2` | `1` | `pose_xm2_y1` |
+| `2` | `-1` | `pose_x2_ym1` |
+| `-10` | `-4` | `pose_xm10_ym4` |
+| `1111` | `0` | `pose_x1111_y0` |
+
+### 8.4 list mode
+
+list mode 用于显式输入若干成对偏置。
+
+```yaml
+pose:
+  mode: list
+  list:
+    head_offset_x_mm: [0, 2, 3, 10]
+    head_offset_y_mm: [0, 1, 4, 2]
+```
+
+规则：
+
+```text
+第 i 个 x offset 与第 i 个 y offset 配对。
+两个数组长度必须相同。
+```
+
+若长度不同，配置读取阶段报错停止。
+
+### 8.5 grid mode
+
+grid mode 用于从 x offset 和 y offset 的笛卡尔积自动生成 pose。
+
+```yaml
+pose:
+  mode: grid
+  grid:
+    x_offsets_mm: [-10, 0, 10]
+    y_offsets_mm: [0, 5]
+```
+
+生成：
+
+```text
+(-10, 0)
+(-10, 5)
+(0, 0)
+(0, 5)
+(10, 0)
+(10, 5)
+```
+
+---
+
+## 9. 射线源
+
+### 9.1 粒子与 event 定义
+
+每个 event 产生一个 primary gamma：
+
+```text
+1 event = 1 primary gamma
+```
+
+### 9.2 源位置
+
+源位置由 YAML 给出零位姿坐标：
+
+```yaml
+source:
+  source_pos_zero_mm: [0.0, 0.0, -185.0]
+```
+
+实际位置为：
+
+```text
+source_pos_actual = source_pos_zero + (head_offset_x, head_offset_y, 0)
+```
+
+### 9.3 入射方向
+
+第二版源模型为斜入射有限焦点笔形束，不再使用第一版目标平面采样锥束。
+
+入射方向位于 global `x-z` 平面内，与 `+x` 轴正方向成 `theta` 角：
+
+```text
+incident_dir = (cos(theta), 0, sin(theta))
+```
+
+合法范围：
+
+```text
+0° < theta <= 90°
+```
+
+默认样例值：
+
+```yaml
+incident_theta_deg: 45.0
+```
+
+### 9.4 焦点面
+
+焦点面为过 `source_pos_actual` 的圆形平面，该平面垂直于 `incident_dir`。
+
+圆形焦点面内均匀采样 gamma 起点。
+
+默认样例焦点直径：
+
+```yaml
+focal_spot_diameter_mm: 5.0
+```
+
+焦点面采样基为：
+
+```text
+u = (0, 1, 0)
+v = (-sin(theta), 0, cos(theta))
+```
+
+采样：
+
+```text
+r = R * sqrt(xi_1)
+phi = 2π * xi_2
+R = focal_spot_diameter_mm / 2
+```
+
+起点：
+
+```text
+gamma_start = source_pos_actual
+            + r * cos(phi) * u
+            + r * sin(phi) * v
+```
+
+方向：
+
+```text
+gamma_dir = incident_dir
+```
+
+### 9.5 能量模式
+
+第二版保留第一版的能量模式：
+
+```text
+mono
+spectrum
+```
+
+mono 模式：
+
+```yaml
+source:
+  energy_mode: mono
+  mono_energy_keV: 160.0
+```
+
+spectrum 模式：
+
+```yaml
+source:
+  energy_mode: spectrum
+  spectrum_file: data/spectrum.csv
+```
+
+spectrum CSV 格式：
+
+```csv
+energy_keV,weight
+40,0.01
+45,0.03
+50,0.06
+```
+
+验证规则：
+
+- `energy_keV` 必须为正且有限；
+- `weight` 必须非负且有限；
+- 文件至少包含一行有效数据；
+- 权重总和必须大于 0；
+- 程序内部归一化并构建 CDF。
+
+---
+
+## 10. 狭缝准直器
+
+### 10.1 总体原则
+
+第二版准直器为成像头组件之一。
+
+准直器位于车辆 ROI 与虚拟探测器平面之间。
+
+准直器由外部 CSV profile 定义。
+
+第二版不构建镜像准直器。
+
+### 10.2 CSV 表头
+
+准直器 profile 文件沿用第一版表头：
+
+```csv
+profile_id,jaw_id,vertex_id,x_mm,z_mm
+```
+
+字段含义：
+
+| 字段 | 含义 |
+|---|---|
+| `profile_id` | profile ID。 |
+| `jaw_id` | jaw 编号，格式为 `jaw_0 ... jaw_{M-1}`。 |
+| `vertex_id` | 同一 jaw 内顶点编号。 |
+| `x_mm` | 零位姿 global x 坐标，单位 mm。 |
+| `z_mm` | 零位姿 global z 坐标，单位 mm。 |
+
+### 10.3 jaw 规则
+
+每个 profile 包含可变数量的 jaw。
+
+若某个 profile 包含 `M` 块 jaw，则：
+
+```text
+M >= 1
+jaw_id = jaw_0, jaw_1, ..., jaw_{M-1}
+```
+
+每块 jaw：
+
+```text
+N >= 3
+vertex_id = 0, 1, ..., N-1
+```
+
+必须拒绝：
+
+- 文件无法打开；
+- 找不到指定 profile；
+- 缺少必要列；
+- 必要字段为空；
+- jaw 编号不连续；
+- jaw 编号重复；
+- vertex_id 缺失、重复或不连续；
+- 坐标非数值、NaN 或 Inf；
+- 多边形面积为 0；
+- 多边形非凸；
+- 连续共线点。
+
+### 10.4 Geant4 构建
+
+每块 jaw 使用：
+
+```text
+G4ExtrudedSolid
+```
+
+输入点为零位姿 global `x-z` 坐标：
+
+```text
+(x_mm, z_mm)
+```
+
+映射：
+
+| 输入物理量 | `G4ExtrudedSolid` local 坐标 |
+|---|---|
+| global x | local x |
+| global z | local y |
+| global y | local z 拉伸方向 |
+
+jaw 沿 global `y` 方向拉伸。
+
+默认样例拉伸长度：
+
+```yaml
+jaw_extrusion_length_y_mm: 120.0
+```
+
+扫描 pose 下：
+
+```text
+x_actual = x_zero + head_offset_x
+z_actual = z_zero
+y_actual = y_zero + head_offset_y
+```
+
+### 10.5 占位 profile
+
+第二版样例配置可以暂用第一版 `P001` 作为占位 slit profile，用于构建、可视化和输出链路测试。
+
+该占位 profile 不代表第二版最终成像头准直器几何。
+
+---
+
+## 11. 虚拟探测器平面
+
+### 11.1 探测器类型
+
+第二版探测器为单个理想虚拟探测平面。
+
+不模拟真实探测器材料响应。
+
+不设置真实 sensitive detector。
+
+探测记录来自 step 穿越判定。
+
+第二版不构建镜像探测器。
+
+### 11.2 几何关系
+
+背散射结构中：
+
+```text
+VehicleROI
+→ SlitCollimator
+→ VirtualDetectorPlane
+```
+
+准直器夹在车辆 ROI 与虚拟探测平面之间。
+
+### 11.3 探测器零位姿
+
+探测器平面平行于 global `x-y` 平面。
+
+样例配置：
+
+```yaml
+detector:
+  detector_z_zero_mm: -73.0
+  detector_x_range_zero_mm: [53.0, 161.0]
+  detector_y_range_zero_mm: [-50.0, 50.0]
+  accept_direction: negative_z
+```
+
+### 11.4 pose 下的实际接收范围
+
+```text
+det_x_min_actual = det_x_min_zero + head_offset_x
+det_x_max_actual = det_x_max_zero + head_offset_x
+
+det_y_min_actual = det_y_min_zero + head_offset_y
+det_y_max_actual = det_y_max_zero + head_offset_y
+
+det_z_actual = detector_z_zero
+```
+
+### 11.5 探测面穿越条件
+
+当：
+
+```yaml
+accept_direction: negative_z
+```
+
+探测判定为：
 
 ```text
 particle == gamma
@@ -222,282 +817,53 @@ direction.z < 0
 crossing point inside detector x-y bounds
 ```
 
-穿越点使用 step 前后点线性插值得到。
-
----
-
-## 4. 准直器几何
-
-### 4.1 总体定义
-
-准直器采用真实钨材料几何体。每个 profile 定义三块凸多边形钨板，程序同时构建原始准直器和关于 `x = 0` 镜像的准直器。
-
-| 项目 | 设定 |
-|---|---|
-| 材料 | `G4_W` |
-| profile 中钨板数量 | 3 |
-| 每块钨板截面 | x-z 平面内凸多边形 |
-| 每块钨板顶点数 | 不固定，`N >= 3` |
-| 拉伸方向 | 全局 y 方向 |
-| y 尺寸 | 120 mm |
-| y 范围 | `[-60, 60] mm` |
-| 镜像平面 | `x = 0`，即 y-z 平面 |
-
-准直器支持宏命令开关：
+穿越点线性插值：
 
 ```text
-/geometry/enableCollimator true
-/geometry/enableCollimator false
+t = (detector_z - pre_z) / (post_z - pre_z)
+
+det_x = pre_x + t * (post_x - pre_x)
+det_y = pre_y + t * (post_y - pre_y)
+det_z = detector_z
 ```
 
-默认值为 `true`。设置为 `false` 时，不读取 collimator profile CSV，不构建原始或镜像钨 jaw；World、PMMA、空气缺陷和探测面辅助体仍按各自配置构建。
-
-材料定义：
-
-```cpp
-G4Material* tungstenMat = nist->FindOrBuildMaterial("G4_W");
-```
+同一 event 中，第一次有效探测命中被记录。后续穿越不再产生额外正式 CSV 行。
 
 ---
 
-### 4.2 外部 profile 文件
+## 12. 物理过程
 
-准直器几何由外部 CSV 文件定义。
+### 12.1 Physics List
 
-文件内包含多组 profile。每一组 profile 对应一次仿真可选用的准直器几何。
-
-每个 profile 包含：
-
-| 项目 | 数量 |
-|---|---:|
-| profile ID | 1 |
-| 钨板 | 3 |
-| 每块钨板顶点 | `N >= 3`，不固定 |
-| 每个顶点坐标 | `(x_mm, z_mm)` |
-
-CSV 格式：
-
-```csv
-profile_id,jaw_id,vertex_id,x_mm,z_mm
-P001,jaw_0,0,50,-28
-P001,jaw_0,1,105,-28
-P001,jaw_0,2,106,-24
-P001,jaw_0,3,105,-20
-P001,jaw_0,4,50,-20
-P001,jaw_1,0,108,-24
-P001,jaw_1,1,109,-28
-P001,jaw_1,2,164,-28
-P001,jaw_1,3,164,-20
-P001,jaw_1,4,109,-20
-P001,jaw_2,0,21,-28
-P001,jaw_2,1,29,-28
-P001,jaw_2,2,29,-113
-P001,jaw_2,3,21,-113
-```
-
-字段定义：
-
-| 字段 | 要求 |
-|---|---|
-| `profile_id` | 准直器数据组 ID，例如 `P001` |
-| `jaw_id` | `jaw_0`、`jaw_1` 或 `jaw_2` |
-| `vertex_id` | 每块 jaw 内从 `0` 到 `N-1` 的连续整数 |
-| `x_mm` | 顶点 x 坐标，单位 mm |
-| `z_mm` | 顶点 z 坐标，单位 mm |
-
-注意：
-
-- 外部文件中的 `x_mm` 和 `z_mm` 是全局坐标。
-- 程序不额外叠加 `collimator_center_z`。
-- 程序不检查 z 坐标是否落在 `[-28, -20] mm`。
-- 外部文件完全决定准直器在 z 方向的位置和厚度。
-
----
-
-### 4.3 profile 选择方式
-
-第一版只实现单组选择：
+第二版默认使用：
 
 ```text
-/geometry/collimatorProfileFile data/collimator_profiles.csv
-/geometry/collimatorProfileId P001
-/geometry/enableCollimator true
-```
-
-暂不在程序内部自动遍历全部 profile。后续可通过 shell 脚本或程序扩展实现批量 profile 扫描。
-
----
-
-### 4.4 profile 错误处理
-
-如果出现以下情况，程序必须报错并停止：
-
-| 错误类型 | 行为 |
-|---|---|
-| 找不到指定 `profile_id` | 停止 |
-| 指定 profile 中不是 3 块钨板 | 停止 |
-| jaw ID 不是 `jaw_0`、`jaw_1`、`jaw_2` | 停止 |
-| 某块钨板少于 3 个顶点 | 停止 |
-| `vertex_id` 不连续、缺失或重复 | 停止 |
-| 坐标为空、非数值、NaN、Inf | 停止 |
-| 多边形面积为 0 | 停止 |
-| 多边形非凸或含连续共线点 | 停止 |
-
----
-
-### 4.5 Geant4 实现方式
-
-每块钨板使用 `G4ExtrudedSolid` 构建。
-
-输入文件中的点为全局 x-z 坐标：
-
-```text
-(x_mm, z_mm)
-```
-
-`G4ExtrudedSolid` 的二维截面默认位于 local x-y 平面，拉伸方向为 local z。需要做坐标映射：
-
-| 输入物理量 | G4ExtrudedSolid local 坐标 |
-|---|---|
-| global x | local x |
-| global z | local y |
-| global y | local z 拉伸方向 |
-
-构建后需要旋转，使 local z 拉伸方向对应 global y 方向。可采用：
-
-```text
-local x -> global x
-local y -> global z
-local z -> global -y
-```
-
-这等价于绕 x 轴旋转 `+90 deg`。由于钨板沿 y 方向对称拉伸，local z 对应 global +y 或 -y 在几何覆盖上等价。
-
----
-
-### 4.6 占位 profile
-
-项目需要提供占位 profile，用于代码编译、可视化、输出流程测试。
-
-占位 profile 不代表真实准直器几何。后续真实顶点确定后应替换。
-
-建议 `data/collimator_profiles.csv` 中包含 `P001`：
-
-```csv
-profile_id,jaw_id,vertex_id,x_mm,z_mm
-P001,jaw_0,0,50,-28
-P001,jaw_0,1,105,-28
-P001,jaw_0,2,106,-24
-P001,jaw_0,3,105,-20
-P001,jaw_0,4,50,-20
-P001,jaw_1,0,108,-24
-P001,jaw_1,1,109,-28
-P001,jaw_1,2,164,-28
-P001,jaw_1,3,164,-20
-P001,jaw_1,4,109,-20
-P001,jaw_2,0,21,-28
-P001,jaw_2,1,29,-28
-P001,jaw_2,2,29,-113
-P001,jaw_2,3,21,-113
-```
-
----
-
-## 5. 物理过程与 Physics List
-
-### 5.1 Physics List
-
-使用：
-
-```cpp
 G4EmLivermorePhysics
 ```
 
-理由：本项目关注低能 gamma 在 PMMA 中的 Compton / Rayleigh 散射，Livermore 低能电磁模型适合该能区，并包含 Rayleigh 散射。
+### 12.2 Production cut
 
-### 5.2 Production Cut
-
-采用全局统一 production cut：
+默认：
 
 ```text
 0.1 mm
 ```
 
-实现示例：
+配置：
 
-```cpp
-SetDefaultCutValue(0.1 * mm);
+```yaml
+physics:
+  physics_list: G4EmLivermorePhysics
+  production_cut_mm: 0.1
 ```
 
 ---
 
-## 6. Primary Generator
+## 13. 事件追踪逻辑
 
-### 6.1 Event 定义
+### 13.1 追踪对象
 
-```text
-1 event = 1 primary gamma
-```
-
-因此：
-
-```text
-/run/beamOn N
-```
-
-表示模拟 `N` 个入射 gamma。
-
-### 6.2 能量模式
-
-支持两种能量模式。
-
-#### 单能模式
-
-默认单能：
-
-```text
-160 keV
-```
-
-宏命令：
-
-```text
-/source/energyMode mono
-/source/monoEnergy 160 keV
-```
-
-#### 能谱模式
-
-宏命令：
-
-```text
-/source/energyMode spectrum
-/source/spectrumFile data/spectrum.csv
-```
-
-能谱 CSV 格式：
-
-```csv
-energy_keV,weight
-40,0.01
-45,0.03
-50,0.06
-```
-
-采样规则：
-
-1. 读取 `energy_keV` 和 `weight`。
-2. 将 `weight` 归一化。
-3. 构造累积分布函数。
-4. 每个 event 随机采样一个 primary gamma 初始能量。
-
----
-
-## 7. 散射追踪逻辑
-
-### 7.1 追踪对象
-
-只追踪 primary gamma：
+只记录 primary gamma：
 
 ```text
 particle_name == gamma
@@ -505,721 +871,509 @@ track_id == 1
 parent_id == 0
 ```
 
-非 primary gamma 不参与 PMMA 内散射历史统计。
+secondary gamma、电子、正电子等不进入事件级散射摘要。
 
-### 7.2 统计范围
+### 13.2 detected 与 undetected
 
-只统计 primary gamma 在 PMMA 内发生的散射。
+正式 `events.csv`：
+
+```text
+只记录 detected primary gamma
+```
+
+Debug CSV：
+
+```text
+记录 detected 和 undetected primary gamma
+```
+
+Debug CSV 使用字段：
+
+```text
+detected
+```
+
+区分事件是否被探测。
+
+### 13.3 散射记录原则
+
+对于 primary gamma，记录其 Compton / Rayleigh 散射历史。
+
+事件是否进入正式 CSV 只由是否被探测器探测到决定，不由散射发生在哪个 volume 决定。
+
+统计过程：
 
 | 过程 | 是否计入 |
 |---|---|
-| Compton scattering | 是 |
-| Rayleigh scattering | 是 |
+| Compton scattering，process name `compt` | 是 |
+| Rayleigh scattering，process name `Rayl` | 是 |
 | Photoelectric effect | 否 |
-| 准直器内相互作用 | 否 |
-| 空气 / World 中相互作用 | 否 |
+| secondary particle interactions | 否 |
 
-建议通过 Geant4 process name 判断：
+散射位置使用：
 
-```cpp
-processName == "compt" || processName == "Rayl"
-```
-
-同时要求 step 所在体积或 interaction point 位于 PMMA 内。
-
-### 7.3 散射位置定义
-
-若某一步末端发生 Compton 或 Rayleigh 散射，则散射位置取：
-
-```cpp
+```text
 step->GetPostStepPoint()->GetPosition()
 ```
 
-### 7.4 记录变量
-
-对每个 primary gamma event 记录：
-
-| 字段 | 含义 |
-|---|---|
-| `scatter_count_total` | PMMA 内 Compton + Rayleigh 总次数 |
-| `compton_count` | PMMA 内 Compton 次数 |
-| `rayleigh_count` | PMMA 内 Rayleigh 次数 |
-| `first_scatter_x/y/z` | PMMA 内第一次散射位置 |
-| `last_scatter_x/y/z` | PMMA 内最后一次散射位置 |
-
-多重散射定义：
+region 归属使用：
 
 ```text
-is_multiple_scatter = scatter_count_total >= 2
+preStep volume 对应的 region_id
 ```
 
-若 `scatter_count_total = 0`：
+即：
+
+| 情况 | region 归属 |
+|---|---|
+| step 起点位于子 volume | 子 volume 的 region_id |
+| step 起点位于 VehicleROI 空气母体 | `vehicle_background_air` |
+| step 起点位于未注册区域 | `other` |
+| 无有效散射 | `none` |
+
+贴边界面事件按 preStep volume 归属。
+
+### 13.4 记录变量
+
+每个 event 维护：
+
+```text
+event_id
+detected
+scatter_count_total
+compton_count
+rayleigh_count
+first_scatter_x/y/z
+last_scatter_x/y/z
+first_scatter_region_id
+last_scatter_region_id
+det_x/det_y/det_z
+det_energy
+```
+
+无散射时：
 
 ```text
 first_scatter_x/y/z = NaN
 last_scatter_x/y/z = NaN
-is_multiple_scatter = 0
+first_scatter_region_id = none
+last_scatter_region_id = none
+scatter_count_total = 0
+compton_count = 0
+rayleigh_count = 0
 ```
 
 ---
 
-## 8. 探测记录逻辑
+## 14. 正式事件级 CSV
 
-### 8.1 输出对象
+### 14.1 输出对象
 
-CSV 只输出到达探测器的 primary gamma。
-
-不输出：
+正式 `events.csv` 只输出 detected primary gamma。
 
 ```text
-未到达探测器的 event
-非 primary gamma
-非 gamma 粒子
+1 row = 1 detected primary gamma
 ```
 
-即使 `scatter_count_total = 0`，只要 primary gamma 到达探测面并落在探测器边界内，也应输出。
+未探测 event 不进入正式 `events.csv`。
 
-### 8.2 探测面穿越条件
+### 14.2 Header
 
-探测面：
-
-```text
-z = -73 mm
-```
-
-穿越方向：
-
-```text
-preStep.z > detector_z
-postStep.z <= detector_z
-direction.z < 0
-```
-
-边界条件：
-
-```text
-original detector:  53 mm <= det_x <= 161 mm, -50 mm <= det_y <= 50 mm
-mirror detector:  -161 mm <= det_x <= -53 mm, -50 mm <= det_y <= 50 mm
-```
-
-穿越点通过 step 前后位置线性插值得到。
-命中任一探测区域都按同一 CSV schema 输出；镜像探测器命中时 `det_x` 为负的全局 x 坐标。
-
----
-
-## 9. CSV 输出规格
-
-### 9.1 单位约定
-
-CSV 字段名不强制写单位后缀。
-
-统一约定：
-
-| 类型 | 默认单位 |
-|---|---|
-| 长度 | mm |
-| 能量 | keV |
-
----
-
-### 9.2 输出模式
-
-程序支持两种输出模式。
-
-| 模式 | 默认场景 | 用途 |
-|---|---|---|
-| debug | 单线程默认 | 检查事件、轨迹、散射绑定是否正确 |
-| compact | 多线程默认 | 正式统计分析 |
-
-宏命令：
-
-```text
-/output/debug true
-/output/debug false
-```
-
-### 9.3 compact CSV 字段
-
-每一行表示一个到达探测器的 primary gamma。
+正式 `events.csv` header 为：
 
 ```csv
-initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
+event_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
 ```
 
-字段含义：
+### 14.3 字段含义
 
 | 字段 | 含义 |
 |---|---|
-| `initial_energy` | 入射 primary gamma 初始能量 |
-| `det_x` | 探测面穿越点 x |
-| `det_y` | 探测面穿越点 y |
-| `det_energy` | 到达探测面时 gamma 能量 |
-| `scatter_count_total` | PMMA 内 Compton + Rayleigh 总次数 |
-| `compton_count` | PMMA 内 Compton 次数 |
-| `rayleigh_count` | PMMA 内 Rayleigh 次数 |
-| `is_multiple_scatter` | 是否多重散射，`scatter_count_total >= 2` |
-| `first_scatter_x/y/z` | PMMA 内第一次散射位置 |
-| `last_scatter_x/y/z` | PMMA 内最后一次散射位置 |
+| `event_id` | Geant4 event 编号。 |
+| `det_x` | 探测平面命中点 x 坐标，单位 mm。 |
+| `det_y` | 探测平面命中点 y 坐标，单位 mm。 |
+| `det_z` | 探测平面命中点 z 坐标，单位 mm。 |
+| `det_energy` | 到达探测平面时 primary gamma 能量，单位 keV。 |
+| `scatter_count_total` | primary gamma 的 Compton + Rayleigh 总次数。 |
+| `compton_count` | Compton 次数。 |
+| `rayleigh_count` | Rayleigh 次数。 |
+| `first_scatter_x/y/z` | 第一次有效散射位置，单位 mm。 |
+| `last_scatter_x/y/z` | 最后一次有效散射位置，单位 mm。 |
+| `first_scatter_region_id` | 第一次有效散射对应的 region_id。 |
+| `last_scatter_region_id` | 最后一次有效散射对应的 region_id。 |
 
-### 9.4 debug CSV 字段
+### 14.4 单位
 
-debug 模式在 compact 信息基础上增加 event、track、探测方向和 primary 初始方向字段；compact CSV 字段保持不变。
-
-```csv
-event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_dir_x,initial_dir_y,initial_dir_z
-```
-
-完整字段：
-
-```csv
-event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,initial_dir_x,initial_dir_y,initial_dir_z,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
-```
+| 类型 | 单位 |
+|---|---|
+| 长度 | mm |
+| 能量 | keV |
+| 计数 | 无量纲整数 |
+| region | 字符串 |
 
 ---
 
-## 10. 输出文件与多线程
+## 15. Debug CSV
 
-### 10.1 输出目录
+### 15.1 输出对象
 
-支持宏命令设置输出目录：
+Debug CSV 输出：
 
 ```text
-/output/directory results
+detected primary gamma
+undetected primary gamma
 ```
 
-默认：
+### 15.2 Header
+
+Debug CSV header 为：
+
+```csv
+event_id,detected,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
+```
+
+### 15.3 未探测事件填写规则
+
+若 `detected = 0`：
+
+```text
+det_x = NaN
+det_y = NaN
+det_z = NaN
+det_energy = NaN
+```
+
+散射字段按 event 已发生的追踪结果填写。
+
+若无有效散射：
+
+```text
+scatter_count_total = 0
+compton_count = 0
+rayleigh_count = 0
+first_scatter_x/y/z = NaN
+last_scatter_x/y/z = NaN
+first_scatter_region_id = none
+last_scatter_region_id = none
+```
+
+Debug CSV 不包含其他可选字段。
+
+---
+
+## 16. metadata.yaml
+
+每个 pose 输出一个 `metadata.yaml`，记录 run-level 条件。
+
+示例：
+
+```yaml
+run_id: pose_x0_y0_normal_seed12345
+output_csv: events.csv
+
+model_type: normal
+vehicle_model_id: vehicle_roi_v03
+vehicle_geometry_file: data/vehicle_roi_v03.yaml
+selected_target_component: null
+abnormal_target_type: none
+abnormal_target_region: none
+
+pose_id: pose_x0_y0
+head_offset_x_mm: 0
+head_offset_y_mm: 0
+
+n_primary: 10000
+random_seed: 12345
+number_of_threads: 8
+
+debug: false
+
+source:
+  particle: gamma
+  energy_mode: mono
+  mono_energy_keV: 160.0
+  spectrum_file: data/spectrum.csv
+  incident_theta_deg: 45.0
+  focal_spot_diameter_mm: 5.0
+  source_pos_zero_mm: [0.0, 0.0, -185.0]
+
+collimator:
+  enable: true
+  profile_file: data/collimator_profiles.csv
+  profile_id: P001
+  jaw_extrusion_length_y_mm: 120.0
+
+detector:
+  detector_z_zero_mm: -73.0
+  detector_x_range_zero_mm: [53.0, 161.0]
+  detector_y_range_zero_mm: [-50.0, 50.0]
+  accept_direction: negative_z
+
+physics:
+  physics_list: G4EmLivermorePhysics
+  production_cut_mm: 0.1
+
+notes: sample config for pipeline validation
+```
+
+metadata 不重复写入每一行 CSV。
+
+---
+
+## 17. 输出文件组织
+
+### 17.1 每个位姿独立输出
+
+每个 pose 独立运行一组 Monte Carlo 统计。
+
+建议输出目录结构：
 
 ```text
 results/
+└── {run_id}/
+    ├── events.csv
+    ├── metadata.yaml
+    └── tmp/
+        ├── events_thread0.csv
+        ├── events_thread1.csv
+        └── ...
 ```
 
-若输出目录不存在，程序应自动创建。若创建失败，应报错并停止。
-
-线程临时文件放在：
+若 debug 为 true：
 
 ```text
-results/tmp/
+results/{run_id}/events_debug.csv
+results/{run_id}/metadata.yaml
 ```
 
----
+### 17.2 run_id 生成
 
-### 10.2 文件命名
-
-由于 CSV 内不记录 profile、energy mode、seed，这些信息必须体现在文件名中。
-
-#### 单能 compact
+建议：
 
 ```text
-results/hits_profile_{profile_id}_mono_{energy}keV_seed{seed}.csv
+run_id = {pose_id}_{model_type}_seed{random_seed}
 ```
 
 示例：
 
 ```text
-results/hits_profile_P001_mono_160keV_seed12345.csv
-```
-
-#### 单能 debug
-
-```text
-results/hits_profile_{profile_id}_mono_{energy}keV_seed{seed}_debug.csv
-```
-
-#### 能谱 compact
-
-```text
-results/hits_profile_{profile_id}_spectrum_seed{seed}.csv
-```
-
-#### 能谱 debug
-
-```text
-results/hits_profile_{profile_id}_spectrum_seed{seed}_debug.csv
+pose_x0_y0_normal_seed12345
+pose_x1111_y0_abnormal_seed12345
+pose_xm10_y4_normal_seed12345
 ```
 
 ---
 
-### 10.3 多线程输出策略
+## 18. 多线程输出策略
 
-采用 M1：每个 worker 线程写独立 CSV，run 结束后由 master 合并。
+第二版继承第一版多线程输出策略。
 
 规则：
 
-1. 每个线程只写自己的临时 CSV。
-2. 不允许多个线程共享同一个 `std::ofstream`。
-3. run 结束后由 master 合并所有线程文件。
-4. 合并时只保留一个 header。
-5. compact 模式下，合并成功后删除线程临时文件。
-6. debug 模式下，合并成功后保留线程临时文件。
-7. 合并失败时，保留所有临时文件并报错。
-
-临时文件命名示例：
-
-```text
-results/tmp/hits_profile_P001_mono_160keV_seed12345_thread0.csv
-results/tmp/hits_profile_P001_mono_160keV_seed12345_thread1.csv
-```
-
-Debug 模式：
-
-```text
-results/tmp/hits_profile_P001_mono_160keV_seed12345_debug_thread0.csv
-```
+1. 每个 worker 线程写独立临时 CSV；
+2. 不允许多个 worker 共享同一个 `std::ofstream`；
+3. run 结束后由 master 合并临时 CSV；
+4. 最终 CSV 只保留一个 header；
+5. 正式模式合并成功后删除对应临时 CSV；
+6. debug 模式合并成功后保留对应临时 CSV；
+7. 合并失败时保留所有临时 CSV 并报错。
 
 ---
 
-## 11. 随机种子与线程
+## 19. Run / pose 生命周期
 
-支持宏命令设置随机种子：
-
-```text
-/run/randomSeed 12345
-```
-
-支持宏命令设置线程数：
+### 19.1 程序启动
 
 ```text
-/run/numberOfThreads 8
+main()
+  ├── 读取 simulation_config_v2.yaml
+  ├── 读取 vehicle_roi_v03.yaml
+  ├── 生成 pose 列表
+  ├── 创建 Geant4 run manager
+  ├── 注册 geometry / physics / actions
+  └── 按 pose 执行 run
 ```
 
-默认规则：
-
-| 运行模式 | 默认输出模式 |
-|---|---|
-| 单线程 | debug |
-| 多线程 | compact |
-
-建议使用 Geant4 run manager factory，避免写死单线程或多线程：
-
-```cpp
-auto* runManager = G4RunManagerFactory::CreateRunManager(G4RunManagerType::Default);
-```
-
----
-
-## 12. 宏命令接口
-
-第一版需要支持以下宏命令：
+### 19.2 每个 pose 的运行流程
 
 ```text
-/geometry/collimatorProfileFile data/collimator_profiles.csv
-/geometry/collimatorProfileId P001
-/geometry/enableCollimator true
-/geometry/enableAirDefect true
-
-/source/energyMode mono
-/source/monoEnergy 160 keV
-/source/spectrumFile data/spectrum.csv
-
-/run/randomSeed 12345
-/run/numberOfThreads 8
-
-/output/directory results
-/output/debug false
+For each pose:
+  ├── 生成 pose_id
+  ├── 应用 head_offset
+  ├── 构建或更新 ImagingHead geometry
+  ├── VehicleROI 保持固定
+  ├── /run/initialize
+  ├── beamOn n_primary_per_pose
+  ├── 写 events.csv 或 events_debug.csv
+  ├── 写 metadata.yaml
+  └── 多线程合并
 ```
 
-宏命令含义：
+第一阶段允许每个 pose 作为独立静态几何状态运行。
 
-| 命令 | 作用 |
-|---|---|
-| `/geometry/collimatorProfileFile` | 指定准直器轮廓 CSV |
-| `/geometry/collimatorProfileId` | 指定本次使用的数据组 |
-| `/geometry/enableCollimator` | 控制是否读取 profile 并构建钨准直器，默认 `true` |
-| `/geometry/enableAirDefect` | 控制空气缺陷是否启用 |
-| `/source/energyMode` | `mono` 或 `spectrum` |
-| `/source/monoEnergy` | 单能模式能量，默认 `160 keV` |
-| `/source/spectrumFile` | 能谱 CSV 文件 |
-| `/run/randomSeed` | 设置随机种子 |
-| `/run/numberOfThreads` | 设置线程数 |
-| `/output/directory` | 输出目录，默认 `results/` |
-| `/output/debug` | 是否启用 debug 输出 |
+不要求模拟连续运动或在一个 event loop 内动态移动成像头。
 
 ---
 
-## 13. 项目代码结构
+## 20. 错误处理
 
-建议项目结构：
+以下情况必须 fail fast：
 
-```text
-MSS/
-├── CMakeLists.txt
-├── README.md
-├── include/
-│   ├── DetectorConstruction.hh
-│   ├── PhysicsList.hh
-│   ├── PrimaryGeneratorAction.hh
-│   ├── RunAction.hh
-│   ├── EventAction.hh
-│   ├── SteppingAction.hh
-│   ├── CollimatorProfileReader.hh
-│   ├── CollimatorBuilder.hh
-│   ├── SpectrumSampler.hh
-│   └── CsvWriter.hh
-├── src/
-│   ├── DetectorConstruction.cc
-│   ├── PhysicsList.cc
-│   ├── PrimaryGeneratorAction.cc
-│   ├── RunAction.cc
-│   ├── EventAction.cc
-│   ├── SteppingAction.cc
-│   ├── CollimatorProfileReader.cc
-│   ├── CollimatorBuilder.cc
-│   ├── SpectrumSampler.cc
-│   └── CsvWriter.cc
-├── macros/
-│   ├── vis.mac
-│   ├── run.mac
-│   └── run_mt.mac
-├── data/
-│   ├── collimator_profiles.csv
-│   └── spectrum.csv
-└── results/
-```
+### 20.1 YAML 配置错误
 
----
+- YAML 文件不存在；
+- 必要字段缺失；
+- 数值类型错误；
+- `schema_version` 不支持；
+- `pose.mode` 不是 `list` 或 `grid`；
+- list mode 中 x/y offset 数组长度不同；
+- offset 不是整数；
+- `n_primary_per_pose <= 0`；
+- `number_of_threads < 1`；
+- `model_type` 不是 `normal` 或 `abnormal`；
+- abnormal 模式下未指定 `selected_target_component`；
+- 指定 target component 不存在或不是 insert；
+- `incident_theta_deg <= 0` 或 `incident_theta_deg > 90`；
+- `focal_spot_diameter_mm <= 0`；
+- detector range 非法；
+- output directory 无法创建。
 
-## 14. 推荐核心类职责
+### 20.2 Vehicle ROI 错误
 
-### 14.1 `DetectorConstruction`
+- material 不存在且无法创建；
+- host 不存在；
+- daughter 不在 host 内；
+- 同级实体 overlap；
+- insert 不在唯一宿主内；
+- region_id 缺失。
 
-职责：
+### 20.3 Collimator profile 错误
 
-- 构建 World。
-- 构建 PMMA 模体。
-- 根据 `/geometry/enableAirDefect` 构建或不构建空气缺陷。
-- 根据 `/geometry/enableCollimator` 决定是否调用 `CollimatorProfileReader` 和 `CollimatorBuilder` 构建准直器。
-- 构建用于可视化的探测面辅助几何。
-- 保存探测器边界配置，供 `SteppingAction` 使用。
+- profile 文件无法打开；
+- 找不到 profile_id；
+- jaw 编号不连续；
+- vertex_id 不连续；
+- 坐标非法；
+- 多边形非法。
 
-### 14.2 `CollimatorProfileReader`
+### 20.4 输出错误
 
-职责：
-
-- 读取外部 CSV。
-- 筛选指定 `profile_id`。
-- 检查 jaw 数量、顶点数量、顶点 ID、坐标合法性、面积、凸性。
-- 返回 `CollimatorProfile`。
-
-建议数据结构：
-
-```cpp
-struct XZPoint {
-    double x_mm;
-    double z_mm;
-};
-
-struct PolygonJawProfile {
-    std::string jaw_id;
-    std::vector<XZPoint> vertices;
-};
-
-struct CollimatorProfile {
-    std::string profile_id;
-    std::array<PolygonJawProfile, 3> jaws;
-};
-```
-
-### 14.3 `CollimatorBuilder`
-
-职责：
-
-- 将 `CollimatorProfile` 转换为 Geant4 几何。
-- 使用 `G4ExtrudedSolid` 构建每块凸多边形钨板及其镜像。
-- 沿全局 y 方向拉伸 120 mm。
-
-### 14.4 `PrimaryGeneratorAction`
-
-职责：
-
-- 每个 event 发射一个 primary gamma。
-- 支持 mono / spectrum 两种能量模式。
-- 根据目标平面采样法生成锥束方向。
-- 将当前 event 的初始能量传递给 `EventAction`。
-
-### 14.5 `SpectrumSampler`
-
-职责：
-
-- 读取能谱 CSV。
-- 检查 `energy_keV` 和 `weight` 合法性。
-- 构建 CDF。
-- 每个 event 随机采样能量。
-
-### 14.6 `EventAction`
-
-职责：
-
-- 在 event 开始时初始化当前 primary gamma 的散射摘要。
-- 保存初始能量。
-- 保存 first / last scatter 位置和散射计数。
-- 保存 detector crossing 记录。
-- event 结束时，如果 primary gamma 被探测到，则调用 `CsvWriter` 写一行。
-
-### 14.7 `SteppingAction`
-
-职责：
-
-- 对每个 step 判断是否是 primary gamma。
-- 判断 PMMA 内 Compton / Rayleigh 散射。
-- 更新散射计数、第一次散射位置和最后一次散射位置。
-- 判断是否穿过探测面，并计算穿越点。
-- 若穿越点在探测器边界内，则记录探测信息。
-
-### 14.8 `CsvWriter`
-
-职责：
-
-- 根据 debug / compact 模式生成 header。
-- 每线程写独立临时 CSV。
-- run 结束时由 master 合并文件。
-- 根据模式决定是否删除线程临时文件。
-- 自动创建输出目录和 `tmp/` 目录。
-
-### 14.9 `RunAction`
-
-职责：
-
-- 初始化随机种子。
-- 初始化输出文件名。
-- 管理 run 开始 / 结束时的 CSV writer 生命周期。
-- 在 run 结束时触发多线程临时文件合并。
+- CSV 无法创建；
+- metadata 无法写出；
+- 线程临时文件无法创建；
+- 合并失败；
+- 合并后 header 不唯一。
 
 ---
 
-## 15. 宏文件要求
+## 21. 后处理边界
 
-### 15.1 `macros/run.mac`
+Geant4 程序只负责输出事件级数据和 metadata。
 
-用途：单线程最小测试。
+以下内容由后处理完成：
 
-应包含：
+- 探测器二维 histogram；
+- normal / abnormal 差异图；
+- 相对变化图；
+- CNR；
+- detector region mapping；
+- depth region mapping；
+- `M_RJ`；
+- `purity_R`；
+- `crosstalk_R`；
+- `H_k`；
+- `H_ms`；
+- `F_ms`；
+- `D_JS`；
+- effective rank；
+- SVD explained variance。
 
-```text
-/run/numberOfThreads 1
-/run/randomSeed 12345
-
-/geometry/collimatorProfileFile data/collimator_profiles.csv
-/geometry/collimatorProfileId P001
-/geometry/enableCollimator true
-/geometry/enableAirDefect true
-
-/source/energyMode mono
-/source/monoEnergy 160 keV
-
-/output/directory results
-/output/debug true
-
-/run/initialize
-/run/beamOn 1000
-```
-
-预期输出：
-
-```text
-results/hits_profile_P001_mono_160keV_seed12345_debug.csv
-```
+Geant4 不直接输出 detector region ID 或 depth region ID。
 
 ---
 
-### 15.2 `macros/run_mt.mac`
+## 22. 验收标准摘要
 
-用途：多线程正式运行测试。
+第二版基础实现至少应满足：
 
-应包含：
-
-```text
-/run/numberOfThreads 8
-/run/randomSeed 12345
-
-/geometry/collimatorProfileFile data/collimator_profiles.csv
-/geometry/collimatorProfileId P001
-/geometry/enableCollimator true
-/geometry/enableAirDefect true
-
-/source/energyMode mono
-/source/monoEnergy 160 keV
-
-/output/directory results
-/output/debug false
-
-/run/initialize
-/run/beamOn 100000
-```
-
-预期输出：
-
-```text
-results/hits_profile_P001_mono_160keV_seed12345.csv
-```
-
-compact 模式下，合并成功后应删除 `results/tmp/` 中对应线程临时 CSV。
+1. 能读取 `simulation_config_v2.yaml`；
+2. 能读取 `vehicle_roi_v03.yaml`；
+3. VehicleROI 几何可视化正确，且无 overlap；
+4. normal / abnormal insert 替换逻辑正确；
+5. 成像头 source、collimator、detector 随同一个 head_offset 平移；
+6. 车辆 ROI 在不同 pose 中保持固定；
+7. pose_id 按 offset 自动生成；
+8. list mode 和 grid mode 均可生成 pose；
+9. 斜入射有限焦点笔形束方向满足 `incident_dir = (cos(theta), 0, sin(theta))`；
+10. 焦点起点位于垂直 incident_dir 的圆形焦点面内；
+11. 准直器按第二版可变 jaw 规则读取 profile；
+12. 不构建镜像准直器；
+13. 不构建镜像探测器；
+14. 探测面 crossing 使用 YAML 中的 detector 配置；
+15. 正式 `events.csv` 只输出 detected primary gamma；
+16. debug CSV 输出 detected + undetected，并使用 `detected` 字段区分；
+17. 正式 CSV header 与本文档一致；
+18. debug CSV header 与本文档一致；
+19. `metadata.yaml` 使用 `head_offset_x_mm` 和 `head_offset_y_mm`，不使用 `vehicle_shift_x/y`；
+20. 多线程输出不共享同一个输出流；
+21. master 合并后最终 CSV 只保留一个 header。
 
 ---
 
-### 15.3 `macros/vis.mac`
+## 23. 第二版当前非目标
 
-用途：几何与轨迹可视化。
+第二版基础构建不包含：
 
-应支持检查：
-
-- PMMA 模体位置与尺寸。
-- 空气缺陷开关。
-- 3 块原始凸多边形钨板和 3 块镜像钨板。
-- 原始探测面和镜像探测面的位置与范围。
-- 源位置。
-- 少量 gamma 轨迹。
-
----
-
-## 16. README.md 要求
-
-README.md 至少包含：
-
-1. 项目简介。
-2. 软件环境：Geant4 11.2.0、Ubuntu 24.04、CMake、GCC。
-3. 编译方式：
-
-```bash
-mkdir build
-cd build
-cmake ..
-make -j
-```
-
-4. 单线程测试运行方式：
-
-```bash
-./MSS macros/run.mac
-```
-
-5. 多线程运行方式：
-
-```bash
-./MSS macros/run_mt.mac
-```
-
-6. 可视化运行方式：
-
-```bash
-./MSS macros/vis.mac
-```
-
-7. 宏命令说明。
-8. 准直器 profile CSV 格式。
-9. 能谱 CSV 格式。
-10. 输出 CSV 字段说明。
-11. Debug / compact 模式区别。
-12. 占位准直器 profile 的说明：仅用于测试，不代表真实准直器几何。
+- 整车 CAD 复现；
+- 完整车辆扫描；
+- 底盘、发动机舱、轮胎、悬挂详细建模；
+- 曲面真实车身；
+- 真实探测器材料响应；
+- sensitive detector 能量沉积建模；
+- 工程级图像重建；
+- 连续运动扫描；
+- 运动模糊；
+- 时间相关探测器积分；
+- 成像头旋转；
+- 成像头 z 方向运动；
+- 镜像准直器；
+- 镜像探测器；
+- 在 Geant4 内直接生成统计图。
 
 ---
 
-## 17. 验收标准
+## 24. 规格闭合状态
 
-### 17.1 几何可视化验收
+当前第二版规格已闭合到可以指导基础代码实现。
 
-`vis.mac` 应能显示：
+已闭合项：
 
-| 对象 | 验收要求 |
-|---|---|
-| PMMA 模体 | 可见，位置为 `z=[0,65] mm` |
-| 空气缺陷 | 开启时可见，关闭时不存在 |
-| 准直器 | 从外部 CSV 指定 profile 正确生成 3 块原始凸多边形钨板和 3 块镜像钨板 |
-| 探测面 | 原始与镜像探测面均可见，位置为 `z=-73 mm`，范围分别为 `x=[53,161] mm` 与 `x=[-161,-53] mm`，`y=[-50,50] mm` |
-| 源位置 | 位于 `(0,0,-185 mm)` |
-| 少量粒子轨迹 | 可用于检查锥束方向和背散射路径 |
+- 第二版目标和边界；
+- 固定车辆 ROI + 移动成像头；
+- 两个 YAML 配置文件；
+- list / grid pose 规则；
+- pose_id 自动生成规则；
+- 斜入射有限焦点源；
+- mono / spectrum 能量模式；
+- 可变 jaw 数量准直器 reader；
+- 不构建镜像准直器；
+- 单个虚拟探测平面；
+- negative_z 探测方向；
+- 正式 CSV 与 debug CSV schema；
+- metadata.yaml；
+- 多线程临时 CSV + master merge。
 
-### 17.2 最小运行测试
+仍可通过 YAML 调整的参数：
 
-命令：
+- 源零位姿；
+- 探测器零位姿；
+- 探测器接收范围；
+- 入射角；
+- 焦点直径；
+- 准直器 profile；
+- head_offset 列表或 grid；
+- 每个位姿入射粒子数；
+- normal / abnormal target 位置；
+- 随机种子与线程数。
 
-```bash
-./MSS macros/run.mac
-```
-
-要求：
-
-- 程序正常结束。
-- 生成 debug CSV：
-
-```text
-results/hits_profile_P001_mono_160keV_seed12345_debug.csv
-```
-
-- CSV header 与 debug 字段定义一致。
-
-### 17.3 多线程运行测试
-
-命令：
-
-```bash
-./MSS macros/run_mt.mac
-```
-
-要求：
-
-- 程序正常结束。
-- 生成 compact CSV：
-
-```text
-results/hits_profile_P001_mono_160keV_seed12345.csv
-```
-
-- compact 模式下线程临时文件合并成功后自动删除。
-- CSV header 与 compact 字段定义一致。
-
-### 17.4 错误 profile 测试
-
-程序必须对以下错误明确报错并停止：
-
-| 错误 | 期望行为 |
-|---|---|
-| 找不到 profile_id | 停止 |
-| 某个 jaw 少于 3 个顶点 | 停止 |
-| vertex_id 重复 | 停止 |
-| 多边形非凸或含连续共线点 | 停止 |
-| 坐标非数值 | 停止 |
-
----
-
-## 18. 第一版不包含的内容
-
-第一版不要求实现：
-
-- 图像重建。
-- 真实探测器材料响应。
-- 探测器能量沉积统计。
-- 自动遍历所有准直器 profile。
-- 所有散射点完整轨迹输出。
-- 源位置和探测器边界宏命令调节。
-- 准直器真实顶点坐标生成逻辑。
-
-这些可作为后续版本扩展。
-
----
-
-## 19. 当前 ToDo
-
-| ToDo | 说明 |
-|---|---|
-| 真实准直器 profile | 需要后续填写真实三块凸多边形钨板顶点坐标 |
-| 能谱文件 | 若使用 spectrum 模式，需要提供真实能谱 CSV |
-| 后处理脚本 | 可后续补充 Python 分析脚本，用于统计多重散射占比、能谱分布、探测面 x 分布 |
-| profile 批处理 | 后续可扩展为遍历多个 profile 自动运行 |
-
----
-
-## 20. 规格闭合状态
-
-当前规格已经闭合到可以指导 Codex 生成第一版 Geant4 项目代码。
-
-关键已定项：
-
-- 背散射几何。
-- PMMA、空气缺陷、源、探测器、准直器定义。
-- 准直器外部 CSV 输入。
-- 单能 / 能谱模式。
-- primary gamma 散射历史统计。
-- 只输出到达探测器的 primary gamma。
-- 单线程 debug、多线程 compact。
-- 多线程每线程临时 CSV + master 合并。
-- Ubuntu 24.04 + Geant4 11.2.0 + CMake + C++17。
+这些参数是运行配置，不再阻塞第二版基础实现。

@@ -1,60 +1,474 @@
-# MSS 架构说明
+# 第二版架构说明
 
 ## 1. 文档目的
 
-本文档定义 `MSS` 的第一版实现架构，用于配合 Codex 进行分阶段代码生成。
+本文档定义第二版车辆侧向背散射 ROI Geant4 仿真项目的代码组织方式、模块边界、核心数据结构、运行生命周期和数据流。
 
-文档关系如下：
+本文档服务于后续分阶段实现。它不重复 `spec.md` 中的全部物理参数和字段定义；若本文档与 `spec.md` 冲突，以 `spec.md` 为准。
 
-| 文件 | 作用 |
-|---|---|
-| `docs/spec.md` | 定义仿真需求、物理参数、宏命令、CSV 输出和验收标准；是最高优先级依据。 |
-| `docs/architecture.md` | 定义代码组织方式、模块边界、数据流和 Geant4 生命周期。 |
-| `docs/decisions.md` | 记录已接受的设计决策，避免实现过程中发生设计漂移。 |
-| `docs/milestones.md` | 定义分阶段实现顺序和每阶段验收点。 |
+文档优先级：
 
-若本文档与 `spec.md` 冲突，以 `spec.md` 为准。本文档不重复所有物理参数，只规定实现结构和边界。
+1. `spec.md`
+2. `decisions.md`
+3. `architecture.md`
+4. `milestones.md`
+5. `acceptance_checklist.md`
 
 ---
 
-## 2. 架构原则
+## 2. 架构目标
 
-### 2.1 物理意图与软件流程分离
+第二版程序的核心任务是：
 
-`MSS` 不是通用 Geant4 框架，而是面向 gamma 背散射多重散射统计的专用仿真程序。
+```text
+读取 YAML 配置
+构建固定 VehicleROI
+构建按 pose 平移的 ImagingHead
+产生斜入射有限焦点 primary gamma
+记录 detected primary gamma 的事件级统计量
+输出 events.csv / events_debug.csv 与 metadata.yaml
+```
 
-代码中应保持以下职责分离：
+架构设计应满足：
 
-| 关注点 | 主要负责模块 |
+- 车辆 ROI 与成像头职责分离；
+- 配置读取与 Geant4 构建分离；
+- 事件状态与 step 判断分离；
+- CSV 输出与后处理统计分离；
+- 多线程输出不共享同一个输出流；
+- 每个 pose 可作为独立静态几何状态运行；
+- 所有非法配置和非法几何 fail fast。
+
+---
+
+## 3. 总体模块划分
+
+| 关注点 | 主要模块 |
 |---|---|
-| 几何构建 | `DetectorConstruction`, `CollimatorBuilder` |
-| 外部准直器 profile 读取 | `CollimatorProfileReader` |
-| 物理过程注册 | `PhysicsList` |
-| primary gamma 产生 | `PrimaryGeneratorAction`, `SpectrumSampler` |
-| 单事件散射与探测状态 | `EventAction` |
-| 单步过程判断与探测面穿越判断 | `SteppingAction` |
-| CSV 写入与线程文件合并 | `CsvWriter`, `RunAction` |
-| 运行级配置、命名与宏命令 | `SimulationConfig`, `SimulationMessenger`, `RunAction` |
+| YAML 读取与验证 | `SimulationConfigReader`, `VehicleROIConfigReader` |
+| 配置对象 | `SimulationConfig`, `VehicleROIConfig`, `ScanPose`, `PoseList` |
+| 材料管理 | `MaterialManager` |
+| region 注册与查询 | `RegionRegistry`, `RegionResolver` |
+| 车辆 ROI 构建 | `VehicleROIConstruction` |
+| 成像头构建 | `ImagingHeadConstruction` |
+| 准直器 profile 读取 | `SlitCollimatorProfileReader` |
+| 准直器几何构建 | `SlitCollimatorBuilder` |
+| 虚拟探测器配置 | `VirtualDetectorPlane` |
+| primary gamma 产生 | `PrimaryGeneratorAction`, `SourceModel`, `SpectrumSampler` |
+| physics list | `PhysicsList` |
+| event 状态 | `EventAction`, `EventRecord` |
+| step 判断 | `SteppingAction` |
+| run / pose 生命周期 | `PoseRunController`, `RunAction` |
+| CSV 输出与合并 | `CsvWriter` |
+| metadata 输出 | `MetadataWriter` |
 
-禁止让某个类变成无边界的全局状态容器。
+---
 
-### 2.2 使用明确的数据结构传递跨模块信息
+## 4. 推荐仓库结构
 
-跨模块传递的信息应使用小型结构体，不应把互不相关的变量散落传递。
+```text
+MSS/
+├── CMakeLists.txt
+├── README.md
+├── main.cc
+├── docs/
+│   ├── spec.md
+│   ├── decisions.md
+│   ├── architecture.md
+│   ├── milestones.md
+│   └── acceptance_checklist.md
+├── include/
+│   ├── SimulationConfig.hh
+│   ├── SimulationConfigReader.hh
+│   ├── VehicleROIConfig.hh
+│   ├── VehicleROIConfigReader.hh
+│   ├── MaterialManager.hh
+│   ├── RegionRegistry.hh
+│   ├── RegionResolver.hh
+│   ├── VehicleROIConstruction.hh
+│   ├── ImagingHeadConstruction.hh
+│   ├── SourceModel.hh
+│   ├── PrimaryGeneratorAction.hh
+│   ├── SpectrumSampler.hh
+│   ├── SlitCollimatorProfileReader.hh
+│   ├── SlitCollimatorBuilder.hh
+│   ├── VirtualDetectorPlane.hh
+│   ├── PhysicsList.hh
+│   ├── ActionInitialization.hh
+│   ├── EventRecord.hh
+│   ├── EventAction.hh
+│   ├── SteppingAction.hh
+│   ├── RunAction.hh
+│   ├── PoseRunController.hh
+│   ├── CsvWriter.hh
+│   └── MetadataWriter.hh
+├── src/
+│   ├── SimulationConfigReader.cc
+│   ├── VehicleROIConfigReader.cc
+│   ├── MaterialManager.cc
+│   ├── RegionRegistry.cc
+│   ├── RegionResolver.cc
+│   ├── VehicleROIConstruction.cc
+│   ├── ImagingHeadConstruction.cc
+│   ├── SourceModel.cc
+│   ├── PrimaryGeneratorAction.cc
+│   ├── SpectrumSampler.cc
+│   ├── SlitCollimatorProfileReader.cc
+│   ├── SlitCollimatorBuilder.cc
+│   ├── VirtualDetectorPlane.cc
+│   ├── PhysicsList.cc
+│   ├── ActionInitialization.cc
+│   ├── EventAction.cc
+│   ├── SteppingAction.cc
+│   ├── RunAction.cc
+│   ├── PoseRunController.cc
+│   ├── CsvWriter.cc
+│   └── MetadataWriter.cc
+├── configs/
+│   └── simulation_config_v2.yaml
+├── data/
+│   ├── vehicle_roi_v03.yaml
+│   ├── collimator_profiles.csv
+│   └── spectrum.csv
+└── results/
+    └── .gitkeep
+```
 
-建议共享数据结构如下。
+允许按实现需要调整文件名，但模块边界不应漂移。
+
+---
+
+## 5. 核心配置结构
+
+### 5.1 `SimulationConfig`
+
+`SimulationConfig` 由 `simulation_config_v2.yaml` 读取生成。
+
+建议结构：
 
 ```cpp
-struct DetectorPlaneConfig {
-    double z_mm = -73.0;
-    double x_min_mm = 53.0;
-    double x_max_mm = 161.0;
-    double y_min_mm = -50.0;
-    double y_max_mm = 50.0;
+struct RunConfig {
+    long random_seed = 12345;
+    int number_of_threads = 1;
+    long n_primary_per_pose = 10000;
+    bool debug = false;
 };
 
-std::array<DetectorPlaneConfig, 2> detectorPlanes;
+struct VehicleRunConfig {
+    std::string geometry_file;
+    std::string model_type;  // normal | abnormal
+    std::optional<std::string> selected_target_component;
+    std::string abnormal_material = "G4_POLYETHYLENE";
+};
+
+struct SourceConfig {
+    std::string particle = "gamma";
+    std::string energy_mode = "mono";  // mono | spectrum
+    double mono_energy_keV = 160.0;
+    std::string spectrum_file;
+    std::array<double, 3> source_pos_zero_mm;
+    double incident_theta_deg = 45.0;
+    double focal_spot_diameter_mm = 5.0;
+};
+
+struct CollimatorConfig {
+    bool enable = true;
+    std::string profile_file;
+    std::string profile_id;
+    double jaw_extrusion_length_y_mm = 120.0;
+};
+
+struct DetectorConfig {
+    double detector_z_zero_mm;
+    double detector_x_min_zero_mm;
+    double detector_x_max_zero_mm;
+    double detector_y_min_zero_mm;
+    double detector_y_max_zero_mm;
+    std::string accept_direction = "negative_z";
+};
+
+struct PhysicsConfig {
+    std::string physics_list = "G4EmLivermorePhysics";
+    double production_cut_mm = 0.1;
+};
+
+struct OutputConfig {
+    std::string output_directory = "results";
+    std::string events_csv_name = "events.csv";
+    std::string metadata_yaml_name = "metadata.yaml";
+    std::string thread_tmp_directory = "tmp";
+};
+
+struct SimulationConfig {
+    int schema_version = 2;
+    RunConfig run;
+    VehicleRunConfig vehicle;
+    SourceConfig source;
+    CollimatorConfig collimator;
+    DetectorConfig detector;
+    PhysicsConfig physics;
+    OutputConfig output;
+    PoseList poses;
+};
 ```
+
+### 5.2 `ScanPose`
+
+```cpp
+struct ScanPose {
+    int head_offset_x_mm = 0;
+    int head_offset_y_mm = 0;
+    std::string pose_id;
+};
+```
+
+第一阶段 offset 只支持整数 mm。
+
+`pose_id` 自动生成：
+
+```text
+pose_x{encoded_x}_y{encoded_y}
+```
+
+编码规则：
+
+```text
+0      -> 0
+正整数 -> 原始十进制数字
+负整数 -> m + 绝对值
+```
+
+### 5.3 `DetectorPlaneActual`
+
+每个 pose 下计算实际探测器范围：
+
+```cpp
+struct DetectorPlaneActual {
+    double z_mm;
+    double x_min_mm;
+    double x_max_mm;
+    double y_min_mm;
+    double y_max_mm;
+};
+```
+
+计算规则：
+
+```text
+x_min = x_min_zero + head_offset_x
+x_max = x_max_zero + head_offset_x
+y_min = y_min_zero + head_offset_y
+y_max = y_max_zero + head_offset_y
+z     = detector_z_zero
+```
+
+---
+
+## 6. 车辆 ROI 配置结构
+
+### 6.1 `VehicleROIConfig`
+
+`VehicleROIConfig` 由 `vehicle_roi_v03.yaml` 读取生成。
+
+建议包含：
+
+```cpp
+struct BoxComponentConfig {
+    std::string name;
+    std::string host;
+    std::array<double, 3> center_mm;
+    std::array<double, 3> size_mm;
+    std::string material;
+    std::string region_id;
+
+    bool is_insert = false;
+    std::optional<std::string> normal_material;
+    std::optional<std::string> abnormal_material;
+    std::optional<std::string> normal_region_id;
+    std::optional<std::string> abnormal_region_id;
+};
+
+struct VehicleROIConfig {
+    std::string vehicle_model_id;
+    BoxComponentConfig root_roi;
+    std::vector<BoxComponentConfig> components;
+};
+```
+
+### 6.2 host / daughter 坐标转换
+
+若 component 是 `VehicleROI` 的直接 daughter：
+
+```text
+placement = component_center - VehicleROI_center
+```
+
+若 component 是其他 host 的 daughter：
+
+```text
+placement = component_center - host_center
+```
+
+YAML 中的 `size` 表示全长。构建 `G4Box` 时使用 half length。
+
+### 6.3 normal / abnormal 材料选择
+
+`VehicleROIConstruction` 根据 `VehicleRunConfig` 选择 insert 材料和 region。
+
+normal：
+
+```text
+insert material = normal_material
+insert region_id = normal_region_id
+```
+
+abnormal：
+
+```text
+selected_target_component:
+  material = abnormal_material
+  region_id = target
+
+其他 insert:
+  material = normal_material
+  region_id = normal_region_id
+```
+
+---
+
+## 7. MaterialManager
+
+### 7.1 职责
+
+`MaterialManager` 负责统一创建和查询 Geant4 材料。
+
+必须支持：
+
+| 材料 | 来源 |
+|---|---|
+| `G4_AIR` | NIST |
+| `G4_Fe` | NIST |
+| `G4_GLASS_PLATE` | NIST |
+| `G4_POLYPROPYLENE` | NIST |
+| `G4_POLYETHYLENE` | NIST |
+| `G4_W` | NIST |
+| `Vehicle_PU_Foam` | 自定义 |
+
+### 7.2 `Vehicle_PU_Foam`
+
+```cpp
+auto* foam = new G4Material("Vehicle_PU_Foam", 0.055*g/cm3, 4);
+foam->AddElement(nist->FindOrBuildElement("C"), 0.60);
+foam->AddElement(nist->FindOrBuildElement("H"), 0.08);
+foam->AddElement(nist->FindOrBuildElement("O"), 0.28);
+foam->AddElement(nist->FindOrBuildElement("N"), 0.04);
+```
+
+材料创建应幂等，避免重复创建同名 material。
+
+---
+
+## 8. RegionRegistry 与 RegionResolver
+
+### 8.1 `RegionRegistry`
+
+`RegionRegistry` 负责建立 volume / placement 到 `region_id` 的映射。
+
+建议接口：
+
+```cpp
+class RegionRegistry {
+public:
+    void Register(const G4VPhysicalVolume* volume, std::string region_id);
+    std::string FindRegionId(const G4VPhysicalVolume* volume) const;
+};
+```
+
+### 8.2 `RegionResolver`
+
+`RegionResolver` 在 `SteppingAction` 中使用。
+
+散射 region 归属规则：
+
+```text
+使用 preStep volume 对应的 region_id
+```
+
+返回规则：
+
+| 情况 | 返回 |
+|---|---|
+| preStep volume 已注册 | 对应 region_id |
+| preStep volume 是 VehicleROI 空气母体 | `vehicle_background_air` |
+| preStep volume 未注册 | `other` |
+| 无有效散射 | `none` |
+
+注意：散射位置坐标仍使用 postStep position；region 归属使用 preStep volume。
+
+---
+
+## 9. 成像头架构
+
+### 9.1 `ImagingHeadConstruction`
+
+职责：
+
+- 接收当前 `ScanPose`；
+- 计算成像头组件实际坐标；
+- 构建或更新准直器几何；
+- 构建虚拟探测器可视化辅助体；
+- 暴露当前 pose 下的 detector plane actual config。
+
+不负责：
+
+- 构建车辆 ROI；
+- 产生 primary gamma；
+- 判断 detector crossing；
+- 写 CSV。
+
+### 9.2 source 坐标
+
+```text
+source_pos_actual = source_pos_zero + (head_offset_x, head_offset_y, 0)
+```
+
+### 9.3 collimator 坐标
+
+对 CSV profile 中每个 jaw 顶点：
+
+```text
+x_actual = x_zero + head_offset_x
+z_actual = z_zero
+```
+
+jaw 沿 y 拉伸时：
+
+```text
+y_actual = y_zero + head_offset_y
+```
+
+### 9.4 detector 坐标
+
+```text
+detector_z_actual = detector_z_zero
+x/y range 随 head_offset_x/y 平移
+```
+
+---
+
+## 10. SlitCollimatorProfileReader
+
+### 10.1 职责
+
+读取第二版狭缝准直器 CSV profile。
+
+输入表头：
+
+```csv
+profile_id,jaw_id,vertex_id,x_mm,z_mm
+```
+
+### 10.2 数据结构
 
 ```cpp
 struct XZPoint {
@@ -62,470 +476,157 @@ struct XZPoint {
     double z_mm;
 };
 
-struct PolygonJawProfile {
+struct SlitJawProfile {
     std::string jaw_id;
     std::vector<XZPoint> vertices;
 };
 
-struct CollimatorProfile {
+struct SlitCollimatorProfile {
     std::string profile_id;
-    std::array<PolygonJawProfile, 3> jaws;
+    std::vector<SlitJawProfile> jaws;
 };
 ```
 
-```cpp
-struct ScatterSummary {
-    int scatter_count_total = 0;
-    int compton_count = 0;
-    int rayleigh_count = 0;
-    bool has_scatter = false;
-    G4ThreeVector first_scatter_pos;
-    G4ThreeVector last_scatter_pos;
-};
-```
+### 10.3 验证规则
 
-```cpp
-struct DetectorHitRecord {
-    bool detected = false;
-    double det_x = 0.0;
-    double det_y = 0.0;
-    double det_z = -73.0;
-    double det_energy_keV = 0.0;
-    G4ThreeVector det_dir;
-};
-```
+必须验证：
 
-```cpp
-struct EventRecord {
-    int event_id = -1;
-    int track_id = 1;
-    int parent_id = 0;
-    double initial_energy_keV = 0.0;
-    G4ThreeVector initial_dir;
-    ScatterSummary scatter;
-    DetectorHitRecord hit;
-};
-```
+- 文件可打开；
+- 指定 `profile_id` 存在；
+- 必要列存在；
+- `M >= 1`；
+- jaw ID 连续为 `jaw_0 ... jaw_{M-1}`；
+- 每块 jaw 顶点数 `N >= 3`；
+- `vertex_id = 0 ... N-1` 连续；
+- 坐标有限；
+- 多边形面积非零；
+- 多边形凸；
+- 不含连续共线点。
 
-上述结构可集中放在 `include/SimulationData.hh` 或按职责拆入相应头文件。
+该类不创建 Geant4 solid。
 
 ---
 
-## 3. 仓库结构
+## 11. SlitCollimatorBuilder
 
-目标结构如下：
+### 11.1 职责
 
-```text
-MSS/
-├── .gitignore
-├── AGENTS.md
-├── CMakeLists.txt
-├── README.md
-├── main.cc
-├── docs/
-│   ├── architecture.md
-│   ├── decisions.md
-│   ├── milestones.md
-│   └── spec.md
-├── include/
-│   ├── DetectorConstruction.hh
-│   ├── PhysicsList.hh
-│   ├── PrimaryGeneratorAction.hh
-│   ├── RunAction.hh
-│   ├── EventAction.hh
-│   ├── SteppingAction.hh
-│   ├── CollimatorProfileReader.hh
-│   ├── CollimatorBuilder.hh
-│   ├── SpectrumSampler.hh
-│   ├── CsvWriter.hh
-│   ├── SimulationConfig.hh
-│   ├── SimulationMessenger.hh
-│   └── SimulationData.hh
-├── src/
-│   ├── DetectorConstruction.cc
-│   ├── PhysicsList.cc
-│   ├── PrimaryGeneratorAction.cc
-│   ├── RunAction.cc
-│   ├── EventAction.cc
-│   ├── SteppingAction.cc
-│   ├── CollimatorProfileReader.cc
-│   ├── CollimatorBuilder.cc
-│   ├── SpectrumSampler.cc
-│   ├── CsvWriter.cc
-│   ├── SimulationConfig.cc
-│   └── SimulationMessenger.cc
-├── macros/
-│   ├── vis.mac
-│   ├── run.mac
-│   └── run_mt.mac
-├── data/
-│   ├── collimator_profiles.csv
-│   └── spectrum.csv
-└── results/
-    └── .gitkeep
-```
+将已验证的 `SlitCollimatorProfile` 构建为 Geant4 钨几何。
 
-允许按 Geant4 标准模式增加：
+### 11.2 几何规则
+
+每块 jaw 使用：
 
 ```text
-include/ActionInitialization.hh
-src/ActionInitialization.cc
+G4ExtrudedSolid
 ```
 
-`.gitignore` 建议忽略：
+二维截面映射：
 
-```gitignore
-build/
-results/*.csv
-results/tmp/
-*.root
-*.log
-```
-
-但应保留：
-
-```gitignore
-!results/.gitkeep
-```
-
----
-
-## 4. 运行生命周期
-
-### 4.1 程序启动
-
-预期流程：
-
-```text
-main()
-  ├── 使用 G4RunManagerFactory 创建 run manager
-  ├── 创建共享 SimulationConfig
-  ├── 注册 DetectorConstruction
-  ├── 注册 PhysicsList
-  ├── 注册 ActionInitialization 或各个 user action
-  ├── 创建 SimulationMessenger
-  ├── 若传入 argv[1]，执行宏文件
-  └── 若无宏文件，可进入交互模式
-```
-
-必须使用 Geant4 run manager factory，不应写死单线程 run manager。
-
-### 4.2 宏命令配置
-
-第一版必须支持：
-
-```text
-/geometry/collimatorProfileFile data/collimator_profiles.csv
-/geometry/collimatorProfileId P001
-/geometry/enableCollimator true
-/geometry/enableAirDefect true
-
-/source/energyMode mono
-/source/monoEnergy 160 keV
-/source/spectrumFile data/spectrum.csv
-
-/run/randomSeed 12345
-/run/numberOfThreads 8
-
-/output/directory results
-/output/debug false
-```
-
-实现要求：
-
-- 宏命令值进入明确的配置字段。
-- 几何相关命令必须在 `/run/initialize` 前生效。
-- 源与输出配置必须在 `/run/beamOn` 前有效。
-- 非法值应尽早报错，不应静默回退。
-
-建议配置结构：
-
-```cpp
-struct GeometryConfig {
-    std::string collimator_profile_file = "data/collimator_profiles.csv";
-    std::string collimator_profile_id = "P001";
-    bool enable_collimator = true;
-    bool enable_air_defect = true;
-};
-
-struct SourceConfig {
-    std::string energy_mode = "mono";
-    double mono_energy_keV = 160.0;
-    std::string spectrum_file = "data/spectrum.csv";
-};
-
-struct OutputConfig {
-    std::string output_directory = "results";
-
-    // 重要：debug 是否显式设置，应与 debug 值分开。
-    // 若未显式设置，则单线程默认 debug，多线程默认 compact。
-    std::optional<bool> debug_override = std::nullopt;
-};
-
-struct RunConfig {
-    long random_seed = 12345;
-    int number_of_threads = 1;
-};
-```
-
-也可以合并为一个 `SimulationConfig`。关键点是 `/output/debug` 的“是否显式设置”需要被保存，否则无法同时满足“单线程默认 debug、多线程默认 compact”的规则。
-
-### 4.3 `/run/initialize`
-
-初始化阶段应完成：
-
-1. `DetectorConstruction` 构建 World、PMMA、可选空气缺陷、可选准直器和探测面可视化辅助体。
-2. 准直器启用时，`CollimatorProfileReader` 读取并验证指定 profile。
-3. 准直器启用时，`CollimatorBuilder` 将 profile 转换为 Geant4 钨准直器几何。
-4. `PhysicsList` 注册 `G4EmLivermorePhysics` 并设置 production cut。
-5. 源、输出与线程配置处于有效状态。
-
-profile 或几何输入无效时，必须在事件产生前停止。
-
-### 4.4 run 开始
-
-`BeginOfRunAction` 负责：
-
-1. 应用或确认随机种子。
-2. 根据线程数和 `/output/debug` 显式设置解析最终输出模式。
-3. 构造最终输出文件名与线程临时文件名。
-4. 创建输出目录与 `tmp/` 目录。
-5. 初始化当前线程对应的 CSV writer。
-
-默认输出模式：
-
-| 条件 | 默认模式 |
+| 输入物理量 | `G4ExtrudedSolid` local 坐标 |
 |---|---|
-| 单线程且未显式设置 `/output/debug` | debug |
-| 多线程且未显式设置 `/output/debug` | compact |
-| 显式设置 `/output/debug true/false` | 使用显式值 |
+| global x | local x |
+| global z | local y |
+| global y | local z 拉伸方向 |
 
-### 4.5 event 生命周期
+沿 global `y` 方向拉伸。
 
-```text
-BeginOfEventAction
-  ├── 重置 EventRecord
-  ├── 重置 ScatterSummary
-  └── 重置 DetectorHitRecord
+第二版不构建镜像 jaw。
 
-GeneratePrimaries
-  ├── 采样 primary gamma 初始能量
-  ├── 在 z = 0 圆形束斑上采样目标点
-  ├── 从源位置发射 primary gamma
-  └── 将初始能量写入 EventAction
+### 11.3 offset 应用
 
-SteppingAction
-  ├── 忽略非 primary gamma
-  ├── 统计 PMMA 内 Compton/Rayleigh 散射
-  ├── 判断是否穿越探测面
-  └── 若穿越点在探测器边界内，记录 hit
+`SlitCollimatorBuilder` 应接收当前 `ScanPose` 或已计算的实际坐标。
 
-EndOfEventAction
-  ├── 若 hit.detected == true，写出一行 CSV
-  └── 否则不写出
-```
-
-不变量：
-
-```text
-1 event = 1 primary gamma
-1 CSV row = 1 detected primary gamma
-```
-
-未到达探测面的事件不写入 CSV。
-
-### 4.6 run 结束
-
-`EndOfRunAction` 负责：
-
-1. 关闭线程本地 CSV 文件。
-2. 由 master 合并 worker 临时 CSV。
-3. 合并时只保留一个 header。
-4. compact 模式合并成功后删除对应临时文件。
-5. debug 模式合并成功后保留对应临时文件。
-6. 合并失败时保留所有临时文件并报错。
+不得在 builder 内私自读取全局配置。
 
 ---
 
-## 5. 组件设计
+## 12. SourceModel 与 PrimaryGeneratorAction
 
-### 5.1 `DetectorConstruction`
+### 12.1 `SourceModel`
 
 职责：
 
-- 构建 World。
-- 构建 PMMA 模体。
-- 根据 `enable_air_defect` 构建或省略空气缺陷。
-- 根据 `enable_collimator` 决定是否调用 `CollimatorProfileReader` 与 `CollimatorBuilder` 构建准直器。
-- 构建探测面的可视化辅助几何。
-- 暴露探测器边界配置，供 `SteppingAction` 使用。
+- 计算 incident direction；
+- 在焦点面内采样起点；
+- 按 mono / spectrum 采样能量。
 
-稳定 volume 名称建议：
+### 12.2 incident direction
 
 ```text
-WorldLogical
-PMMALogical
-AirDefectLogical
-CollimatorJaw0Logical
-CollimatorJaw1Logical
-CollimatorJaw2Logical
-CollimatorJaw0MirrorLogical
-CollimatorJaw1MirrorLogical
-CollimatorJaw2MirrorLogical
-DetectorPlaneVisLogical
-DetectorPlaneVisMirrorLogical
+incident_dir = (cos(theta), 0, sin(theta))
 ```
 
-`SteppingAction` 不应依赖可视化属性或 placement 顺序判断物理含义。
-
-探测面辅助几何只用于可视化，不应作为 sensitive detector，也不应用于能量沉积统计。
-
-### 5.2 `CollimatorProfileReader`
-
-职责：读取、筛选、验证并返回一个 `CollimatorProfile`。
-
-输入 CSV：
-
-```csv
-profile_id,jaw_id,vertex_id,x_mm,z_mm
-```
-
-必须报错停止的情况：
-
-- 文件无法打开。
-- 指定 `profile_id` 不存在。
-- 缺少必要列。
-- 指定 profile 中不是三块 jaw。
-- jaw ID 不是 `jaw_0`、`jaw_1`、`jaw_2`。
-- 某块 jaw 少于 3 个顶点。
-- `vertex_id` 不是从 `0` 到 `N-1` 的连续整数，或缺失、重复。
-- 坐标为空、非数值、NaN 或 Inf。
-- 多边形面积为 0。
-- 多边形非凸或含连续共线点。
-
-该类只验证数据，不创建 Geant4 solid。
-
-### 5.3 `CollimatorBuilder`
-
-职责：将已验证的 `CollimatorProfile` 转换为 Geant4 钨几何。
-
-要求：
-
-- 使用 `G4ExtrudedSolid`。
-- 输入 `x_mm` 和 `z_mm` 是全局坐标。
-- 映射关系为：global x → local x，global z → local y。
-- local z 为拉伸方向，半长 `60 mm`。
-- 旋转使拉伸方向对应全局 y 方向。
-- 每个 profile 构建 3 块原始 jaw，并构建 3 块关于 `x = 0` 镜像的 jaw。
-- 镜像 jaw 使用 `x' = -x, z' = z`；构建前可统一顶点方向，但不得改变几何形状。
-- 不额外叠加 `collimator_center_z`。
-
-该类不解析 CSV，也不决定使用哪个 profile。
-
-### 5.4 `PhysicsList`
-
-职责：定义 Geant4 物理过程。
-
-要求：
-
-- 注册 `G4EmLivermorePhysics`。
-- 设置全局 production cut 为 `0.1 mm`。
-
-不得包含几何、源、输出或事件记录逻辑。
-
-### 5.5 `PrimaryGeneratorAction`
-
-职责：每个 event 产生一个 primary gamma。
-
-要求：
-
-- 粒子类型：gamma。
-- 源位置：`(0, 0, -185 mm)`。
-- 束型：通过 z = 0 平面圆形目标点采样生成锥束。
-- 束斑半径：`1.5 mm`。
-- 能量模式：`mono` 或 `spectrum`。
-
-采样初始能量和目标平面方向后，应通过 Geant4 primary vertex 保存到 event；`EventAction::BeginOfEventAction` 从 event 读取 `initial_energy_keV` 和初始单位方向。
-
-不得写 CSV，也不得判断探测面穿越。
-
-### 5.6 `SpectrumSampler`
-
-职责：读取能谱 CSV 并按权重采样 gamma 能量。
-
-输入 CSV：
-
-```csv
-energy_keV,weight
-```
-
-要求：
-
-- 能量为正且有限。
-- 权重非负且有限。
-- 文件非空。
-- 总权重大于 0。
-- 内部归一化并构建 CDF。
-- 每个 event 采样一个能量。
-
-该类不应依赖 Geant4 event、几何或输出文件。
-
-### 5.7 `EventAction`
-
-职责：持有当前 event 的记录。
-
-event 开始时：
-
-- 重置散射计数。
-- first/last scatter 位置置为 NaN。
-- 重置 detector hit 标记。
-- 准备接收初始能量。
-
-event 过程中提供接口，例如：
-
-```cpp
-void SetInitialEnergy(double energy_keV);
-void RecordComptonScatter(const G4ThreeVector& pos);
-void RecordRayleighScatter(const G4ThreeVector& pos);
-void RecordDetectorHit(const DetectorHitRecord& hit);
-bool HasDetectorHit() const;
-const EventRecord& GetRecord() const;
-```
-
-event 结束时：
-
-- 若已探测，写一行 CSV。
-- 若未探测，不写。
-
-`EventAction` 不负责判断某个 step 是否为 Compton/Rayleigh，也不负责探测面穿越计算。
-
-### 5.8 `SteppingAction`
-
-职责：检查每个 step 并更新事件状态。
-
-只处理：
+`theta` 来自 YAML，合法范围：
 
 ```text
-particle == gamma
-track_id == 1
-parent_id == 0
+0° < theta <= 90°
 ```
 
-PMMA 内散射计数条件：
+### 12.3 焦点面采样
+
+基向量：
 
 ```text
-processName == "compt" || processName == "Rayl"
+u = (0, 1, 0)
+v = (-sin(theta), 0, cos(theta))
 ```
 
-并且相互作用点位于 PMMA 材料或 `PMMALogical` 对应区域内。空气缺陷、钨准直器、World 中的相互作用不计入 PMMA 散射。
+采样：
 
-散射位置使用：
-
-```cpp
-step->GetPostStepPoint()->GetPosition()
+```text
+r = R * sqrt(xi_1)
+phi = 2π * xi_2
 ```
 
-探测面穿越条件：
+起点：
+
+```text
+gamma_start = source_pos_actual
+            + r * cos(phi) * u
+            + r * sin(phi) * v
+```
+
+方向：
+
+```text
+gamma_dir = incident_dir
+```
+
+### 12.4 `PrimaryGeneratorAction`
+
+每个 event 只产生一个 primary gamma。
+
+不负责：
+
+- 写 CSV；
+- 判断探测器命中；
+- 统计散射。
+
+---
+
+## 13. VirtualDetectorPlane
+
+### 13.1 职责
+
+`VirtualDetectorPlane` 是配置与几何辅助模块，不是真实 sensitive detector。
+
+职责：
+
+- 保存 detector zero config；
+- 根据 pose 计算 detector actual bounds；
+- 可构建可视化辅助体；
+- 向 `SteppingAction` 提供当前 detector crossing 所需配置。
+
+### 13.2 detector crossing 配置
+
+第一阶段支持：
+
+```yaml
+accept_direction: negative_z
+```
+
+对应：
 
 ```text
 preStep.z > detector_z
@@ -533,215 +634,485 @@ postStep.z <= detector_z
 direction.z < 0
 ```
 
-穿越点线性插值：
+---
+
+## 14. EventRecord
+
+### 14.1 数据结构
+
+```cpp
+struct ScatterSummary {
+    int scatter_count_total = 0;
+    int compton_count = 0;
+    int rayleigh_count = 0;
+
+    G4ThreeVector first_scatter_pos;
+    G4ThreeVector last_scatter_pos;
+
+    std::string first_scatter_region_id = "none";
+    std::string last_scatter_region_id = "none";
+};
+
+struct DetectorHitRecord {
+    bool detected = false;
+    double det_x_mm = std::numeric_limits<double>::quiet_NaN();
+    double det_y_mm = std::numeric_limits<double>::quiet_NaN();
+    double det_z_mm = std::numeric_limits<double>::quiet_NaN();
+    double det_energy_keV = std::numeric_limits<double>::quiet_NaN();
+};
+
+struct EventRecord {
+    int event_id = -1;
+    ScatterSummary scatter;
+    DetectorHitRecord hit;
+};
+```
+
+### 14.2 reset 规则
+
+每个 event 开始时：
+
+```text
+detected = false
+scatter_count_total = 0
+compton_count = 0
+rayleigh_count = 0
+first / last scatter position = NaN
+first / last scatter region = none
+det fields = NaN
+```
+
+---
+
+## 15. EventAction
+
+### 15.1 职责
+
+`EventAction` 持有当前 event 的 `EventRecord`。
+
+提供接口：
+
+```cpp
+void BeginOfEventAction(const G4Event*) override;
+void EndOfEventAction(const G4Event*) override;
+
+void RecordComptonScatter(const G4ThreeVector& pos, const std::string& region_id);
+void RecordRayleighScatter(const G4ThreeVector& pos, const std::string& region_id);
+void RecordDetectorHit(const DetectorHitRecord& hit);
+
+const EventRecord& GetRecord() const;
+bool HasDetectorHit() const;
+```
+
+### 15.2 写出规则
+
+End of event：
+
+| 模式 | 行为 |
+|---|---|
+| 正式模式 | 只有 `detected == true` 才写一行。 |
+| debug 模式 | detected 和 undetected 都写一行，并写 `detected` 字段。 |
+
+`EventAction` 不负责判断 step 是否为散射，也不负责 detector crossing 插值。
+
+---
+
+## 16. SteppingAction
+
+### 16.1 过滤对象
+
+只处理 primary gamma：
+
+```text
+particle_name == gamma
+track_id == 1
+parent_id == 0
+```
+
+### 16.2 散射统计
+
+计入：
+
+```text
+processName == "compt"
+processName == "Rayl"
+```
+
+不计入：
+
+- photoelectric effect；
+- secondary interactions；
+- 非 gamma 粒子。
+
+事件是否进入正式 CSV 不由散射发生位置决定。
+
+散射位置：
+
+```text
+postStep position
+```
+
+region 归属：
+
+```text
+preStep volume -> RegionResolver
+```
+
+### 16.3 detector crossing
+
+当 detector accept direction 为 `negative_z` 时：
+
+```text
+preStep.z > detector_z
+postStep.z <= detector_z
+direction.z < 0
+```
+
+穿越点：
 
 ```text
 t = (detector_z - pre_z) / (post_z - pre_z)
 det_x = pre_x + t * (post_x - pre_x)
 det_y = pre_y + t * (post_y - pre_y)
+det_z = detector_z
 ```
 
-hit 接受范围：
+若穿越点落在当前 pose 的 detector bounds 内，则记录 detector hit。
 
-```text
-original detector: 53 mm <= det_x <= 161 mm, -50 mm <= det_y <= 50 mm
-mirror detector: -161 mm <= det_x <= -53 mm, -50 mm <= det_y <= 50 mm
-```
-
-同一 event 一旦在任一探测区域记录有效 detector hit，后续穿越不应再产生额外 CSV 行。CSV 不新增 detector ID，镜像命中时 `det_x` 保留负的全局 x 坐标。
-
-### 5.9 `CsvWriter`
-
-职责：安全写出 CSV。
-
-要求：
-
-- 根据 debug/compact 模式生成精确 header。
-- 每个 worker 线程写独立临时 CSV。
-- 不共享同一个 `std::ofstream`。
-- 写出前统一转换为 mm 与 keV。
-- 无散射位置写为 `NaN`。
-- run 结束后由 master 合并。
-- 最终文件只保留一个 header。
-
-compact header：
-
-```csv
-initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
-```
-
-debug header：
-
-```csv
-event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,initial_dir_x,initial_dir_y,initial_dir_z,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
-```
-
-### 5.10 `RunAction`
-
-职责：管理 run 级初始化与结束。
-
-要求：
-
-- 初始化随机种子。
-- 解析最终输出模式。
-- 构造最终文件名和线程临时文件名。
-- run 开始时初始化 CSV writer。
-- run 结束时触发 master 合并。
-
-不得执行 per-step 物理判断，也不得解析准直器多边形。
+同一 event 只记录第一次有效 detector hit。
 
 ---
 
-## 6. 数据流
+## 17. CsvWriter
 
-配置数据流：
+### 17.1 职责
 
-```text
-Macro commands
-  └── SimulationConfig
-        ├── DetectorConstruction
-        │     ├── CollimatorProfileReader
-        │     └── CollimatorBuilder
-        ├── PrimaryGeneratorAction
-        │     └── SpectrumSampler
-        ├── RunAction
-        │     └── CsvWriter
-        └── SteppingAction
-              └── DetectorPlaneConfig
+`CsvWriter` 负责：
+
+- 生成正式 CSV header；
+- 生成 debug CSV header；
+- 每个 worker 写线程本地临时 CSV；
+- master 合并临时 CSV；
+- 合并时只保留一个 header；
+- 正式模式合并成功后删除临时文件；
+- debug 模式合并成功后保留临时文件。
+
+### 17.2 正式 CSV header
+
+```csv
+event_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
 ```
 
-单 event 数据流：
+### 17.3 Debug CSV header
+
+```csv
+event_id,detected,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
+```
+
+### 17.4 线程文件组织
+
+每个 pose 输出目录：
 
 ```text
-PrimaryGeneratorAction
-  └── Geant4 primary vertex: initial energy + initial direction
-        ↓
-EventAction::EventRecord
-        ↑
-SteppingAction
-  ├── PMMA scatter updates
-  └── detector crossing update
-        ↓
-EndOfEventAction
-  └── CsvWriter::WriteRow(EventRecord)
+results/{run_id}/
+├── events.csv 或 events_debug.csv
+├── metadata.yaml
+└── tmp/
+    ├── events_thread0.csv
+    ├── events_thread1.csv
+    └── ...
+```
+
+worker 不得直接写最终 CSV。
+
+---
+
+## 18. MetadataWriter
+
+### 18.1 职责
+
+`MetadataWriter` 负责为每个 pose 写出 `metadata.yaml`。
+
+metadata 记录 run-level 条件，不重复写入每个事件行。
+
+### 18.2 必须包含的字段
+
+```yaml
+run_id: ...
+output_csv: ...
+model_type: ...
+vehicle_model_id: ...
+vehicle_geometry_file: ...
+selected_target_component: ...
+abnormal_target_type: ...
+abnormal_target_region: ...
+pose_id: ...
+head_offset_x_mm: ...
+head_offset_y_mm: ...
+n_primary: ...
+random_seed: ...
+number_of_threads: ...
+debug: ...
+source: ...
+collimator: ...
+detector: ...
+physics: ...
+notes: ...
+```
+
+禁止使用：
+
+```text
+vehicle_shift_x
+vehicle_shift_y
 ```
 
 ---
 
-## 7. 多线程模型
+## 19. Run / pose 生命周期
+
+### 19.1 程序启动
+
+```text
+main()
+  ├── 读取 simulation_config_v2.yaml
+  ├── 读取 vehicle_roi_v03.yaml
+  ├── 验证所有配置
+  ├── 生成 PoseList
+  ├── 创建 Geant4 run manager
+  ├── 注册 PhysicsList
+  ├── 注册 ActionInitialization
+  └── 交给 PoseRunController 执行 pose runs
+```
+
+### 19.2 每个 pose 的运行流程
+
+```text
+For each ScanPose:
+  ├── 生成 pose_id
+  ├── 生成 run_id
+  ├── 计算 head_offset
+  ├── 构建或刷新当前 pose 的 ImagingHead
+  ├── VehicleROI 保持固定
+  ├── 初始化 / 重新初始化 Geant4 geometry
+  ├── BeginOfRunAction
+  │     ├── 创建 results/{run_id}/
+  │     ├── 创建 tmp/
+  │     └── 打开线程本地 CSV
+  ├── BeamOn n_primary_per_pose
+  ├── EndOfRunAction
+  │     ├── 关闭线程本地 CSV
+  │     ├── master 合并
+  │     └── 处理临时文件
+  └── MetadataWriter 写 metadata.yaml
+```
+
+实现可以选择：
+
+- 每个 pose 重新创建 run manager；或
+- 使用同一个 run manager 并在 pose 间重新初始化几何。
+
+但对外语义必须保持：
+
+```text
+每个 pose 是一组独立静态几何 Monte Carlo 统计。
+```
+
+---
+
+## 20. 多线程模型
 
 多线程模式下：
 
-- worker 线程处理 events。
-- 每个 worker 写自己的临时 CSV。
-- master 在 run 结束后合并文件。
+- worker 处理 events；
+- 每个 worker 写自己的临时 CSV；
+- master 合并临时 CSV；
+- 不共享 `std::ofstream`；
+- 不把全部 event records 累积到内存后再统一写出。
 
 允许共享只读状态：
 
-- 几何常量。
-- 探测面边界。
-- 冻结后的配置值。
+- 已冻结配置；
+- 车辆 ROI 几何常量；
+- 当前 pose 配置；
+- detector actual bounds；
+- region registry 只读映射；
+- collimator profile 数据。
 
 禁止共享可变状态：
 
-- 多线程共享一个 `std::ofstream`。
-- 多线程更新同一个 `EventRecord`。
-- 将全部 event record 累积到内存后统一写出。
+- 当前 event record；
+- 输出流；
+- worker 本地 CSV writer；
+- mutable random sampling state。
 
 ---
 
-## 8. 错误处理策略
+## 21. 数据流
 
-无效输入或不可能几何应 fail fast。
-
-初始化阶段 fatal：
-
-- 缺少准直器 profile 文件。
-- 找不到指定 profile ID。
-- jaw 或 vertex 数量错误。
-- 多边形非法。
-- spectrum 模式下能谱文件非法。
-- 输出目录无法创建。
-
-运行阶段 fatal：
-
-- CSV 文件无法打开。
-- CSV 合并失败。
-
-设计上非 fatal：
-
-- event 未到达探测器。
-- event 无 PMMA 散射但到达探测器。
-- event 在探测前发生光电吸收。
-
----
-
-## 9. 单位与输出约定
-
-Geant4 内部可使用 Geant4 单位系统。
-
-CSV 输出统一约定：
-
-| 量 | CSV 单位 |
-|---|---|
-| 长度 | mm |
-| 能量 | keV |
-
-除非 `spec.md` 更新，不应给 CSV 字段名增加单位后缀。
-
----
-
-## 10. Codex 实现边界
-
-Codex 应按里程碑逐步实现。
-
-推荐任务格式：
+### 21.1 配置数据流
 
 ```text
-Read docs/spec.md, docs/architecture.md, and docs/milestones.md.
-Implement Milestone 2 only: Collimator profile reader.
-Do not modify unrelated modules except CMakeLists.txt if required.
-After implementation, summarize changed files and validation commands.
+simulation_config_v2.yaml
+  └── SimulationConfigReader
+        └── SimulationConfig
+              ├── PoseList
+              ├── SourceConfig
+              ├── CollimatorConfig
+              ├── DetectorConfig
+              ├── OutputConfig
+              └── PhysicsConfig
+
+vehicle_roi_v03.yaml
+  └── VehicleROIConfigReader
+        └── VehicleROIConfig
+              └── VehicleROIConstruction
 ```
 
-不推荐任务：
+### 21.2 几何数据流
 
 ```text
-Build the whole project.
-Make it work.
-Implement everything from the spec.
+VehicleROIConfig
+  └── VehicleROIConstruction
+        ├── MaterialManager
+        └── RegionRegistry
+
+ScanPose + ImagingHeadConfig
+  └── ImagingHeadConstruction
+        ├── SlitCollimatorProfileReader
+        ├── SlitCollimatorBuilder
+        └── VirtualDetectorPlane
 ```
 
-这类任务范围过大，不利于检查错误。
+### 21.3 event 数据流
+
+```text
+PrimaryGeneratorAction
+  └── Generate primary gamma
+
+SteppingAction
+  ├── filter primary gamma
+  ├── record Compton / Rayleigh scatter
+  ├── resolve region from preStep volume
+  └── detect virtual detector crossing
+
+EventAction
+  ├── hold EventRecord
+  └── write row according to output mode
+
+CsvWriter
+  ├── write thread-local CSV
+  └── master merge
+```
 
 ---
 
-## 11. 第一版非目标
+## 22. 错误处理策略
 
-第一版不得扩展到以下功能，除非 `spec.md` 明确更新：
+### 22.1 配置阶段 fatal
 
-- 图像重建。
-- 真实探测器材料响应。
-- 探测器能量沉积 scoring。
-- 自动遍历全部 collimator profile。
-- 全部散射轨迹输出。
-- 源位置宏命令。
-- 探测器边界宏命令。
-- 真实准直器 profile 生成逻辑。
+- YAML 文件不存在；
+- `schema_version` 不支持；
+- 必要字段缺失；
+- 字段类型错误；
+- list pose 数组长度不一致；
+- offset 非整数；
+- `n_primary_per_pose <= 0`；
+- `number_of_threads < 1`；
+- `model_type` 非法；
+- abnormal 模式未指定 target；
+- detector range 非法；
+- theta 非法；
+- focal spot diameter 非法。
+
+### 22.2 几何阶段 fatal
+
+- material 无法解析；
+- host 不存在；
+- daughter 不在 host 内；
+- 同级实体 overlap；
+- insert 不在唯一宿主内；
+- region_id 缺失；
+- collimator profile 非法。
+
+### 22.3 运行 / 输出阶段 fatal
+
+- CSV 无法创建；
+- metadata 无法写出；
+- 线程临时文件无法创建；
+- 合并失败；
+- 合并后 header 不唯一。
+
+原则：
+
+```text
+不静默回退
+不自动修复非法输入
+错误信息应包含文件、字段或组件名
+```
 
 ---
 
-## 12. 架构验收清单
+## 23. 后处理边界
+
+Geant4 程序不负责：
+
+- 探测器二维 histogram；
+- normal / abnormal 差异图；
+- 相对变化图；
+- CNR；
+- detector region mapping；
+- depth region mapping；
+- `M_RJ`；
+- `purity_R`；
+- `crosstalk_R`；
+- `H_k`；
+- `H_ms`；
+- `F_ms`；
+- `D_JS`；
+- SVD / effective rank。
+
+这些全部由后处理读取 `events.csv` 和 `metadata.yaml` 计算。
+
+---
+
+## 24. 第一阶段非目标
+
+第一阶段不实现：
+
+- 整车 CAD；
+- 曲面真实车身；
+- 真实探测器响应；
+- sensitive detector 能量沉积；
+- 图像重建；
+- 连续运动扫描；
+- 运动模糊；
+- 时间相关积分；
+- 成像头旋转；
+- 成像头 z 方向运动；
+- 镜像准直器；
+- 镜像探测器；
+- 在 Geant4 内生成统计图。
+
+---
+
+## 25. 架构验收要点
 
 实现满足本文档的条件：
 
-- `spec.md` 是物理参数和输出规格的唯一最高依据。
-- 几何构建、profile 读取、事件跟踪和 CSV 输出位于不同模块。
-- 只记录 primary gamma。
-- PMMA 内 Compton/Rayleigh 散射计数绑定到当前 event。
-- 探测面穿越使用线性插值。
-- 一个被探测 primary gamma 只产生一行 CSV。
-- 多线程输出不共享一个输出流。
-- compact 模式只在合并成功后删除临时 CSV。
-- debug 模式合并成功后保留临时 CSV。
-- 非法 profile 在事件生成前报错停止。
+- 以 YAML 为主配置入口；
+- 车辆 ROI 固定，成像头移动；
+- `head_offset_x/y` 统一作用于 source、collimator、detector；
+- `pose_id` 自动生成，不手写；
+- source 使用斜入射有限焦点笔形束；
+- collimator reader 支持可变 jaw 数量；
+- 不构建镜像准直器；
+- 不构建镜像探测器；
+- detector crossing 由当前 pose detector bounds 决定；
+- 散射位置用 postStep position；
+- region 归属用 preStep volume；
+- 正式 CSV 只写 detected primary gamma；
+- debug CSV 写 detected 与 undetected，并仅额外增加 `detected` 字段；
+- metadata 使用 `head_offset_x/y`，不使用 `vehicle_shift_x/y`；
+- 多线程输出不共享输出流；
+- master 合并后最终 CSV 只有一个 header。

@@ -37,7 +37,7 @@ cmake --build build -j
 预期输出：
 
 ```text
-results/hits_profile_P001_mono_160keV_seed12345_debug.csv
+results/hits_profile_P001_mono_160keV_defect_off_thick_20mm_seed123_debug.csv
 ```
 
 多线程 compact 测试：
@@ -49,8 +49,10 @@ results/hits_profile_P001_mono_160keV_seed12345_debug.csv
 预期输出：
 
 ```text
-results/hits_profile_P001_mono_160keV_seed12345.csv
+results/hits_profile_P001_mono_160keV_defect_on_thick_{当前 PMMA 厚度}mm_seed111.csv
 ```
+
+当前 `macros/run_mt.mac` 启用空气缺陷。如果代码中的 PMMA 厚度不足以容纳固定空气缺陷，程序会在 `/run/initialize` 阶段报错停止，不会生成误导性的 CSV。
 
 几何与轨迹可视化：
 
@@ -79,6 +81,8 @@ results/hits_profile_P001_mono_160keV_seed12345.csv
 | `/output/debug false` | 显式选择 debug 或 compact 输出 |
 
 若未显式设置 `/output/debug`，单线程默认 debug，多线程默认 compact。
+
+PMMA 厚度没有宏命令。程序运行时从几何构建代码中的实际 PMMA 厚度生成输出文件名；不要使用 `/geometry/pmmaThickness`，该命令不存在。启用空气缺陷时，固定空气缺陷必须完整落在当前 PMMA z 范围内，否则初始化失败。
 
 ## 输入 CSV
 
@@ -142,6 +146,17 @@ event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,i
 
 `is_multiple_scatter` 的定义是 `scatter_count_total >= 2`。无 PMMA 内散射时，first / last scatter 坐标输出为 `NaN`。
 
+输出文件名记录 run-level metadata，不写入每行 CSV。当前格式为：
+
+```text
+results/hits_profile_{profile_id}_mono_{energy}keV_{defect_state}_thick_{pmma_thickness}mm_seed{seed}.csv
+results/hits_profile_{profile_id}_mono_{energy}keV_{defect_state}_thick_{pmma_thickness}mm_seed{seed}_debug.csv
+results/hits_profile_{profile_id}_spectrum_{defect_state}_thick_{pmma_thickness}mm_seed{seed}.csv
+results/hits_profile_{profile_id}_spectrum_{defect_state}_thick_{pmma_thickness}mm_seed{seed}_debug.csv
+```
+
+其中 `defect_state` 为 `defect_on` 或 `defect_off`。厚度格式去掉无意义尾随 0，并把小数点写作 `p`，例如 `65 mm -> thick_65mm`，`2.5 mm -> thick_2p5mm`。
+
 ## Debug 与 Compact
 
 debug 模式包含 event、track、parent、探测面 z、探测方向和 primary 初始方向字段，适合单线程调试。
@@ -149,6 +164,13 @@ debug 模式包含 event、track、parent、探测面 z、探测方向和 primar
 compact 模式只包含后处理统计所需字段，适合多线程正式运行。
 
 多线程运行时，每个 worker 写入 `results/tmp/` 下的临时 CSV，run 结束后由 master 合并。compact 模式合并成功后删除对应临时 CSV；debug 模式合并成功后保留临时 CSV。
+
+线程临时文件使用同一个 base filename，并追加 thread ID：
+
+```text
+results/tmp/hits_profile_{profile_id}_mono_{energy}keV_{defect_state}_thick_{pmma_thickness}mm_seed{seed}_thread0.csv
+results/tmp/hits_profile_{profile_id}_mono_{energy}keV_{defect_state}_thick_{pmma_thickness}mm_seed{seed}_debug_thread0.csv
+```
 
 ## 第一版限制
 
