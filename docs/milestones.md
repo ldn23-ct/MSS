@@ -50,8 +50,8 @@ After implementation, summarize:
 
 ### 3.1 必须遵守
 
-- 以 YAML 作为第二版主配置入口。
-- 使用两个配置文件：`vehicle_roi_v03.yaml` 和 `simulation_config_v2.yaml`。
+- 以 `data/simulation_config_v2.yaml` 或 `--config` 指定的等价 YAML 作为第二版主配置入口。
+- 主入口 YAML 位于 `data/`，车辆 ROI、collimator profile 和 spectrum 文件也位于 `data/`，具体文件名由主入口 YAML 指定。
 - 车辆 ROI 固定，成像头移动。
 - 使用 `head_offset_x_mm` / `head_offset_y_mm`，不得使用 `vehicle_shift_x/y`。
 - `pose_id` 由 offset 自动生成，不由用户手写。
@@ -69,6 +69,9 @@ After implementation, summarize:
 - 散射坐标使用 postStep position。
 - 散射 region 归属使用 preStep volume。
 - 输出采用 `events.csv` / `events_debug.csv` + `metadata.yaml`。
+- 本轮不实现 pose-level summary、scan-level summary、图表、统计指标或后处理脚本。
+- World 使用中心 `[0,0,0]`、边长 `4000 mm` 的固定 `G4_AIR` box，并检查所有 pose 下组件均在 World 内。
+- 一个 run 对应一个 pose 和一个实际 seed；一个 run 可以使用多线程执行。
 - 多线程输出使用线程临时 CSV + master 合并。
 - 所有非法配置、非法几何、非法 profile 和输出错误必须 fail fast。
 
@@ -85,10 +88,34 @@ After implementation, summarize:
 - 不得加入真实探测器材料响应。
 - 不得加入 sensitive detector 能量沉积 scoring。
 - 不得在 Geant4 程序中生成统计图、差异图或 CNR。
+- 不得在本轮实现 pose_summary.csv、scan_summary.csv 或后处理脚本。
 - 不得让多个 worker 共享同一个 `std::ofstream`。
 - 不得在正式 CSV 中加入 `detected`、`pose_id`、`model_type` 或 `head_offset_x/y`。
 - 不得在 debug CSV 中加入 `termination_process`、`termination_volume`、`termination_region_id`。
 - 不得静默修复非法 YAML、非法 profile 或非法几何。
+
+### 3.3 现有代码迁移规则
+
+当前仓库不是空骨架，而是第一轮 PMMA 背散射实现。后续里程碑应在现有代码上建立第二轮结构，同时隔离第一轮语义。
+
+可机制级复用：
+
+- `SpectrumSampler` 的 spectrum CSV 验证和 CDF sampling；
+- `CsvWriter` / `RunAction` 中 worker 临时 CSV 与 master merge 的基本思路；
+- `SteppingAction` 中 primary gamma 过滤和 detector plane crossing 插值；
+- `CollimatorProfileReader` 中 CSV 基础解析和凸多边形检查；
+- `CollimatorBuilder` 中 `G4ExtrudedSolid` 构建经验；
+- `PhysicsList` 中 `G4EmLivermorePhysics` 和 `0.1 mm` production cut。
+
+必须隔离或替换：
+
+- PMMA / air defect 几何；
+- mirror collimator 和 mirror detector；
+- macro 主配置入口和旧 `/geometry/*`、`/source/*`、`/output/*` 参数；
+- `PMMALogical` 内散射过滤；
+- `hits_profile_*` 输出文件名；
+- compact/debug 第一轮 CSV header；
+- 固定三块 jaw 数据结构。
 
 ---
 
@@ -96,7 +123,7 @@ After implementation, summarize:
 
 | 里程碑 | 名称 | 主要交付物 |
 |---:|---|---|
-| M0 | 第二版仓库骨架 | 可编译最小项目、核心占位类、基础 CLI |
+| M0 | 第二版仓库骨架与 legacy 隔离 | 可编译最小项目、核心占位类、基础 CLI、第一轮语义隔离 |
 | M1 | `simulation_config_v2.yaml` 读取 | `SimulationConfigReader`、配置结构、基础验证 |
 | M2 | `vehicle_roi_v03.yaml` 读取 | `VehicleROIConfigReader`、组件配置、host/insert 校验 |
 | M3 | 材料与 region 基础设施 | `MaterialManager`、`RegionRegistry`、`RegionResolver` |
@@ -116,11 +143,11 @@ After implementation, summarize:
 
 ---
 
-# M0：第二版仓库骨架
+# M0：第二版仓库骨架与 legacy 隔离
 
 ## 目标
 
-创建第二版最小可编译 Geant4 项目骨架。该阶段只建立目录、CMake、入口文件和核心占位类，不实现真实车辆几何、源、准直器、探测器或 CSV 输出。
+在现有第一轮代码基础上建立第二版最小可编译骨架，并隔离 legacy PMMA / macro / mirror / old CSV 语义。该阶段只建立 CMake、入口文件和核心占位类的第二轮边界，不实现真实车辆几何、源、准直器、探测器或 CSV 输出。
 
 ## 创建或修改文件
 
@@ -153,7 +180,6 @@ After implementation, summarize:
 - `include/CsvWriter.hh`
 - `include/MetadataWriter.hh`
 - 对应 `src/*.cc`
-- `configs/.gitkeep`
 - `data/.gitkeep`
 - `results/.gitkeep`
 
@@ -167,27 +193,36 @@ After implementation, summarize:
 - executable target 为 `MSS`。
 - C++ 标准为 C++17。
 - 查找 Geant4。
-- 后续可链接 YAML 解析库。
+- 接入已批准的 `yaml-cpp`；若依赖不可用，应给出明确构建错误。
 
 ### M0.2 main 入口
 
 `main.cc` 应接受一个 YAML 配置路径，例如：
 
 ```bash
-./build/MSS configs/simulation_config_v2.yaml
+./build/MSS data/simulation_config_v2.yaml
 ```
 
 或实现明确的等价方式：
 
 ```bash
-./build/MSS --config configs/simulation_config_v2.yaml
+./build/MSS --config data/simulation_config_v2.yaml
 ```
 
-README 和验收文档必须与实际入口一致。
+`--config` 为推荐主入口；若同时支持位置参数形式，应以 `--config` 指定路径为准。README 和验收文档必须与实际入口一致。
 
 ### M0.3 占位类
 
 所有核心类应能编译，但仅实现最小行为。
+
+### M0.4 legacy 隔离
+
+要求：
+
+- 旧 macro 运行链路不得作为第二轮默认主路径；如保留 `SimulationMessenger`，只能用于指定或切换入口 YAML 文件路径。
+- 旧 PMMA / air defect / mirror collimator / mirror detector / compact CSV 文件名逻辑不得继续作为默认行为。
+- 若保留旧类文件名作为临时过渡，必须保证其对外语义已经改为第二轮职责，或在后续里程碑中明确重命名 / 替换。
+- README 与宏文件可暂时保留，但不得作为第二轮 M0/M1 验收入口。
 
 ## 完成标准
 
@@ -196,10 +231,13 @@ README 和验收文档必须与实际入口一致。
 - 生成 `build/MSS`。
 - 运行无配置或配置路径错误时给出清晰错误，不崩溃。
 - 未实现真实仿真行为。
+- 默认入口不再依赖第一轮 macro 文件。
+- CMake 已接入 `yaml-cpp` 或在依赖不可用时明确失败。
 
 ## 不做
 
 - 不读取 YAML 内容。
+- 不运行第一轮 PMMA / air defect / mirror 几何作为第二轮默认行为。
 - 不构建 VehicleROI。
 - 不构建成像头。
 - 不产生 gamma。
@@ -238,7 +276,7 @@ README 和验收文档必须与实际入口一致。
 - `OutputConfig`
 - `SimulationConfig`
 
-字段应与 `spec.md` 中 `simulation_config_v2.yaml` 保持一致。
+字段应与 `spec.md` 中 `simulation_config_v2.yaml` 保持一致。不得把旧 `SimulationConfig` 中的 `enableAirDefect`、`collimatorProfileFile`、`debugOutputOverride` 等 macro-era 字段作为第二轮 schema。
 
 ### M1.2 读取 YAML
 
@@ -278,10 +316,13 @@ M1 阶段可以先读取 pose 原始数组，但 pose 生成可留到 M5。
 
 ## 完成标准
 
-- 有效 `simulation_config_v2.yaml` 可读取。
+- 有效 `data/simulation_config_v2.yaml` 可读取。
+- 已批准的 `yaml-cpp` 已实际用于读取配置。
 - 配置对象可打印或日志输出关键字段。
 - 非法字段能 fail fast。
 - 未读取或构建 `vehicle_roi_v03.yaml`。
+- 不再通过旧 macro 字段驱动 source、detector、collimator、pose、output、seed 或 thread。
+- 提供 `data/simulation_config_v2.yaml` 最小可读样例。
 
 ## 不做
 
@@ -296,7 +337,7 @@ M1 阶段可以先读取 pose 原始数组，但 pose 生成可留到 M5。
 
 ## 目标
 
-实现车辆 ROI YAML 的读取和结构验证，不构建 Geant4 几何。
+实现车辆 ROI YAML 的读取和结构验证，不构建 Geant4 几何。该阶段不得复用 PMMA / air defect 几何字段作为 VehicleROI schema。
 
 ## 修改文件
 
@@ -320,13 +361,21 @@ M1 阶段可以先读取 pose 原始数组，但 pose 生成可留到 M5。
 
 ### M2.2 读取 YAML
 
+按 `vehicle_roi_v03.yaml` 实际 schema 读取，不得假设存在 `vehicle_roi:` 顶层字段。
+
 读取：
 
+- `schema`、`metadata`、`units`、`coordinate_system`、`roi`、`geant4_placement_rules`、`materials`、`model_modes`、`regions`、`components`、`validation`；
 - VehicleROI 根 volume；
 - 所有 component；
 - center；
 - size；
 - host；
+- shape；
+- role；
+- half_size_mm；
+- aabb_mm；
+- placement_center_in_host_mm；
 - material；
 - region_id；
 - normal / abnormal insert 字段。
@@ -344,6 +393,11 @@ M1 阶段可以先读取 pose 原始数组，但 pose 生成可留到 M5。
 - region_id 字段存在。
 - insert 有 normal / abnormal material 与 region 信息。
 - abnormal target component 若在 simulation config 中指定，则存在且是 insert。
+- `shape` 第一阶段必须为 `box`。
+- `half_size_mm` 与 `size_mm` 一致。
+- `aabb_mm` 与 `center_mm/size_mm` 一致。
+- `placement_center_in_host_mm` 与 host placement 规则一致。
+- recommended target component 列表合法。
 
 ### M2.4 AABB 检查
 
@@ -360,6 +414,7 @@ M1 阶段可以先读取 pose 原始数组，但 pose 生成可留到 M5。
 - 能列出组件数量、host 关系和 region_id。
 - AABB 检查通过。
 - 构造一个临时 overlap YAML 时能报错。
+- 提供 `data/vehicle_roi_v03.yaml` 当前完整 VehicleROI 样例。
 
 ## 不做
 
@@ -446,7 +501,7 @@ N = 0.04
 
 ## 目标
 
-使用 `vehicle_roi_v03.yaml` 构建 World、VehicleROI 和全部车辆 ROI 组件。
+使用 `vehicle_roi_v03.yaml` 构建固定 World、VehicleROI 和全部车辆 ROI 组件。
 
 ## 修改文件
 
@@ -459,6 +514,14 @@ N = 0.04
 ## 任务
 
 ### M4.1 World 与 VehicleROI
+
+World 固定为：
+
+```text
+center = [0, 0, 0] mm
+size = [4000, 4000, 4000] mm
+material = G4_AIR
+```
 
 构建：
 
@@ -501,6 +564,8 @@ region_id = vehicle_background_air
 - normal 模型无 target region。
 - abnormal 模型只有 selected insert 为 target region。
 - Geant4 overlap 检查通过。
+- VehicleROI 位于固定 World 内。
+- 若任一几何组件超出固定 World，fail fast。
 
 ## 不做
 
@@ -578,6 +643,8 @@ pose_x{encoded_x}_y{encoded_y}
 - grid mode 生成正确笛卡尔积。
 - pose_id 正确。
 - 非法 offset fail fast。
+- 每个 pose 带有稳定的 `pose_index`，供 run seed 与 metadata 使用。
+- `ScanPoseManager` 生成的 `PoseList` 作为 `PoseRunController` 执行 pose runs 的输入。
 
 ## 不做
 
@@ -715,6 +782,7 @@ energy_keV,weight
 - `theta = 90°` 时方向约为 `(0, 0, 1)`。
 - gamma 起点落在有限焦点圆盘内。
 - 不使用第一版目标平面锥束采样。
+- 提供 `data/spectrum.csv` 最小合法样例。
 
 ## 不做
 
@@ -728,7 +796,7 @@ energy_keV,weight
 
 ## 目标
 
-实现第二版狭缝准直器 CSV profile 读取和验证。
+实现第二版狭缝准直器 CSV profile 读取和验证。可参考旧 `CollimatorProfileReader` 的 CSV 解析和凸多边形检查，但必须迁移为 `SlitCollimatorProfileReader` 语义。
 
 ## 修改文件
 
@@ -748,6 +816,7 @@ struct XZPoint {
 
 struct SlitJawProfile {
     std::string jaw_id;
+    double y_zero_mm = 0.0;
     std::vector<XZPoint> vertices;
 };
 
@@ -759,13 +828,19 @@ struct SlitCollimatorProfile {
 
 ### M8.2 CSV 读取
 
-表头：
+必需列：
 
 ```csv
 profile_id,jaw_id,vertex_id,x_mm,z_mm
 ```
 
-只读取指定 `profile_id`。
+可选列：
+
+```csv
+y_mm
+```
+
+只读取指定 `profile_id`。若存在 `y_mm`，同一 jaw 内所有顶点的 `y_mm` 必须相同，并作为 jaw 的 `y_zero_mm`；若不存在，`y_zero_mm = 0`。Reader 应容忍并去除 UTF-8 BOM。
 
 ### M8.3 验证规则
 
@@ -779,6 +854,7 @@ profile_id,jaw_id,vertex_id,x_mm,z_mm
 - 每块 jaw `N >= 3`；
 - `vertex_id = 0 ... N-1` 连续；
 - 坐标有限；
+- 同一 jaw 内 `y_mm` 不一致时 fail fast；
 - 多边形面积非零；
 - 多边形凸；
 - 不含连续共线点。
@@ -787,8 +863,10 @@ profile_id,jaw_id,vertex_id,x_mm,z_mm
 
 - 可读取样例 `P001`。
 - 不写死三块 jaw。
+- 不复用旧 `std::array<..., 3>` profile 结构。
 - 不构建镜像。
 - 各类非法 profile 可报错停止。
+- 提供 `data/collimator_profiles.csv` 或主入口 YAML 指定的等价样例 profile 文件。
 
 ## 不做
 
@@ -802,7 +880,7 @@ profile_id,jaw_id,vertex_id,x_mm,z_mm
 
 ## 目标
 
-使用 M8 输出的 profile 构建第二版钨准直器几何。
+使用 M8 输出的 profile 构建第二版钨准直器几何。可参考旧 `CollimatorBuilder` 的 `G4ExtrudedSolid` 经验，但必须迁移为 `SlitCollimatorBuilder` 语义。
 
 ## 修改文件
 
@@ -829,6 +907,8 @@ profile_id,jaw_id,vertex_id,x_mm,z_mm
 
 ### M9.2 offset 应用
 
+`y_zero` 来自 profile CSV 可选 `y_mm`；若 CSV 不含 `y_mm`，则 `y_zero = 0`。`jaw_extrusion_length_y_mm` 表示 global y 方向全长，不是 half length。
+
 当前 pose 下：
 
 ```text
@@ -849,6 +929,7 @@ y_actual = y_zero + head_offset_y
 - jaw 数量等于 profile 中 jaw 数量。
 - pose offset 改变时 jaw 同步平移。
 - 可视化中没有镜像 jaw。
+- 不出现旧 `Mirror` jaw 命名或关于 `x=0` 的镜像 placement。
 - `enable=false` 时不读取不存在的 profile 文件。
 
 ## 不做
@@ -1058,7 +1139,7 @@ det_y = pre_y + t * (post_y - pre_y)
 
 ## 目标
 
-实现事件级 CSV 输出，包括正式模式和 debug 模式。
+实现事件级 CSV 输出，包括正式模式和 debug 模式。旧 `CsvWriter` 只能复用打开文件、格式化和合并机制，header 与 row schema 必须按 `spec.md` 重写。
 
 ## 修改文件
 
@@ -1110,6 +1191,7 @@ Debug 模式：
 - 不输出 termination 字段。
 - 无散射字段按 NaN / none 写出。
 - 单线程运行可生成最终 CSV。
+- 不再输出旧 compact/debug header、`initial_energy`、`initial_dir_*`、`is_multiple_scatter` 或 `track_id` / `parent_id` 字段。
 
 ## 不做
 
@@ -1123,7 +1205,7 @@ Debug 模式：
 
 ## 目标
 
-为每个 pose 写出 run-level metadata。
+为每个 pose 写出 run-level metadata。旧 `RunAction` 的 `hits_profile_*` 文件名逻辑不得继续作为第二轮 metadata 或 run_id 来源。
 
 ## 修改文件
 
@@ -1152,6 +1234,7 @@ pose_id: ...
 head_offset_x_mm: ...
 head_offset_y_mm: ...
 n_primary: ...
+base_random_seed: ...
 random_seed: ...
 number_of_threads: ...
 debug: ...
@@ -1159,8 +1242,18 @@ source: ...
 collimator: ...
 detector: ...
 physics: ...
+world:
+  shape: box
+  center_mm: [0.0, 0.0, 0.0]
+  size_mm: [4000.0, 4000.0, 4000.0]
+  material: G4_AIR
+output_policy:
+  existing_run_policy: fail
+pose_index: ...
 notes: ...
 ```
+
+`random_seed` 只写一次，取值为该 pose run 最终实际执行时使用的 seed；`base_random_seed` 记录入口 YAML 中的基础 seed。
 
 ### M14.2 禁止字段
 
@@ -1185,6 +1278,8 @@ run_id = {pose_id}_{model_type}_seed{random_seed}
 - metadata 与实际 CSV 文件名一致。
 - metadata 中记录 source、detector、collimator、physics 配置。
 - 不在事件 CSV 中重复写入 metadata 字段。
+- metadata 记录每个 pose run 实际使用的 `random_seed`。
+- 创建 `results/{run_id}` 时，若目录已存在且非空，必须 fail fast。
 
 ## 不做
 
@@ -1197,7 +1292,7 @@ run_id = {pose_id}_{model_type}_seed{random_seed}
 
 ## 目标
 
-实现多线程安全输出和 master 合并。
+实现多线程安全输出和 master 合并。旧 `RunAction` / `CsvWriter` 的线程临时文件机制可复用，但输出目录必须改为每个 `results/{run_id}/tmp/`。
 
 ## 修改文件
 
@@ -1252,6 +1347,7 @@ debug 模式：
 
 - 多线程正式模式最终 `events.csv` header 唯一。
 - 多线程 debug 模式最终 `events_debug.csv` header 唯一。
+- 不再使用全局 `results/tmp/` 或 `hits_profile_*_threadN.csv` 命名。
 - worker 不共享输出流。
 - 正式模式合并成功后 tmp 中对应临时 CSV 被删除。
 - debug 模式合并成功后 tmp 中对应临时 CSV 被保留。
@@ -1267,17 +1363,18 @@ debug 模式：
 
 ## 目标
 
-完成第二版基础链路：多个 pose 独立运行、独立输出，并补齐样例配置和 README 对齐。
+完成第二版基础链路：多个 pose 独立运行、独立输出，并补齐样例配置、README 和 legacy macros 清理。
 
 ## 修改文件
 
 - `include/PoseRunController.hh`
 - `src/PoseRunController.cc`
-- `configs/simulation_config_v2.yaml`
+- `data/simulation_config_v2.yaml`
 - `data/vehicle_roi_v03.yaml`
 - `data/collimator_profiles.csv`
 - `data/spectrum.csv`
 - `README.md`
+- `macros/*.mac`，如保留兼容示例
 - `docs/acceptance_checklist.md`，如需要同步
 
 ## 任务
@@ -1305,31 +1402,31 @@ For each pose:
 
 ### M16.2 样例配置
 
-提供可运行样例：
+检查并整理可运行样例。样例文件应位于 `data/`，其中入口 YAML 为：
 
 ```text
-configs/simulation_config_v2.yaml
-data/vehicle_roi_v03.yaml
-data/collimator_profiles.csv
-data/spectrum.csv
+data/simulation_config_v2.yaml
 ```
+
+车辆 ROI、collimator profile 和 spectrum 文件的实际文件名由入口 YAML 指定。
 
 样例源和探测器位置使用第一版链路验证值，但 README 和文档必须说明其样例性质。
 
 ### M16.3 README
 
-README 至少说明：
+README 至少说明，并移除第一轮 PMMA 主叙述作为默认运行方式：
 
 - 项目目标；
 - 依赖环境；
 - 构建命令；
 - 运行命令；
-- 两个 YAML 文件职责；
+- 入口 YAML 与被引用数据文件职责；
 - pose list / grid 规则；
 - pose_id 编码规则；
 - formal / debug CSV 区别；
 - metadata 作用；
 - 第一阶段非目标。
+- 本轮不实现位姿级 / 扫描级后处理。
 
 ## 完成标准
 
@@ -1339,10 +1436,14 @@ README 至少说明：
 - list mode 多 pose 可生成多个独立目录。
 - grid mode 可生成笛卡尔积 pose。
 - README 命令与实际程序入口一致。
+- `macros/*.mac` 若保留，只能作为 legacy / visualization compatibility 示例，不得覆盖 YAML 主入口。
+- 多 pose 运行中每个 pose run 使用不同 seed，并在 metadata 中记录。
 
 ## 不做
 
 - 不添加后处理绘图脚本。
+- 不添加 pose-level summary。
+- 不添加 scan-level summary。
 - 不添加图像重建。
 - 不添加真实探测器响应。
 - 不添加连续运动扫描。
@@ -1359,6 +1460,8 @@ README 至少说明：
 - sensitive detector 能量沉积 scoring；
 - 图像重建；
 - 后处理绘图脚本；
+- pose-level summary；
+- scan-level summary；
 - 连续运动扫描；
 - 运动模糊；
 - 时间相关积分；

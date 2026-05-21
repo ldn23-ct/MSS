@@ -13,7 +13,19 @@
 | A 线：项目摸底 | 判断固定车辆 ROI + 移动成像头条件下，原始探测器二维响应是否包含可解释结构信息。 |
 | B 线：论文数据 | 记录被探测 primary gamma 的散射阶次、过程计数、first / last scatter 空间位置和区域归因，用于多重散射性质分析。 |
 
-本文档不定义后处理绘图、不定义图像重建算法、不定义真实探测器响应模型。
+本文档不定义后处理绘图、不定义图像重建算法、不定义真实探测器响应模型。本轮项目固定为搭建 Geant4 仿真程序并输出事件级数据；位姿级 / 扫描级数据、summary、图像、统计指标和后处理模块留到下一轮项目迭代。
+
+### 0.1 本轮修订范围
+
+本修订版在原规格基础上做一致性补充，不改变第二版核心目标。修订重点为：
+
+- 明确 `vehicle_roi_v03.yaml` 的实际 schema 和组件字段；
+- 明确 `simulation_config_v2.yaml`、YAML 解析依赖和 CLI 主入口；
+- 明确 World 尺寸策略、输出目录策略和随机数可复现策略；
+- 明确 collimator profile 的 `y` 向零位姿与 placement 规则；
+- 明确正式 CSV / debug CSV 的字段边界，避免与后处理输出、位姿级输出、扫描级输出混淆；
+- 明确本轮 Geant4 程序只输出事件级文件，位姿级 / 扫描级数据、summary、图表、统计指标和后处理模块不在本轮实现。
+
 
 ---
 
@@ -30,8 +42,8 @@
 | 事件定义 | 1 event = 1 primary gamma |
 | 输出格式 | `events.csv` + `metadata.yaml` |
 | 主配置入口 | YAML |
-| 车辆几何配置 | `vehicle_roi_v03.yaml` |
-| 运行配置 | `simulation_config_v2.yaml` |
+| 车辆几何配置 | 由 `data/simulation_config_v2.yaml` 中的 `vehicle.geometry_file` 指定，样例为 `data/vehicle_roi_v03.yaml` |
+| 运行配置 | 主入口 YAML，样例为 `data/simulation_config_v2.yaml` |
 | C++ 标准 | C++17 |
 | 构建系统 | CMake |
 
@@ -51,7 +63,9 @@
 + 单个虚拟探测平面
 ```
 
-程序需要输出被探测 primary gamma 的事件级统计量，用于后处理生成：
+程序需要输出被探测 primary gamma 的事件级统计量。本轮项目不实现位姿级 / 扫描级数据生成，也不实现后处理模块；事件级 CSV 与 metadata 只需要为下一轮后处理迭代保留足够输入。
+
+事件级输出应能支持后续迭代分析：
 
 - 探测器二维响应图；
 - normal / abnormal 差异图；
@@ -62,7 +76,25 @@
 - first / last scatter region 归因；
 - 位姿级和扫描级响应图。
 
-第二版不要求在 Geant4 程序内完成图像重建或统计图生成。
+第二版本轮不要求在 Geant4 程序内完成图像重建、统计图生成或任何后处理脚本。
+
+### 2.1 Geant4 程序输出边界
+
+第二版 Geant4 程序的基础输出边界为：
+
+```text
+每个 pose 输出：
+  events.csv 或 events_debug.csv
+  metadata.yaml
+```
+
+其中：
+
+- `events.csv` / `events_debug.csv` 是事件级输出；
+- `metadata.yaml` 是该 pose run 的运行条件记录；
+- 本轮不输出位姿级响应图、扫描级响应图、normal / abnormal 差异图、统计指标、论文图表、pose-level summary CSV 或 scan-level summary CSV；
+- 后处理模块不在本轮实现，留到下一轮项目迭代。
+
 
 ---
 
@@ -97,16 +129,19 @@ vehicle interior / far side: z > 0
 
 ## 4. 配置文件体系
 
-第二版使用两个 YAML 文件作为主配置入口。
+第二版使用主入口 YAML 描述运行配置，并由该主入口引用车辆 ROI YAML、准直器 profile CSV 和能谱 CSV。
+
+主入口样例路径为：
 
 ```text
-vehicle_roi_v03.yaml
-simulation_config_v2.yaml
+data/simulation_config_v2.yaml
 ```
 
-### 4.1 `vehicle_roi_v03.yaml`
+车辆 ROI、准直器 profile 和能谱文件也放在 `data/` 目录下，但具体文件名不作为代码硬编码约束，应由 `data/simulation_config_v2.yaml` 中的字段明确指定。
 
-该文件负责描述车辆 ROI：
+### 4.1 车辆 ROI YAML
+
+车辆 ROI YAML 文件由主入口中的 `vehicle.geometry_file` 指定，样例为 `data/vehicle_roi_v03.yaml`。该文件负责描述车辆 ROI：
 
 - VehicleROI 总范围；
 - 几何组件；
@@ -118,9 +153,9 @@ simulation_config_v2.yaml
 - placement 信息；
 - overlap 检查需要的元数据。
 
-### 4.2 `simulation_config_v2.yaml`
+### 4.2 `data/simulation_config_v2.yaml`
 
-该文件负责描述仿真运行条件：
+该文件是第二版正式主入口，负责描述仿真运行条件，并引用车辆 ROI YAML、准直器 profile CSV 和能谱 CSV：
 
 - run 参数；
 - source 参数；
@@ -131,11 +166,44 @@ simulation_config_v2.yaml
 - output 参数；
 - normal / abnormal 模型选择。
 
-宏命令可作为调试接口，但第二版正式配置不以 Geant4 macro 为主入口。
+宏命令仅保留必要入口能力，例如指定或切换入口 YAML 文件路径。凡是 `data/simulation_config_v2.yaml` 可以表达的配置项，不应再新增对应宏命令。
+
+### 4.3 YAML 解析依赖
+
+第二版主配置入口为 YAML。C++ 实现需要显式选择 YAML 解析器。
+
+基础实现批准采用：
+
+```text
+yaml-cpp
+```
+
+依赖边界：
+
+- 已批准使用 `yaml-cpp`；若项目仓库当前未包含该依赖，应在 M0/M1 阶段完成 CMake 接入，并在依赖不可用时给出明确构建错误；
+- 不允许在实现过程中临时改回 Geant4 macro 作为主配置入口；
+- macro / `SimulationMessenger` 仅保留用于指定或切换入口 YAML 文件路径的最小能力；source、detector、collimator、pose、output、seed、thread、target 等可由 YAML 表达的参数不再通过宏命令实现。
+
+### 4.4 CLI 入口
+
+第二版正式 CLI 入口固定为：
+
+```bash
+./build/MSS --config data/simulation_config_v2.yaml
+```
+
+可选兼容形式：
+
+```bash
+./build/MSS data/simulation_config_v2.yaml
+```
+
+若两种形式同时出现，应以 `--config` 指定的路径为准；若未指定配置文件，应报错并打印用法说明。
+
 
 ---
 
-## 5. `simulation_config_v2.yaml` 规格
+## 5. `data/simulation_config_v2.yaml` 规格
 
 ### 5.1 顶层结构
 
@@ -210,6 +278,53 @@ detector_y_range_zero_mm: [-50.0, 50.0]
 ```
 
 来自第一版链路验证用数值。它们仅作为第二版程序构建、可视化和端到端输出测试的默认样例，不作为第二版最终成像头几何的不可修改物理常量。
+
+### 5.3 字段约束
+
+`data/simulation_config_v2.yaml` 的字段约束如下：
+
+| 路径 | 约束 |
+|---|---|
+| `schema_version` | 必须为 `2`。 |
+| `run.random_seed` | 非负整数。 |
+| `run.number_of_threads` | 整数，且 `>= 1`。 |
+| `run.n_primary_per_pose` | 整数，且 `> 0`。 |
+| `run.debug` | bool。 |
+| `vehicle.geometry_file` | 可读 YAML 文件路径。 |
+| `vehicle.model_type` | `normal` 或 `abnormal`。 |
+| `vehicle.selected_target_component` | `normal` 时可为 `null`；`abnormal` 时必须是 `vehicle_roi_v03.yaml` 中 `is_insert=true` 的 component name。 |
+| `vehicle.abnormal_material` | 已知 NIST 材料或项目自定义材料。 |
+| `pose.mode` | `list` 或 `grid`。 |
+| `pose.list.head_offset_x_mm/y_mm` | list mode 下必须长度相同；元素必须为整数 mm。 |
+| `pose.grid.x_offsets_mm/y_offsets_mm` | grid mode 下元素必须为整数 mm。 |
+| `source.particle` | 第一阶段仅支持 `gamma`。 |
+| `source.energy_mode` | `mono` 或 `spectrum`。 |
+| `source.mono_energy_keV` | mono 模式下必须为正且有限。 |
+| `source.spectrum_file` | spectrum 模式下必须可读。 |
+| `source.source_pos_zero_mm` | 长度为 3 的有限数值数组。 |
+| `source.incident_theta_deg` | `0 < theta <= 90`。 |
+| `source.focal_spot_diameter_mm` | 正数。 |
+| `collimator.enable` | bool。 |
+| `collimator.profile_file` | collimator 启用时必须可读。 |
+| `collimator.profile_id` | collimator 启用时必须存在于 profile CSV。 |
+| `collimator.jaw_extrusion_length_y_mm` | 正数。 |
+| `detector.detector_z_zero_mm` | 有限数值。 |
+| `detector.detector_x_range_zero_mm` | `[min,max]`，且 `min < max`。 |
+| `detector.detector_y_range_zero_mm` | `[min,max]`，且 `min < max`。 |
+| `detector.accept_direction` | 第一阶段仅支持 `negative_z`。 |
+| `physics.production_cut_mm` | 正数。 |
+| `output.output_directory` | 不存在时应创建；存在时按 17.3 策略处理。 |
+
+### 5.4 样例配置文件的作用
+
+仓库中的 `data/simulation_config_v2.yaml` 是最小可运行样例。它的职责是：
+
+- 支持 M1/M2 读取配置；
+- 支持零位姿端到端测试；
+- 支持 source / collimator / detector / output 链路验证。
+
+该样例中的第一版继承数值不应写死进 C++ 源码。
+
 
 ---
 
@@ -367,6 +482,194 @@ target
 other
 none
 ```
+
+### 6.7 `vehicle_roi_v03.yaml` 实际 schema
+
+`vehicle_roi_v03.yaml` 当前采用以下顶层结构：
+
+```yaml
+schema:
+  name: vehicle_roi_model
+  version: v03_materials_yaml_1
+  format: yaml
+metadata: {...}
+units: {...}
+coordinate_system: {...}
+roi: {...}
+geant4_placement_rules: {...}
+materials: {...}
+model_modes: {...}
+regions: {...}
+components:
+  - name: VehicleROI
+    host: World
+    shape: box
+    center_mm: [200.0, 625.0, 725.0]
+    size_mm: [2200.0, 1250.0, 1450.0]
+    material: G4_AIR
+    region_id: vehicle_background_air
+    is_insert: false
+    role: roi_air_mother
+    half_size_mm: [1100.0, 625.0, 725.0]
+    aabb_mm:
+      x: [-900.0, 1300.0]
+      y: [0.0, 1250.0]
+      z: [0.0, 1450.0]
+    placement_center_in_host_mm: [0.0, 0.0, 0.0]
+validation: {...}
+```
+
+实现应按该 schema 读取，而不是另行假设 `vehicle_roi:` 顶层字段。
+
+### 6.8 component 字段规范
+
+每个 `components[]` 条目使用以下字段：
+
+| 字段 | 类型 | 必须 | 说明 |
+|---|---|---|---|
+| `name` | string | 是 | component 唯一名称。 |
+| `host` | string | 是 | 宿主 volume 名称；根 ROI 的 host 为 `World`。 |
+| `shape` | string | 是 | 第一阶段仅支持 `box`。 |
+| `center_mm` | array[3] | 是 | component 在 VehicleROI 坐标系中的 global center。 |
+| `size_mm` | array[3] | 是 | box 全尺寸，不是 half length。 |
+| `material` | string 或 object | 是 | 普通 component 为 string；insert 可为 `normal/abnormal` object。 |
+| `region_id` | string 或 object | 是 | 普通 component 为 string；insert 可为 `normal/abnormal` object。 |
+| `is_insert` | bool | 是 | 是否是 abnormal 可替换 insert。 |
+| `role` | string | 是 | 语义角色，用于检查和后处理分组。 |
+| `half_size_mm` | array[3] | 是 | `size_mm * 0.5`，用于构建检查。 |
+| `aabb_mm` | object | 是 | x/y/z 三轴 `[min,max]`，用于 overlap 和 containment 检查。 |
+| `placement_center_in_host_mm` | array[3] | 是 | 在 host 坐标系下的 placement center。 |
+
+材料和 region 的读取规则：
+
+```text
+普通 component:
+  material: string
+  region_id: string
+
+insert component:
+  material.normal: normal 模式材料
+  material.abnormal: abnormal 模式材料默认值
+  region_id.normal: normal 模式 region_id
+  region_id.abnormal: abnormal 模式 region_id，通常为 target
+```
+
+### 6.9 VehicleROI 组件清单
+
+当前 `vehicle_roi_v03.yaml` 包含 45 个 components，其中 `VehicleROI` 为 ROI 空气母体，其余 44 个为车辆结构或 insert。基础实现应至少能读取并构建下表全部 component。
+
+| name | host | role | center_mm | size_mm | material | region_id | is_insert |
+|---|---|---|---|---|---|---|---|
+| `near_front_door_outer_skin` | `VehicleROI` | `door` | `[-430.0, 425.0, 0.5]` | `[740.0, 550.0, 1.0]` | `G4_Fe` | `near_door_outer_metal` | `false` |
+| `near_front_door_cavity_air` | `VehicleROI` | `door` | `[-430.0, 425.0, 33.0]` | `[740.0, 550.0, 64.0]` | `G4_AIR` | `near_door_cavity_air` | `false` |
+| `near_front_door_beam` | `near_front_door_cavity_air` | `door` | `[-430.0, 480.0, 40.0]` | `[600.0, 80.0, 20.0]` | `G4_Fe` | `near_door_reinforcement` | `false` |
+| `near_front_door_insert` | `near_front_door_cavity_air` | `door_insert` | `[-430.0, 320.0, 35.0]` | `[250.0, 180.0, 35.0]` | `normal=G4_AIR; abnormal=G4_POLYETHYLENE` | `normal=near_door_cavity_air; abnormal=target` | `true` |
+| `near_front_door_inner_metal` | `VehicleROI` | `door` | `[-430.0, 425.0, 65.6]` | `[740.0, 550.0, 1.2]` | `G4_Fe` | `near_door_inner_metal` | `false` |
+| `near_front_door_trim` | `VehicleROI` | `door` | `[-430.0, 425.0, 78.1]` | `[740.0, 550.0, 23.8]` | `G4_POLYPROPYLENE` | `near_door_trim` | `false` |
+| `near_rear_door_outer_skin` | `VehicleROI` | `door` | `[430.0, 425.0, 0.5]` | `[740.0, 550.0, 1.0]` | `G4_Fe` | `near_door_outer_metal` | `false` |
+| `near_rear_door_cavity_air` | `VehicleROI` | `door` | `[430.0, 425.0, 33.0]` | `[740.0, 550.0, 64.0]` | `G4_AIR` | `near_door_cavity_air` | `false` |
+| `near_rear_door_beam` | `near_rear_door_cavity_air` | `door` | `[430.0, 480.0, 40.0]` | `[600.0, 80.0, 20.0]` | `G4_Fe` | `near_door_reinforcement` | `false` |
+| `near_rear_door_insert` | `near_rear_door_cavity_air` | `door_insert` | `[430.0, 320.0, 35.0]` | `[250.0, 180.0, 35.0]` | `normal=G4_AIR; abnormal=G4_POLYETHYLENE` | `normal=near_door_cavity_air; abnormal=target` | `true` |
+| `near_rear_door_inner_metal` | `VehicleROI` | `door` | `[430.0, 425.0, 65.6]` | `[740.0, 550.0, 1.2]` | `G4_Fe` | `near_door_inner_metal` | `false` |
+| `near_rear_door_trim` | `VehicleROI` | `door` | `[430.0, 425.0, 78.1]` | `[740.0, 550.0, 23.8]` | `G4_POLYPROPYLENE` | `near_door_trim` | `false` |
+| `far_front_door_trim` | `VehicleROI` | `door` | `[-430.0, 425.0, 1371.9]` | `[740.0, 550.0, 23.8]` | `G4_POLYPROPYLENE` | `far_door_trim` | `false` |
+| `far_front_door_inner_metal` | `VehicleROI` | `door` | `[-430.0, 425.0, 1384.4]` | `[740.0, 550.0, 1.2]` | `G4_Fe` | `far_door_inner_metal` | `false` |
+| `far_front_door_cavity_air` | `VehicleROI` | `door` | `[-430.0, 425.0, 1417.0]` | `[740.0, 550.0, 64.0]` | `G4_AIR` | `far_door_cavity_air` | `false` |
+| `far_front_door_beam` | `far_front_door_cavity_air` | `door` | `[-430.0, 480.0, 1410.0]` | `[600.0, 80.0, 20.0]` | `G4_Fe` | `far_door_reinforcement` | `false` |
+| `far_front_door_insert` | `far_front_door_cavity_air` | `door_insert` | `[-430.0, 320.0, 1415.0]` | `[250.0, 180.0, 35.0]` | `normal=G4_AIR; abnormal=G4_POLYETHYLENE` | `normal=far_door_cavity_air; abnormal=target` | `true` |
+| `far_front_door_outer_skin` | `VehicleROI` | `door` | `[-430.0, 425.0, 1449.5]` | `[740.0, 550.0, 1.0]` | `G4_Fe` | `far_door_outer_metal` | `false` |
+| `far_rear_door_trim` | `VehicleROI` | `door` | `[430.0, 425.0, 1371.9]` | `[740.0, 550.0, 23.8]` | `G4_POLYPROPYLENE` | `far_door_trim` | `false` |
+| `far_rear_door_inner_metal` | `VehicleROI` | `door` | `[430.0, 425.0, 1384.4]` | `[740.0, 550.0, 1.2]` | `G4_Fe` | `far_door_inner_metal` | `false` |
+| `far_rear_door_cavity_air` | `VehicleROI` | `door` | `[430.0, 425.0, 1417.0]` | `[740.0, 550.0, 64.0]` | `G4_AIR` | `far_door_cavity_air` | `false` |
+| `far_rear_door_beam` | `far_rear_door_cavity_air` | `door` | `[430.0, 480.0, 1410.0]` | `[600.0, 80.0, 20.0]` | `G4_Fe` | `far_door_reinforcement` | `false` |
+| `far_rear_door_insert` | `far_rear_door_cavity_air` | `door_insert` | `[430.0, 320.0, 1415.0]` | `[250.0, 180.0, 35.0]` | `normal=G4_AIR; abnormal=G4_POLYETHYLENE` | `normal=far_door_cavity_air; abnormal=target` | `true` |
+| `far_rear_door_outer_skin` | `VehicleROI` | `door` | `[430.0, 425.0, 1449.5]` | `[740.0, 550.0, 1.0]` | `G4_Fe` | `far_door_outer_metal` | `false` |
+| `near_front_window_glass` | `VehicleROI` | `window_glass` | `[-430.0, 925.0, 2.0]` | `[650.0, 400.0, 4.0]` | `G4_GLASS_PLATE` | `near_window_glass` | `false` |
+| `near_rear_window_glass` | `VehicleROI` | `window_glass` | `[430.0, 925.0, 2.0]` | `[650.0, 400.0, 4.0]` | `G4_GLASS_PLATE` | `near_window_glass` | `false` |
+| `far_front_window_glass` | `VehicleROI` | `window_glass` | `[-430.0, 925.0, 1448.0]` | `[650.0, 400.0, 4.0]` | `G4_GLASS_PLATE` | `far_window_glass` | `false` |
+| `far_rear_window_glass` | `VehicleROI` | `window_glass` | `[430.0, 925.0, 1448.0]` | `[650.0, 400.0, 4.0]` | `G4_GLASS_PLATE` | `far_window_glass` | `false` |
+| `near_b_pillar` | `VehicleROI` | `pillar` | `[0.0, 650.0, 45.0]` | `[100.0, 1000.0, 90.0]` | `G4_Fe` | `near_b_pillar_metal` | `false` |
+| `near_c_pillar` | `VehicleROI` | `pillar` | `[900.0, 650.0, 45.0]` | `[120.0, 1000.0, 90.0]` | `G4_Fe` | `near_c_pillar_metal` | `false` |
+| `far_b_pillar` | `VehicleROI` | `pillar` | `[0.0, 650.0, 1405.0]` | `[100.0, 1000.0, 90.0]` | `G4_Fe` | `far_b_pillar_metal` | `false` |
+| `far_c_pillar` | `VehicleROI` | `pillar` | `[900.0, 650.0, 1405.0]` | `[120.0, 1000.0, 90.0]` | `G4_Fe` | `far_c_pillar_metal` | `false` |
+| `cabin_air` | `VehicleROI` | `cabin_air_host` | `[45.0, 625.0, 725.0]` | `[1590.0, 1050.0, 1250.0]` | `G4_AIR` | `cabin_air` | `false` |
+| `front_seat_base_foam` | `cabin_air` | `seat` | `[-430.0, 250.0, 600.0]` | `[450.0, 140.0, 420.0]` | `Vehicle_PU_Foam` | `seat_foam` | `false` |
+| `front_seat_back_foam` | `cabin_air` | `seat` | `[-430.0, 625.0, 820.0]` | `[450.0, 610.0, 120.0]` | `Vehicle_PU_Foam` | `seat_foam` | `false` |
+| `front_seat_frame` | `cabin_air` | `seat` | `[-430.0, 160.0, 600.0]` | `[420.0, 30.0, 340.0]` | `G4_Fe` | `seat_frame_metal` | `false` |
+| `front_seat_insert` | `front_seat_back_foam` | `seat_insert` | `[-430.0, 520.0, 820.0]` | `[250.0, 200.0, 60.0]` | `normal=Vehicle_PU_Foam; abnormal=G4_POLYETHYLENE` | `normal=seat_foam; abnormal=target` | `true` |
+| `rear_seat_base_foam` | `cabin_air` | `seat` | `[430.0, 250.0, 600.0]` | `[550.0, 140.0, 420.0]` | `Vehicle_PU_Foam` | `seat_foam` | `false` |
+| `rear_seat_back_foam` | `cabin_air` | `seat` | `[430.0, 625.0, 850.0]` | `[550.0, 610.0, 120.0]` | `Vehicle_PU_Foam` | `seat_foam` | `false` |
+| `rear_seat_frame` | `cabin_air` | `seat` | `[430.0, 160.0, 600.0]` | `[500.0, 30.0, 340.0]` | `G4_Fe` | `seat_frame_metal` | `false` |
+| `rear_seat_insert` | `rear_seat_back_foam` | `seat_insert` | `[430.0, 520.0, 850.0]` | `[300.0, 200.0, 60.0]` | `normal=Vehicle_PU_Foam; abnormal=G4_POLYETHYLENE` | `normal=seat_foam; abnormal=target` | `true` |
+| `cabin_air_package_insert` | `cabin_air` | `cabin_package_insert` | `[0.0, 420.0, 650.0]` | `[220.0, 220.0, 220.0]` | `normal=G4_AIR; abnormal=G4_POLYETHYLENE` | `normal=cabin_air; abnormal=target` | `true` |
+| `rear_trunk_air` | `VehicleROI` | `trunk_air_host` | `[1130.0, 500.0, 725.0]` | `[340.0, 700.0, 1250.0]` | `G4_AIR` | `rear_trunk_air` | `false` |
+| `rear_trunk_package_insert` | `rear_trunk_air` | `trunk_package_insert` | `[1125.0, 350.0, 700.0]` | `[250.0, 250.0, 250.0]` | `normal=G4_AIR; abnormal=G4_POLYETHYLENE` | `normal=rear_trunk_air; abnormal=target` | `true` |
+
+### 6.10 推荐 abnormal target component
+
+第一阶段 abnormal run 每次只启用一个 insert。推荐 target component 为：
+
+- `near_front_door_insert`
+- `near_rear_door_insert`
+- `far_front_door_insert`
+- `far_rear_door_insert`
+- `front_seat_insert`
+- `rear_seat_insert`
+- `cabin_air_package_insert`
+- `rear_trunk_package_insert`
+
+若 `selected_target_component` 不在上述列表中，配置读取阶段应报错。
+
+### 6.11 AABB / placement / overlap 规则
+
+`vehicle_roi_v03.yaml` 中的 AABB 和 placement 信息用于实现期检查，不是替代 Geant4 几何构建的独立几何系统。
+
+规则：
+
+```text
+G4Box half length = size_mm * 0.5
+component global center = center_mm
+component placement in host = placement_center_in_host_mm
+positive-volume overlap among sibling components = forbidden
+touching surfaces = allowed
+optional engineering gap = 0.01 mm, only if implementation needs to avoid numerical boundary ambiguity
+```
+
+必须检查：
+
+- host 名称存在；
+- component 完全位于 host 内；
+- 同一 host 下非嵌套 component 不存在正体积 overlap；
+- insert 完全位于唯一 host 内；
+- `aabb_mm` 与 `center_mm/size_mm` 一致；
+- `half_size_mm` 与 `size_mm` 一致。
+
+### 6.12 World 几何
+
+World 不由 `vehicle_roi_v03.yaml` 显式描述，但 Geant4 实现必须构建。
+
+第二版基础实现使用固定 World：
+
+```text
+World shape = box
+World material = G4_AIR
+World center_mm = [0.0, 0.0, 0.0]
+World size_mm = [4000.0, 4000.0, 4000.0]
+```
+
+World 必须包含：
+
+```text
+VehicleROI
+Source zero/actual position
+Collimator jaw 全部 pose 下的包围盒
+VirtualDetectorPlane 全部 pose 下的包围盒
+```
+
+配置读取或几何构建阶段必须检查所有 pose 下的 VehicleROI 和成像头组件均位于固定 World 内。若任一 pose 下 source、detector plane 或 collimator jaw 超出 World，程序必须 fail fast。
+
+`metadata.yaml` 应记录固定 World 的 shape、center、size 和 material。
+
 
 ---
 
@@ -651,11 +954,26 @@ energy_keV,weight
 
 ### 10.2 CSV 表头
 
-准直器 profile 文件沿用第一版表头：
+准直器 profile 文件基础必需列为：
 
 ```csv
 profile_id,jaw_id,vertex_id,x_mm,z_mm
 ```
+
+当前样例文件中包含额外的 `y_mm` 列：
+
+```csv
+profile_id,jaw_id,vertex_id,x_mm,y_mm,z_mm
+```
+
+解析规则：
+
+- `profile_id`、`jaw_id`、`vertex_id`、`x_mm`、`z_mm` 为必需列；
+- `y_mm` 为可选列；
+- 若存在 `y_mm`，它定义该顶点所在 jaw 的零位姿 global y 坐标；
+- 若不存在 `y_mm`，默认 `y_zero_mm = 0`；
+- 同一 jaw 内所有顶点的 `y_mm` 必须相同；
+- UTF-8 BOM 应被容忍并去除。
 
 字段含义：
 
@@ -665,6 +983,7 @@ profile_id,jaw_id,vertex_id,x_mm,z_mm
 | `jaw_id` | jaw 编号，格式为 `jaw_0 ... jaw_{M-1}`。 |
 | `vertex_id` | 同一 jaw 内顶点编号。 |
 | `x_mm` | 零位姿 global x 坐标，单位 mm。 |
+| `y_mm` | 可选。零位姿 global y 坐标，单位 mm。 |
 | `z_mm` | 零位姿 global z 坐标，单位 mm。 |
 
 ### 10.3 jaw 规则
@@ -742,6 +1061,43 @@ y_actual = y_zero + head_offset_y
 第二版样例配置可以暂用第一版 `P001` 作为占位 slit profile，用于构建、可视化和输出链路测试。
 
 该占位 profile 不代表第二版最终成像头准直器几何。
+
+### 10.6 y 向 placement 约定
+
+准直器 jaw 的 `x-z` 多边形由 CSV 中的 `x_mm/z_mm` 描述，jaw 沿 global `y` 方向拉伸。
+
+零位姿下：
+
+```text
+jaw_center_y_zero = y_mm, if CSV contains y_mm
+jaw_center_y_zero = 0,    otherwise
+```
+
+pose 下：
+
+```text
+jaw_center_y_actual = jaw_center_y_zero + head_offset_y
+jaw_x_actual = jaw_x_zero + head_offset_x
+jaw_z_actual = jaw_z_zero
+```
+
+`jaw_extrusion_length_y_mm` 表示沿 global y 方向的全长，而不是 half length。
+
+若使用 `G4ExtrudedSolid`，其 local z 为拉伸轴。实现可采用以下等价方式之一：
+
+1. 将 CSV 的 `x/z` 多边形映射到 `G4ExtrudedSolid` local `x/y`，local `z` 作为拉伸轴，然后通过 rotation/placement 使 local z 对齐 global y；
+2. 构建时在局部坐标中完成 `global x -> local x`、`global z -> local y`、`global y -> local z` 的轴映射。
+
+无论采用哪种实现，最终 global 几何必须满足：
+
+```text
+profile 多边形位于 global x-z 平面
+jaw 厚度/拉伸方向为 global y
+head_offset_x 只影响 global x
+head_offset_y 只影响 global y
+z 不随 pose 改变
+```
+
 
 ---
 
@@ -963,6 +1319,42 @@ compton_count = 0
 rayleigh_count = 0
 ```
 
+### 13.5 散射统计空间范围
+
+`scatter_count_total`、`compton_count`、`rayleigh_count` 统计的是 primary gamma 在整个 Geant4 world 中发生的指定散射过程，而不是只统计 VehicleROI 内散射。
+
+因此：
+
+- VehicleROI 内散射计入；
+- collimator / tungsten jaw 内 primary gamma 的 `compt` / `Rayl` 也计入；
+- world air 中 primary gamma 的 `compt` / `Rayl` 也计入；
+- 未注册 region 的散射 region_id 记为 `other`；
+- 无散射事件的 first/last region_id 记为 `none`。
+
+事件是否进入正式 CSV 只由是否被虚拟探测平面探测到决定，不由散射发生位置决定。
+
+### 13.6 不进入事件级 CSV 的变量
+
+为保持第二版基础程序输出稳定，以下变量不写入正式 `events.csv` 或 `events_debug.csv`：
+
+- `pose_id`；
+- `head_offset_x_mm` / `head_offset_y_mm`；
+- primary 初始位置 `source_x/y/z`；
+- primary 初始方向 `dir_x/y/z`；
+- primary 初始能量；
+- `target_interaction` boolean；
+- per-region scatter counts；
+- detector region ID；
+- depth region ID。
+
+处理方式：
+
+- pose 信息写入该 pose 的 `metadata.yaml`；
+- 初始源状态由 `metadata.yaml` 中 source 参数与随机种子复现；
+- detector region、depth region、per-region 统计和 target interaction 由后处理根据事件级 first/last scatter 信息或后续扩展 debug 输出生成；
+- 若后续论文数据需要完整 per-region trajectory，应另开扩展 CSV schema，不修改本节定义的基础正式 CSV header。
+
+
 ---
 
 ## 14. 正式事件级 CSV
@@ -1063,7 +1455,7 @@ Debug CSV 不包含其他可选字段。
 
 ## 16. metadata.yaml
 
-每个 pose 输出一个 `metadata.yaml`，记录 run-level 条件。
+每个 pose run 输出一个 `metadata.yaml`，记录 run-level 条件。第二版中一个 run 对应一个 pose 和一个实际使用的 seed；多线程只是该 run 内部的执行方式。
 
 示例：
 
@@ -1079,10 +1471,12 @@ abnormal_target_type: none
 abnormal_target_region: none
 
 pose_id: pose_x0_y0
+pose_index: 0
 head_offset_x_mm: 0
 head_offset_y_mm: 0
 
 n_primary: 10000
+base_random_seed: 12345
 random_seed: 12345
 number_of_threads: 8
 
@@ -1113,10 +1507,88 @@ physics:
   physics_list: G4EmLivermorePhysics
   production_cut_mm: 0.1
 
+world:
+  shape: box
+  center_mm: [0.0, 0.0, 0.0]
+  size_mm: [4000.0, 4000.0, 4000.0]
+  material: G4_AIR
+
+output_policy:
+  existing_run_policy: fail
+
 notes: sample config for pipeline validation
 ```
 
 metadata 不重复写入每一行 CSV。
+
+### 16.1 metadata 必含字段
+
+`metadata.yaml` 至少应包含以下字段：
+
+```yaml
+run_id: string
+output_csv: string
+model_type: normal | abnormal
+vehicle_model_id: string
+vehicle_geometry_file: string
+selected_target_component: string | null
+abnormal_target_type: string | none
+abnormal_target_region: target | none
+pose_id: string
+pose_index: int
+head_offset_x_mm: int
+head_offset_y_mm: int
+n_primary: int
+base_random_seed: int
+random_seed: int
+number_of_threads: int
+debug: bool
+source: {...}
+collimator: {...}
+detector: {...}
+physics: {...}
+world: {...}
+output_policy: {...}
+```
+
+其中 `world` 至少记录固定 World 配置：
+
+```yaml
+world:
+  shape: box
+  center_mm: [0.0, 0.0, 0.0]
+  size_mm: [4000.0, 4000.0, 4000.0]
+  material: G4_AIR
+```
+
+其中 `output_policy` 至少记录输出目录已存在时的策略：
+
+```yaml
+output_policy:
+  existing_run_policy: fail
+```
+
+### 16.2 随机数与 run 关系
+
+第二版中，一个 run 对应一个 pose 和一个实际使用的 seed。该 run 可以使用多线程运行；线程数不改变 run 的定义。
+
+多 pose 程序执行时，每个 pose run 必须使用不同 seed，并在该 pose 的 `metadata.yaml` 中记录实际使用的 `random_seed`。
+
+推荐默认规则：
+
+```text
+base_random_seed = run.random_seed
+pose_seed = base_random_seed + pose_index
+```
+
+约束：
+
+- 每个 pose run 使用一个明确 seed；
+- 每个 pose run 的 metadata 必须记录 `base_random_seed`、`pose_index` 和实际 `random_seed`；
+- 同一配置、同一 Geant4 版本、同一线程数下应尽量保持可复现；
+- 改变 `number_of_threads` 时，基础实现不强制逐事件 bitwise identical；
+- 不要求实现复杂 hash 派生策略或跨线程数严格复现策略。
+
 
 ---
 
@@ -1124,7 +1596,7 @@ metadata 不重复写入每一行 CSV。
 
 ### 17.1 每个位姿独立输出
 
-每个 pose 独立运行一组 Monte Carlo 统计。
+每个 pose 独立运行一组 Monte Carlo 统计。第二版定义中，一个 run 对应一个 pose 和一个 seed；若一次程序执行包含多个 pose，则程序内部顺序执行多个 pose run。
 
 建议输出目录结构：
 
@@ -1161,6 +1633,31 @@ pose_x0_y0_normal_seed12345
 pose_x1111_y0_abnormal_seed12345
 pose_xm10_y4_normal_seed12345
 ```
+
+### 17.3 输出目录已存在时的策略
+
+默认策略为 fail fast：
+
+```text
+若 results/{run_id}/ 已存在且非空：
+  程序报错停止
+```
+
+理由：
+
+- 避免不同配置或不同运行结果混写；
+- 避免旧 CSV 被误认为新结果；
+- 保持 metadata 与 CSV 一一对应。
+
+后续可选扩展：
+
+```yaml
+output:
+  existing_run_policy: fail | overwrite | append_forbidden | new_run_id
+```
+
+第二版基础实现仅要求支持 `fail`。若实现 `overwrite` 或 `new_run_id`，必须在 metadata 中记录实际策略。
+
 
 ---
 
@@ -1264,13 +1761,35 @@ For each pose:
 - 合并失败；
 - 合并后 header 不唯一。
 
+### 20.5 CLI / dependency 错误
+
+- 未提供配置文件路径；
+- `--config` 后缺少参数；
+- 同时提供多个互相冲突的配置文件路径；
+- YAML parser 依赖不可用；
+- YAML 文件语法错误。
+
+### 20.6 World / pose 错误
+
+- 任一 pose 下 source 不在 World 内；
+- 任一 pose 下 detector plane 不在 World 内；
+- 任一 pose 下 collimator jaw 不在 World 内；
+- 固定 World 尺寸不足以覆盖 VehicleROI 或任一 pose 下成像头组件。
+
+### 20.7 随机数策略错误
+
+- random seed 非整数；
+- 多 pose 模式下无法为每个 pose run 确定独立 seed；
+- metadata 未记录该 pose run 实际使用的 random_seed。
+
+
 ---
 
 ## 21. 后处理边界
 
-Geant4 程序只负责输出事件级数据和 metadata。
+本轮 Geant4 程序只负责输出事件级数据和 metadata。
 
-以下内容由后处理完成：
+以下内容不在本轮实现，留到下一轮后处理项目迭代：
 
 - 探测器二维 histogram；
 - normal / abnormal 差异图；
@@ -1288,7 +1807,20 @@ Geant4 程序只负责输出事件级数据和 metadata。
 - effective rank；
 - SVD explained variance。
 
-Geant4 不直接输出 detector region ID 或 depth region ID。
+Geant4 不直接输出 detector region ID 或 depth region ID。本轮也不提供后处理脚本。
+
+### 21.1 与位姿级 / 扫描级输出的一致性
+
+项目文档中若出现“事件级 / 位姿级 / 扫描级输出”表述，应按以下边界解释：
+
+| 层级 | 本轮是否实现 | 说明 |
+|---|---|---|
+| 事件级 | 是 | `events.csv` / `events_debug.csv` + `metadata.yaml` |
+| 位姿级 | 否 | 下一轮后处理项目迭代实现 |
+| 扫描级 | 否 | 下一轮后处理项目迭代实现 |
+
+因此，`StatisticsAccumulator`、`ScanSummaryWriter`、pose-level summary、scan-level summary、二维响应图和统计指标不属于本轮强制模块。若文档或代码中保留相关名称，应标注为下一轮后处理或 deferred。
+
 
 ---
 
@@ -1317,6 +1849,20 @@ Geant4 不直接输出 detector region ID 或 depth region ID。
 19. `metadata.yaml` 使用 `head_offset_x_mm` 和 `head_offset_y_mm`，不使用 `vehicle_shift_x/y`；
 20. 多线程输出不共享同一个输出流；
 21. master 合并后最终 CSV 只保留一个 header。
+
+22. 能按 `vehicle_roi_v03.yaml` 实际 schema 读取 `schema/metadata/units/roi/materials/model_modes/regions/components/validation`；
+23. 能构建当前样例中全部 VehicleROI components；
+24. 能识别全部 `is_insert=true` 的 recommended target component；
+25. abnormal 模式下非 selected insert 保持 normal material 和 normal region_id；
+26. 固定 World 为中心 `[0,0,0]`、边长 `4000 mm` 的 `G4_AIR` box，并能覆盖全部 VehicleROI 和全部 pose 下的成像头组件；
+27. collimator CSV 可读取必需列，并兼容可选 `y_mm` 列和 UTF-8 BOM；
+28. collimator jaw 的 global y placement 满足 `y_actual = y_zero + head_offset_y`；
+29. formal CSV 不包含 pose_id、初始源状态、target interaction boolean、per-region scatter counts；这些字段由 metadata 或后处理处理；
+30. metadata 记录 pose、pose_index、head_offset、base_random_seed、该 pose run 实际使用的 random_seed、thread 数、source/collimator/detector/physics/world/output_policy；
+31. 输出目录已存在且非空时按默认 fail fast 策略处理；
+32. 多 pose 运行时每个 pose run 使用不同 seed，并在对应 metadata 中记录实际 seed；
+33. 位姿级和扫描级 summary、图表、统计指标和后处理脚本不作为本轮验收项，留到下一轮项目迭代。
+
 
 ---
 
@@ -1377,3 +1923,22 @@ Geant4 不直接输出 detector region ID 或 depth region ID。
 - 随机种子与线程数。
 
 这些参数是运行配置，不再阻塞第二版基础实现。
+
+本修订版新增闭合项：
+
+- `vehicle_roi_v03.yaml` 实际 schema；
+- component 字段规范；
+- 当前 VehicleROI 组件清单；
+- abnormal target component 列表；
+- AABB / placement / overlap 检查规则；
+- 固定 World 尺寸策略；
+- YAML parser 依赖边界；
+- CLI 主入口；
+- collimator 可选 `y_mm` 与 y placement；
+- 散射统计空间范围；
+- 不进入基础事件级 CSV 的字段边界；
+- metadata 必含字段；
+- 每个 pose run 的随机 seed 记录策略；
+- 输出目录已存在时的默认 fail fast 策略；
+- 位姿级 / 扫描级输出与后处理模块留到下一轮项目迭代的边界。
+

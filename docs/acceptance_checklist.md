@@ -29,16 +29,10 @@ primary gamma 源、准直器、虚拟探测器链路可运行
 ```bash
 cmake -S . -B build
 cmake --build build -j
-./build/MSS configs/simulation_config_v2.yaml
+./build/MSS data/simulation_config_v2.yaml
 ```
 
-若实际实现采用 `--config` 参数，例如：
-
-```bash
-./build/MSS --config configs/simulation_config_v2.yaml
-```
-
-则 README、样例命令和本文档应同步更新，不能同时保留两套互相矛盾的入口。
+推荐主入口使用 `--config`。若实现同时支持位置参数形式，应以 `--config` 指定路径为准。README、样例命令和本文档应同步更新，不能保留互相矛盾的入口。
 
 ### 2.2 默认样例配置
 
@@ -145,21 +139,37 @@ cmake --build build -j
 - C++ 标准为 C++17。
 - Geant4 run manager 不写死为单线程专用实现。
 
+### 3.3 legacy 隔离验收
+
+当前仓库曾包含第一轮 PMMA 实现。第二轮基础实现必须满足：
+
+- 构建和默认运行路径不依赖 PMMA、air defect、mirror detector、mirror collimator、`hits_profile_*` 文件名或旧 compact/debug header。
+- `./build/MSS --config data/simulation_config_v2.yaml` 是主入口；位置参数形式若存在，也必须表示 YAML 配置路径，而不是 macro 文件。
+- 旧 macro 不能设置 source、detector、collimator、pose、output、seed、thread、target 等 YAML 已覆盖参数。
+- 源码中不存在固定三 jaw 假设作为第二轮 profile 结构。
+- 不构建 `Mirror` jaw 或 mirror detector。
+- `SteppingAction` 不按 `PMMALogical` 过滤散射。
+- 正式 CSV header 精确等于 `spec.md`，不包含旧 `initial_energy`、`initial_dir_*`、`is_multiple_scatter`、`track_id` 或 `parent_id` 字段。
+
 ---
 
 ## 4. YAML 配置读取验收
 
 ### 4.1 有效配置
 
-使用默认 `configs/simulation_config_v2.yaml` 运行。
+使用默认 `data/simulation_config_v2.yaml` 运行。
 
 验收点：
 
-- 程序能读取 `simulation_config_v2.yaml`。
+- 程序能读取 `data/simulation_config_v2.yaml`。
 - 程序能读取其中指定的 `data/vehicle_roi_v03.yaml`。
 - `schema_version = 2` 被识别。
 - `run`、`vehicle`、`pose`、`source`、`collimator`、`detector`、`physics`、`output` 顶层字段均被解析。
 - 不依赖 Geant4 macro 作为主配置入口。
+- 旧 macro 文件不能作为默认运行入口；`SimulationMessenger` 如保留，只能指定或切换入口 YAML 文件路径。
+- 程序实际使用已批准的 `yaml-cpp` 读取配置，而不是退回 macro。
+- 若 `yaml-cpp` 依赖不可用，CMake 或程序启动阶段给出明确错误。
+- YAML 语法错误应 fail fast，并指出文件路径。
 
 ### 4.2 无效配置 fail fast
 
@@ -288,7 +298,18 @@ pose_x10_y5
 
 ## 6. VehicleROI 几何验收
 
-### 6.1 读取 `vehicle_roi_v03.yaml`
+### 6.1 `vehicle_roi_v03.yaml` schema 验收
+
+验收点：
+
+- 能识别顶层 `schema`、`metadata`、`units`、`coordinate_system`、`roi`、`geant4_placement_rules`、`materials`、`model_modes`、`regions`、`components`、`validation`。
+- 不假设存在 `vehicle_roi:` 顶层字段。
+- 能读取 `components[]` 中每个 component 的 `name`、`host`、`shape`、`center_mm`、`size_mm`、`material`、`region_id`、`is_insert`、`role`、`half_size_mm`、`aabb_mm`、`placement_center_in_host_mm`。
+- `shape` 第一阶段仅支持 `box`。
+- `half_size_mm == size_mm * 0.5`。
+- `aabb_mm` 与 `center_mm / size_mm` 一致。
+
+### 6.2 读取 `vehicle_roi_v03.yaml`
 
 验收点：
 
@@ -305,7 +326,7 @@ z = [0, 1450] mm
 - VehicleROI region 为 `vehicle_background_air`。
 - YAML 中 `size` 被按全长读取，构建 `G4Box` 时使用 half length。
 
-### 6.2 坐标转换
+### 6.3 坐标转换
 
 验收点：
 
@@ -323,7 +344,7 @@ component_center - host_center
 
 - 组件的 global AABB 与 YAML 中定义一致。
 
-### 6.3 主要组件可视化
+### 6.4 主要组件可视化
 
 可视化中应能识别：
 
@@ -338,7 +359,7 @@ component_center - host_center
 - rear_trunk_air。
 - insert 体积。
 
-### 6.4 overlap 与 host 检查
+### 6.5 overlap 与 host 检查
 
 必须无 overlap：
 
@@ -361,9 +382,22 @@ component_center - host_center
 
 ---
 
-## 7. 材料与 region 验收
 
-### 7.1 材料
+## 7. World 几何验收
+
+验收点：
+
+- World 为 `G4_AIR` box。
+- World center 为 `[0, 0, 0] mm`。
+- World size 为 `[4000, 4000, 4000] mm`。
+- VehicleROI 位于 World 内。
+- 所有 pose 下的 source、collimator jaw 和 virtual detector plane 均位于 World 内。
+- 若任一组件超出固定 World，程序必须在事件产生前 fail fast。
+- `metadata.yaml` 记录 World 的 shape、center、size 和 material。
+
+## 8. 材料与 region 验收
+
+### 8.1 材料
 
 必须可创建或读取：
 
@@ -389,7 +423,7 @@ N = 0.04
 
 材料创建应幂等，不重复创建同名 material。
 
-### 7.2 region_id 注册
+### 8.2 region_id 注册
 
 验收点：
 
@@ -399,7 +433,7 @@ N = 0.04
 - 无有效散射时 region 为 `none`。
 - `metadata.yaml` 不需要列出每个 region，但 CSV 中 region 字符串必须与注册值一致。
 
-### 7.3 normal / abnormal insert
+### 8.3 normal / abnormal insert
 
 normal 配置：
 
@@ -436,12 +470,13 @@ vehicle:
 - abnormal 模式下 target 为 null。
 - target component 不存在。
 - target component 不是 insert。
+- `selected_target_component` 不属于 spec.md 推荐 abnormal target component 列表。
 
 ---
 
-## 8. 成像头 pose offset 验收
+## 9. 成像头 pose offset 验收
 
-### 8.1 VehicleROI 固定
+### 9.1 VehicleROI 固定
 
 使用两个不同 pose，例如：
 
@@ -455,7 +490,7 @@ pose_x10_y5
 - VehicleROI 中所有车辆组件 global 坐标不变。
 - first / last scatter 坐标仍在同一车辆 global 坐标系中解释。
 
-### 8.2 source 同步平移
+### 9.2 source 同步平移
 
 验收点：
 
@@ -471,7 +506,7 @@ source_pos_actual = source_pos_zero + (head_offset_x, head_offset_y, 0)
 | `pose_x10_y5` | `[10, 5, -185]` |
 | `pose_xm10_ym4` | `[-10, -4, -185]` |
 
-### 8.3 collimator 同步平移
+### 9.3 collimator 同步平移
 
 验收点：
 
@@ -480,7 +515,7 @@ source_pos_actual = source_pos_zero + (head_offset_x, head_offset_y, 0)
 - jaw z 坐标不随 pose 改变。
 - 不构建镜像 jaw。
 
-### 8.4 detector 同步平移
+### 9.4 detector 同步平移
 
 验收点：
 
@@ -506,9 +541,9 @@ x=[63,171], y=[-45,55], z=-73
 
 ---
 
-## 9. 射线源验收
+## 10. 射线源验收
 
-### 9.1 基本事件定义
+### 10.1 基本事件定义
 
 验收点：
 
@@ -516,7 +551,7 @@ x=[63,171], y=[-45,55], z=-73
 - primary particle 为 gamma。
 - 不在一个 event 内产生多个 primary gamma。
 
-### 9.2 入射方向
+### 10.2 入射方向
 
 当：
 
@@ -549,7 +584,7 @@ theta <= 0
 theta > 90
 ```
 
-### 9.3 焦点面采样
+### 10.3 焦点面采样
 
 验收点：
 
@@ -558,7 +593,7 @@ theta > 90
 - 起点到 source actual 的距离不超过 `focal_spot_diameter_mm / 2`。
 - gamma 方向固定为 `incident_dir`，不使用第一版目标平面锥束采样。
 
-### 9.4 能量模式
+### 10.4 能量模式
 
 mono 模式：
 
@@ -588,9 +623,9 @@ spectrum_file: data/spectrum.csv
 
 ---
 
-## 10. 狭缝准直器验收
+## 11. 狭缝准直器验收
 
-### 10.1 合法 profile
+### 11.1 合法 profile
 
 使用样例：
 
@@ -604,14 +639,18 @@ collimator:
 验收点：
 
 - 能读取 profile `P001`。
+- 能读取必需列 `profile_id,jaw_id,vertex_id,x_mm,z_mm`。
+- 若存在可选 `y_mm`，同一 jaw 内所有 `y_mm` 必须相同。
+- 若不存在 `y_mm`，`jaw_center_y_zero = 0`。
+- UTF-8 BOM 不应导致表头识别失败。
 - 支持可变数量 jaw，不能写死三块 jaw。
 - jaw ID 连续为 `jaw_0 ... jaw_{M-1}`。
 - 每块 jaw 使用 `G4ExtrudedSolid`。
 - jaw 沿 global y 方向拉伸。
-- 拉伸长度来自 `jaw_extrusion_length_y_mm`。
+- 拉伸长度来自 `jaw_extrusion_length_y_mm`，且该值表示 global y 方向全长，不是 half length。
 - 不构建镜像准直器。
 
-### 10.2 非法 profile
+### 11.2 非法 profile
 
 使用临时非法文件测试，不修改有效样例文件。
 
@@ -628,8 +667,9 @@ collimator:
 - 多边形面积为 0。
 - 多边形非凸。
 - 含连续共线点。
+- 同一 jaw 内 `y_mm` 不一致。
 
-### 10.3 关闭准直器
+### 11.3 关闭准直器
 
 配置：
 
@@ -647,9 +687,9 @@ collimator:
 
 ---
 
-## 11. 虚拟探测器验收
+## 12. 虚拟探测器验收
 
-### 11.1 几何关系
+### 12.1 几何关系
 
 验收点：
 
@@ -660,7 +700,7 @@ collimator:
 - 不构建镜像探测器。
 - 准直器位于 VehicleROI 与虚拟探测平面之间。
 
-### 11.2 negative_z crossing
+### 12.2 negative_z crossing
 
 当：
 
@@ -692,9 +732,9 @@ det_y = pre_y + t * (post_y - pre_y)
 
 ---
 
-## 12. event 追踪验收
+## 13. event 追踪验收
 
-### 12.1 primary gamma 过滤
+### 13.1 primary gamma 过滤
 
 只处理：
 
@@ -711,7 +751,7 @@ parent_id == 0
 - positron；
 - 其他非 primary 粒子。
 
-### 12.2 散射计数
+### 13.2 散射计数
 
 计入：
 
@@ -733,7 +773,7 @@ processName == Rayl
 - last scatter 为最后一次有效 Compton / Rayleigh。
 - 无有效散射时 first / last scatter 坐标为 `NaN`，region 为 `none`。
 
-### 12.3 region 归属
+### 13.3 region 归属
 
 验收点：
 
@@ -744,11 +784,20 @@ processName == Rayl
 - step 起点位于未注册区域时返回 `other`。
 - 贴边界面事件按 preStep volume 归属。
 
+### 13.4 散射统计空间范围
+
+验收点：
+
+- `scatter_count_total`、`compton_count`、`rayleigh_count` 不限于 VehicleROI 内。
+- primary gamma 在 VehicleROI、collimator、World air 或其他 registered / unregistered volume 中发生的 `compt` / `Rayl` 均计入。
+- 未注册 region 返回 `other`。
+- 事件是否进入正式 CSV 只由 detector hit 决定。
+
 ---
 
-## 13. 正式 CSV 验收
+## 14. 正式 CSV 验收
 
-### 13.1 输出文件
+### 14.1 输出文件
 
 正式模式：
 
@@ -764,7 +813,7 @@ results/{run_id}/events.csv
 results/{run_id}/metadata.yaml
 ```
 
-### 13.2 Header
+### 14.2 Header
 
 `events.csv` header 必须精确等于：
 
@@ -772,7 +821,7 @@ results/{run_id}/metadata.yaml
 event_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
 ```
 
-### 13.3 行语义
+### 14.3 行语义
 
 验收点：
 
@@ -780,15 +829,16 @@ event_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh
 - 未探测 event 不写入正式 CSV。
 - CSV 不包含 `detected` 字段。
 - CSV 不包含 `pose_id`、`model_type`、`head_offset_x/y`，这些信息写入 metadata。
+- CSV 不包含 `source_start_x/y/z`、`source_dir_x/y/z`、`source_energy_keV`、`target_interaction`、per-region scatter counts、detector region ID 或 depth region ID。
 - 长度单位为 mm。
 - 能量单位为 keV。
 - 无散射事件 first / last scatter 坐标为 `NaN`，region 为 `none`。
 
 ---
 
-## 14. Debug CSV 验收
+## 15. Debug CSV 验收
 
-### 14.1 输出文件
+### 15.1 输出文件
 
 Debug 模式：
 
@@ -804,7 +854,7 @@ results/{run_id}/events_debug.csv
 results/{run_id}/metadata.yaml
 ```
 
-### 14.2 Header
+### 15.2 Header
 
 `events_debug.csv` header 必须精确等于：
 
@@ -812,7 +862,7 @@ results/{run_id}/metadata.yaml
 event_id,detected,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
 ```
 
-### 14.3 行语义
+### 15.3 行语义
 
 验收点：
 
@@ -829,10 +879,11 @@ det_energy = NaN
 
 - scatter 字段仍按 event 已发生的追踪结果填写。
 - Debug CSV 不包含 `termination_process`、`termination_volume`、`termination_region_id` 或其他额外字段。
+- Debug CSV 不包含 `source_start_x/y/z`、`source_dir_x/y/z`、`source_energy_keV`、`target_interaction`、per-region scatter counts、detector region ID 或 depth region ID。
 
 ---
 
-## 15. metadata.yaml 验收
+## 16. metadata.yaml 验收
 
 每个 pose 必须写出 `metadata.yaml`。
 
@@ -851,6 +902,7 @@ pose_id: ...
 head_offset_x_mm: ...
 head_offset_y_mm: ...
 n_primary: ...
+base_random_seed: ...
 random_seed: ...
 number_of_threads: ...
 debug: ...
@@ -858,8 +910,18 @@ source: ...
 collimator: ...
 detector: ...
 physics: ...
+world:
+  shape: box
+  center_mm: [0.0, 0.0, 0.0]
+  size_mm: [4000.0, 4000.0, 4000.0]
+  material: G4_AIR
+output_policy:
+  existing_run_policy: fail
+pose_index: ...
 notes: ...
 ```
+
+`random_seed` 只写一次，取值为该 pose run 最终实际执行时使用的 seed；`base_random_seed` 记录入口 YAML 中的基础 seed。
 
 验收点：
 
@@ -867,6 +929,7 @@ notes: ...
 - metadata 中不得出现 `vehicle_shift_x` 或 `vehicle_shift_y`。
 - `output_csv` 与实际 CSV 文件名一致。
 - `n_primary` 等于该 pose 的入射 primary gamma 数。
+- metadata 记录 `base_random_seed`、`pose_index` 和该 pose run 实际使用的 `random_seed`。
 - `run_id` 推荐格式为：
 
 ```text
@@ -875,9 +938,9 @@ notes: ...
 
 ---
 
-## 16. 多线程输出验收
+## 17. 多线程输出验收
 
-### 16.1 多线程正式模式
+### 17.1 多线程正式模式
 
 配置：
 
@@ -896,7 +959,7 @@ run:
 - 正式模式合并成功后删除对应临时 CSV。
 - 合并失败时保留所有临时 CSV 并报错。
 
-### 16.2 多线程 debug 模式
+### 17.2 多线程 debug 模式
 
 配置：
 
@@ -912,9 +975,18 @@ run:
 - debug 模式合并成功后保留线程临时 CSV。
 - 临时 CSV header 与 debug header 一致。
 
+### 17.3 多线程与 seed
+
+验收点：
+
+- 一个 run 对应一个 pose 和一个实际 seed。
+- 一个 run 可以使用多个 worker thread。
+- 多线程不改变 run 与 pose / seed 的对应关系。
+- metadata 记录该 pose run 实际使用的 `random_seed` 和 `number_of_threads`。
+
 ---
 
-## 17. 多 pose 输出验收
+## 18. 多 pose 输出验收
 
 使用 list mode 多 pose 配置：
 
@@ -934,19 +1006,19 @@ pose:
 
 ```text
 results/pose_x0_y0_normal_seed12345/
-results/pose_x10_y5_normal_seed12345/
-results/pose_xm10_ym4_normal_seed12345/
+results/pose_x10_y5_normal_seed12346/
+results/pose_xm10_ym4_normal_seed12347/
 ```
 
 - 每个目录有独立 `events.csv` 或 `events_debug.csv`。
 - 每个目录有独立 `metadata.yaml`。
-- metadata 中的 pose_id 与目录名一致。
+- metadata 中的 `run_id` 与目录名一致，`pose_id` 与对应 offset 一致。
 
 ---
 
-## 18. 后处理边界验收
+## 19. 后处理边界验收
 
-Geant4 程序不得在基础构建中输出：
+本轮不得输出或实现：
 
 - detector region ID；
 - depth region ID；
@@ -958,15 +1030,18 @@ Geant4 程序不得在基础构建中输出：
 - `H_ms`；
 - `F_ms`；
 - `D_JS`；
-- SVD 或 effective rank。
+- SVD 或 effective rank；
+- pose_summary.csv；
+- scan_summary.csv；
+- 后处理脚本。
 
-这些由后处理读取 `events.csv` 和 `metadata.yaml` 计算。
+这些留到下一轮后处理项目迭代。
 
 ---
 
-## 19. 非目标检查
+## 20. 非目标检查
 
-第二版基础构建不得主动加入：
+第二版基础构建不得主动加入或继续继承第一轮实现中的：
 
 - 整车 CAD 复现；
 - 真实探测器材料响应；
@@ -979,16 +1054,24 @@ Geant4 程序不得在基础构建中输出：
 - 成像头 z 方向运动；
 - 镜像准直器；
 - 镜像探测器；
-- 在 Geant4 内生成统计图。
+- PMMA 主模型；
+- air defect；
+- `PMMALogical` 散射过滤；
+- `hits_profile_*` 输出命名；
+- 第一轮 compact/debug CSV header；
+- 在 Geant4 内生成统计图；
+- pose-level summary；
+- scan-level summary；
+- 后处理脚本。
 
 ---
 
-## 20. 最小端到端验收
+## 21. 最小端到端验收
 
 使用默认样例配置运行：
 
 ```bash
-./build/MSS configs/simulation_config_v2.yaml
+./build/MSS --config data/simulation_config_v2.yaml
 ```
 
 或 README 中定义的等价命令。
@@ -996,7 +1079,7 @@ Geant4 程序不得在基础构建中输出：
 验收点：
 
 - 程序正常结束。
-- 读取 `simulation_config_v2.yaml`。
+- 读取 `data/simulation_config_v2.yaml`。
 - 读取 `vehicle_roi_v03.yaml`。
 - 构建 VehicleROI。
 - 构建 source、slit collimator、virtual detector plane。
@@ -1012,4 +1095,5 @@ results/pose_x0_y0_normal_seed12345/metadata.yaml
 - `metadata.yaml` 中 `pose_id = pose_x0_y0`。
 - `metadata.yaml` 中 `head_offset_x_mm = 0`，`head_offset_y_mm = 0`。
 - metadata 中不出现 `vehicle_shift_x/y`。
+- metadata 中记录固定 World 与该 pose run 实际 random_seed。
 - 若没有 detected event，正式 CSV 可以只有 header，但程序仍应正常结束。

@@ -27,14 +27,16 @@
 产生斜入射有限焦点 primary gamma
 记录 detected primary gamma 的事件级统计量
 输出 events.csv / events_debug.csv 与 metadata.yaml
+本轮不实现 pose-level / scan-level 数据、summary、图表、统计指标或后处理脚本
 ```
 
 架构设计应满足：
 
 - 车辆 ROI 与成像头职责分离；
 - 配置读取与 Geant4 构建分离；
+- YAML 解析器固定采用已批准的 `yaml-cpp`；
 - 事件状态与 step 判断分离；
-- CSV 输出与后处理统计分离；
+- CSV 输出与后处理统计分离，本轮不实现后处理模块；
 - 多线程输出不共享同一个输出流；
 - 每个 pose 可作为独立静态几何状态运行；
 - 所有非法配置和非法几何 fail fast。
@@ -46,9 +48,11 @@
 | 关注点 | 主要模块 |
 |---|---|
 | YAML 读取与验证 | `SimulationConfigReader`, `VehicleROIConfigReader` |
+| YAML / CLI 兼容入口 | `SimulationMessenger`，仅允许指定或切换入口 YAML 文件路径 |
 | 配置对象 | `SimulationConfig`, `VehicleROIConfig`, `ScanPose`, `PoseList` |
 | 材料管理 | `MaterialManager` |
 | region 注册与查询 | `RegionRegistry`, `RegionResolver` |
+| Geant4 几何总装 | `DetectorConstruction` 或 `GeometryAssembly` |
 | 车辆 ROI 构建 | `VehicleROIConstruction` |
 | 成像头构建 | `ImagingHeadConstruction` |
 | 准直器 profile 读取 | `SlitCollimatorProfileReader` |
@@ -58,9 +62,27 @@
 | physics list | `PhysicsList` |
 | event 状态 | `EventAction`, `EventRecord` |
 | step 判断 | `SteppingAction` |
+| pose 生成 | `ScanPoseManager` |
 | run / pose 生命周期 | `PoseRunController`, `RunAction` |
 | CSV 输出与合并 | `CsvWriter` |
 | metadata 输出 | `MetadataWriter` |
+
+### 3.1 现有代码迁移边界
+
+当前仓库仍保留第一轮 PMMA 背散射实现。第二轮重构允许机制级复用，但不得语义级继承第一轮物理模型、入口和输出 schema。
+
+| 现有模块 / 文件 | 第二轮处理方式 |
+|---|---|
+| `CollimatorProfileReader` | 可参考 CSV 解析、BOM 处理、顶点连续性和凸多边形检查；第二轮实现应迁移为 `SlitCollimatorProfileReader`，支持可变 jaw 和可选 `y_mm`。 |
+| `CollimatorBuilder` | 可参考 `G4ExtrudedSolid` 构建方式；第二轮实现应迁移为 `SlitCollimatorBuilder`，移除固定三 jaw 和 mirror jaw，按 pose offset placement。 |
+| 旧 `DetectorConstruction` | 不应继续承载 PMMA / air defect / mirror detector 语义；第二轮应拆分为 `GeometryAssembly` 或 `DetectorConstruction` 总装、`VehicleROIConstruction` 和 `ImagingHeadConstruction`。 |
+| 旧 `SimulationConfig` | 不应继续扩展旧 macro 字段；第二轮应替换为 YAML-based `SimulationConfig`，字段与 `spec.md` 中 `simulation_config_v2.yaml` 对齐。 |
+| `SpectrumSampler` | 可复用 spectrum CSV 读取、验证和 CDF sampling 机制。 |
+| `CsvWriter` / `RunAction` | 可复用 worker 临时 CSV 与 master merge 机制；formal/debug header、run_id、目录结构和 metadata 必须按第二轮 schema 重写。 |
+| `EventAction` / `SteppingAction` | 可复用 event reset、primary gamma 过滤、detector crossing 插值和 first/last scatter 更新思路；散射统计范围、region 归因和 CSV 字段必须按第二轮规则重写。 |
+| `README.md` / `macros/*.mac` | 当前属于第一轮 legacy 运行说明；第二轮实现时不得作为主入口依据，最终应改为 `--config data/simulation_config_v2.yaml` 样例。 |
+
+不得从现有代码继承：PMMA 主模型、air defect、`PMMALogical` 散射过滤、mirror collimator、mirror detector、macro 主配置入口、`hits_profile_*` 文件名、compact/debug 旧 CSV header。
 
 ---
 
@@ -80,11 +102,13 @@ MSS/
 ├── include/
 │   ├── SimulationConfig.hh
 │   ├── SimulationConfigReader.hh
+│   ├── SimulationMessenger.hh
 │   ├── VehicleROIConfig.hh
 │   ├── VehicleROIConfigReader.hh
 │   ├── MaterialManager.hh
 │   ├── RegionRegistry.hh
 │   ├── RegionResolver.hh
+│   ├── DetectorConstruction.hh
 │   ├── VehicleROIConstruction.hh
 │   ├── ImagingHeadConstruction.hh
 │   ├── SourceModel.hh
@@ -99,15 +123,18 @@ MSS/
 │   ├── EventAction.hh
 │   ├── SteppingAction.hh
 │   ├── RunAction.hh
+│   ├── ScanPoseManager.hh
 │   ├── PoseRunController.hh
 │   ├── CsvWriter.hh
 │   └── MetadataWriter.hh
 ├── src/
 │   ├── SimulationConfigReader.cc
+│   ├── SimulationMessenger.cc
 │   ├── VehicleROIConfigReader.cc
 │   ├── MaterialManager.cc
 │   ├── RegionRegistry.cc
 │   ├── RegionResolver.cc
+│   ├── DetectorConstruction.cc
 │   ├── VehicleROIConstruction.cc
 │   ├── ImagingHeadConstruction.cc
 │   ├── SourceModel.cc
@@ -121,12 +148,12 @@ MSS/
 │   ├── EventAction.cc
 │   ├── SteppingAction.cc
 │   ├── RunAction.cc
+│   ├── ScanPoseManager.cc
 │   ├── PoseRunController.cc
 │   ├── CsvWriter.cc
 │   └── MetadataWriter.cc
-├── configs/
-│   └── simulation_config_v2.yaml
 ├── data/
+│   ├── simulation_config_v2.yaml
 │   ├── vehicle_roi_v03.yaml
 │   ├── collimator_profiles.csv
 │   └── spectrum.csv
@@ -197,6 +224,13 @@ struct OutputConfig {
     std::string events_csv_name = "events.csv";
     std::string metadata_yaml_name = "metadata.yaml";
     std::string thread_tmp_directory = "tmp";
+    std::string existing_run_policy = "fail";
+};
+
+struct WorldConfig {
+    std::array<double, 3> center_mm = {0.0, 0.0, 0.0};
+    std::array<double, 3> size_mm = {4000.0, 4000.0, 4000.0};
+    std::string material = "G4_AIR";
 };
 
 struct SimulationConfig {
@@ -208,6 +242,7 @@ struct SimulationConfig {
     DetectorConfig detector;
     PhysicsConfig physics;
     OutputConfig output;
+    WorldConfig world;
     PoseList poses;
 };
 ```
@@ -216,13 +251,15 @@ struct SimulationConfig {
 
 ```cpp
 struct ScanPose {
+    int pose_index = 0;
     int head_offset_x_mm = 0;
     int head_offset_y_mm = 0;
+    long random_seed = 0;
     std::string pose_id;
 };
 ```
 
-第一阶段 offset 只支持整数 mm。
+第一阶段 offset 只支持整数 mm。每个 pose run 使用一个实际 `random_seed`，默认可按 `base_random_seed + pose_index` 生成。
 
 `pose_id` 自动生成：
 
@@ -273,11 +310,22 @@ z     = detector_z_zero
 建议包含：
 
 ```cpp
+struct Aabb {
+    std::array<double, 2> x;
+    std::array<double, 2> y;
+    std::array<double, 2> z;
+};
+
 struct BoxComponentConfig {
     std::string name;
     std::string host;
+    std::string shape;
+    std::string role;
     std::array<double, 3> center_mm;
     std::array<double, 3> size_mm;
+    std::array<double, 3> half_size_mm;
+    std::array<double, 3> placement_center_in_host_mm;
+    Aabb aabb_mm;
     std::string material;
     std::string region_id;
 
@@ -294,6 +342,14 @@ struct VehicleROIConfig {
     std::vector<BoxComponentConfig> components;
 };
 ```
+
+实现必须按 `vehicle_roi_v03.yaml` 的实际顶层结构读取：
+
+```text
+schema / metadata / units / coordinate_system / roi / geant4_placement_rules / materials / model_modes / regions / components / validation
+```
+
+不得假设存在 `vehicle_roi:` 顶层字段。`components[]` 中的 `shape` 第一阶段仅支持 `box`，`half_size_mm` 与 `aabb_mm` 用于读取阶段一致性检查。
 
 ### 6.2 host / daughter 坐标转换
 
@@ -333,6 +389,42 @@ selected_target_component:
   material = normal_material
   region_id = normal_region_id
 ```
+
+---
+
+## 6.4 DetectorConstruction / GeometryAssembly
+
+### 6.4.1 职责
+
+`DetectorConstruction` 或等价 `GeometryAssembly` 负责在 Geant4 生命周期中总装几何。
+
+职责包括：
+
+- 构建固定 World；
+- 调用 `VehicleROIConstruction` 构建固定车辆 ROI；
+- 调用 `ImagingHeadConstruction` 构建当前 pose 下的 source 辅助体、collimator jaw 和 virtual detector plane；
+- 检查 VehicleROI 与所有 pose 下成像头组件均位于固定 World 内；
+- 支持 pose 间重新初始化或重建几何。
+
+不负责：
+
+- 产生 primary gamma；
+- 记录 event；
+- 写 CSV；
+- 生成后处理 summary 或图表。
+
+### 6.4.2 固定 World
+
+本轮 World 固定为：
+
+```text
+shape = box
+center_mm = [0.0, 0.0, 0.0]
+size_mm = [4000.0, 4000.0, 4000.0]
+material = G4_AIR
+```
+
+不实现按 pose 自动扩展 World。若 VehicleROI、source、collimator jaw 或 detector plane 在任一 pose 下超出固定 World，应在事件产生前 fail fast。
 
 ---
 
@@ -447,6 +539,8 @@ jaw 沿 y 拉伸时：
 y_actual = y_zero + head_offset_y
 ```
 
+其中 `y_zero` 来自 profile CSV 的可选 `y_mm`；若 CSV 不含 `y_mm`，则 `y_zero = 0`。`jaw_extrusion_length_y_mm` 表示 global y 方向全长，不是 half length。
+
 ### 9.4 detector 坐标
 
 ```text
@@ -462,11 +556,19 @@ x/y range 随 head_offset_x/y 平移
 
 读取第二版狭缝准直器 CSV profile。
 
-输入表头：
+输入必需列：
 
 ```csv
 profile_id,jaw_id,vertex_id,x_mm,z_mm
 ```
+
+可选列：
+
+```csv
+y_mm
+```
+
+若存在 `y_mm`，同一 jaw 内所有顶点的 `y_mm` 必须相同，并作为该 jaw 的 `y_zero_mm`。若不存在 `y_mm`，`y_zero_mm = 0`。Reader 应容忍并去除 UTF-8 BOM。
 
 ### 10.2 数据结构
 
@@ -478,6 +580,7 @@ struct XZPoint {
 
 struct SlitJawProfile {
     std::string jaw_id;
+    double y_zero_mm = 0.0;
     std::vector<XZPoint> vertices;
 };
 
@@ -494,6 +597,7 @@ struct SlitCollimatorProfile {
 - 文件可打开；
 - 指定 `profile_id` 存在；
 - 必要列存在；
+- 可选 `y_mm` 若存在，同一 jaw 内取值一致；
 - `M >= 1`；
 - jaw ID 连续为 `jaw_0 ... jaw_{M-1}`；
 - 每块 jaw 顶点数 `N >= 3`；
@@ -850,6 +954,7 @@ pose_id: ...
 head_offset_x_mm: ...
 head_offset_y_mm: ...
 n_primary: ...
+base_random_seed: ...
 random_seed: ...
 number_of_threads: ...
 debug: ...
@@ -857,8 +962,18 @@ source: ...
 collimator: ...
 detector: ...
 physics: ...
+world:
+  shape: box
+  center_mm: [0.0, 0.0, 0.0]
+  size_mm: [4000.0, 4000.0, 4000.0]
+  material: G4_AIR
+output_policy:
+  existing_run_policy: fail
+pose_index: ...
 notes: ...
 ```
+
+`random_seed` 只写一次，取值为该 pose run 最终实际执行时使用的 seed；`base_random_seed` 仅记录入口 YAML 中的基础 seed。
 
 禁止使用：
 
@@ -875,7 +990,7 @@ vehicle_shift_y
 
 ```text
 main()
-  ├── 读取 simulation_config_v2.yaml
+  ├── 读取 data/simulation_config_v2.yaml 或 --config 指定的入口 YAML
   ├── 读取 vehicle_roi_v03.yaml
   ├── 验证所有配置
   ├── 生成 PoseList
@@ -890,6 +1005,7 @@ main()
 ```text
 For each ScanPose:
   ├── 生成 pose_id
+  ├── 计算该 pose run 的 random_seed
   ├── 生成 run_id
   ├── 计算 head_offset
   ├── 构建或刷新当前 pose 的 ImagingHead
@@ -945,6 +1061,8 @@ For each ScanPose:
 - 输出流；
 - worker 本地 CSV writer；
 - mutable random sampling state。
+
+本轮随机数语义为：一个 run 对应一个 pose 和一个实际 seed。一个 run 可以使用多线程执行。多 pose 程序执行时，默认可使用 `pose_seed = base_random_seed + pose_index`，并在每个 pose 的 `metadata.yaml` 中记录 `base_random_seed`、`pose_index` 和实际 `random_seed`。不要求跨线程数逐事件 bitwise identical。
 
 ---
 
@@ -1039,6 +1157,7 @@ CsvWriter
 
 - CSV 无法创建；
 - metadata 无法写出；
+- results/{run_id} 已存在且非空；
 - 线程临时文件无法创建；
 - 合并失败；
 - 合并后 header 不唯一。
@@ -1072,7 +1191,7 @@ Geant4 程序不负责：
 - `D_JS`；
 - SVD / effective rank。
 
-这些全部由后处理读取 `events.csv` 和 `metadata.yaml` 计算。
+这些全部留到下一轮后处理项目迭代。本轮不实现后处理脚本、pose_summary.csv 或 scan_summary.csv。
 
 ---
 
@@ -1092,7 +1211,10 @@ Geant4 程序不负责：
 - 成像头 z 方向运动；
 - 镜像准直器；
 - 镜像探测器；
-- 在 Geant4 内生成统计图。
+- 在 Geant4 内生成统计图；
+- pose-level summary；
+- scan-level summary；
+- 后处理脚本。
 
 ---
 
@@ -1114,5 +1236,6 @@ Geant4 程序不负责：
 - 正式 CSV 只写 detected primary gamma；
 - debug CSV 写 detected 与 undetected，并仅额外增加 `detected` 字段；
 - metadata 使用 `head_offset_x/y`，不使用 `vehicle_shift_x/y`；
+- metadata 记录固定 World、output policy、pose_index、base_random_seed 和该 pose run 最终实际使用的 random_seed；
 - 多线程输出不共享输出流；
 - master 合并后最终 CSV 只有一个 header。

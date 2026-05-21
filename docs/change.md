@@ -97,6 +97,12 @@
 
 第二轮应以新需求文档为主，第一轮内容仅用于降低重新设计成本。
 
+### 4.1 当前仓库代码现状
+
+当前仓库仍保留第一轮 PMMA 背散射代码。该代码可作为项目结构、Geant4 action 链路、spectrum sampling、CSV 输出链路和多线程临时文件合并策略的参考。
+
+但当前代码中的 PMMA 模体、air defect、固定三块 jaw、mirror collimator、mirror detector、macro 主配置入口、旧 compact/debug CSV schema、`hits_profile_*` 输出命名和只统计 `PMMALogical` 内散射的逻辑，均不属于第二轮实现边界。后续实现应以 `docs/spec.md` 为准进行重命名、拆分或替换。
+
 ---
 
 ## 5. 第二轮项目的两条需求线
@@ -418,11 +424,11 @@ incident_dir = (cos(theta), 0, sin(theta))
 - 不同车辆材料区内的散射次数；
 - 是否与内部目标物发生过相互作用。
 
-事件级数据是后续所有位姿级和扫描级统计的基础。
+事件级数据是后续所有位姿级和扫描级统计的基础。本文档中的事件级候选类别用于说明需求来源；第二轮本轮 Geant4 基础程序的正式 CSV / debug CSV 字段边界以 `docs/spec.md` 为准，不在本轮 CSV 中输出 `pose_id`、初始源状态、`target_interaction` 或 per-region scatter counts。
 
 ### 9.2 位姿级统计量
 
-位姿级统计量描述某一个成像头扫描位姿下的整体响应。
+位姿级统计量描述某一个成像头扫描位姿下的整体响应。本节只作为下一轮后处理项目迭代的需求背景，不属于第二轮本轮 Geant4 基础程序的实现范围。
 
 候选类别包括：
 
@@ -437,11 +443,11 @@ incident_dir = (cos(theta), 0, sin(theta))
 - 目标物相关事件比例；
 - 各车辆结构区贡献比例。
 
-位姿级统计量主要服务项目摸底，也可作为论文中的比较单位。
+位姿级统计量主要服务项目摸底，也可作为论文中的比较单位。本轮不输出 pose-level summary、pose-level image 或位姿级统计文件。
 
 ### 9.3 扫描级统计量
 
-扫描级统计量描述成像头在 `head_offset_x - head_offset_y` 平移网格上的整体响应。
+扫描级统计量描述成像头在 `head_offset_x - head_offset_y` 平移网格上的整体响应。本节只作为下一轮后处理项目迭代的需求背景，不属于第二轮本轮 Geant4 基础程序的实现范围。
 
 候选结果包括：
 
@@ -453,7 +459,7 @@ incident_dir = (cos(theta), 0, sin(theta))
 - 有 / 无目标物差分响应图；
 - 不同结构区贡献图。
 
-扫描级统计量用于判断当前系统是否具备形成侧向成像响应的潜力。
+扫描级统计量用于判断当前系统是否具备形成侧向成像响应的潜力。本轮不输出 scan-level summary、二维响应图、差异图、统计指标或后处理脚本。
 
 ---
 
