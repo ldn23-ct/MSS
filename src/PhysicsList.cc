@@ -5,7 +5,6 @@
 
 PhysicsList::PhysicsList()
 {
-    SetVerboseLevel(1);
+    RegisterPhysics(new G4EmLivermorePhysics());
     SetDefaultCutValue(0.1 * mm);
-    RegisterPhysics(new G4EmLivermorePhysics);
 }

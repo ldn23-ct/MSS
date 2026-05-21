@@ -1,7 +1,6 @@
 #ifndef COLLIMATOR_PROFILE_READER_HH
 #define COLLIMATOR_PROFILE_READER_HH
 
-#include <array>
 #include <string>
 #include <vector>
 
@@ -17,7 +16,7 @@ struct PolygonJawProfile {
 
 struct CollimatorProfile {
     std::string profile_id;
-    std::array<PolygonJawProfile, 3> jaws;
+    std::vector<PolygonJawProfile> jaws;
 };
 
 class CollimatorProfileReader {

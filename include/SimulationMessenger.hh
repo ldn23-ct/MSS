@@ -5,10 +5,7 @@
 
 #include <memory>
 
-class G4UIcmdWithABool;
-class G4UIcmdWithADoubleAndUnit;
 class G4UIcmdWithAString;
-class G4UIcmdWithAnInteger;
 class G4UIdirectory;
 class G4UIcommand;
 struct SimulationConfig;
@@ -22,25 +19,8 @@ class SimulationMessenger : public G4UImessenger {
 
   private:
     std::shared_ptr<SimulationConfig> config_;
-
-    std::unique_ptr<G4UIdirectory> geometryDirectory_;
-    std::unique_ptr<G4UIdirectory> sourceDirectory_;
-    std::unique_ptr<G4UIdirectory> outputDirectory_;
-
-    std::unique_ptr<G4UIcmdWithAString> collimatorProfileFileCommand_;
-    std::unique_ptr<G4UIcmdWithAString> collimatorProfileIdCommand_;
-    std::unique_ptr<G4UIcmdWithABool> enableCollimatorCommand_;
-    std::unique_ptr<G4UIcmdWithABool> enableAirDefectCommand_;
-
-    std::unique_ptr<G4UIcmdWithAString> energyModeCommand_;
-    std::unique_ptr<G4UIcmdWithADoubleAndUnit> monoEnergyCommand_;
-    std::unique_ptr<G4UIcmdWithAString> spectrumFileCommand_;
-
-    std::unique_ptr<G4UIcmdWithAString> randomSeedCommand_;
-    std::unique_ptr<G4UIcmdWithAnInteger> numberOfThreadsCommand_;
-
-    std::unique_ptr<G4UIcmdWithAString> outputDirectoryCommand_;
-    std::unique_ptr<G4UIcmdWithABool> debugOutputCommand_;
+    std::unique_ptr<G4UIdirectory> mssDirectory_;
+    std::unique_ptr<G4UIcmdWithAString> configPathCommand_;
 };
 
 #endif

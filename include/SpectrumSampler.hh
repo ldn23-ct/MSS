@@ -2,7 +2,6 @@
 #define SPECTRUM_SAMPLER_HH
 
 #include <string>
-#include <vector>
 
 class SpectrumSampler {
   public:
@@ -10,13 +9,10 @@ class SpectrumSampler {
 
     void Load(const std::string& filePath);
     double SampleEnergyKeV() const;
-
     const std::string& LoadedFilePath() const;
 
   private:
     std::string loadedFilePath_;
-    std::vector<double> energies_keV_;
-    std::vector<double> cdf_;
 };
 
 #endif

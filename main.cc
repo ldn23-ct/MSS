@@ -1,47 +1,75 @@
-#include "ActionInitialization.hh"
-#include "DetectorConstruction.hh"
-#include "PhysicsList.hh"
 #include "SimulationConfig.hh"
-#include "SimulationMessenger.hh"
+#include "SimulationConfigReader.hh"
 
-#include "G4RunManager.hh"
-#include "G4RunManagerFactory.hh"
-#include "G4UIExecutive.hh"
-#include "G4UImanager.hh"
-#include "G4VisExecutive.hh"
-
-#include <memory>
+#include <exception>
+#include <iostream>
 #include <string>
+
+namespace {
+
+struct CliOptions {
+    std::string configPath;
+};
+
+void PrintUsage(std::ostream& os)
+{
+    os << "Usage:\n"
+       << "  MSS --config <simulation_config_v2.yaml>\n"
+       << "  MSS <simulation_config_v2.yaml>\n";
+}
+
+bool StartsWithDash(const std::string& value)
+{
+    return !value.empty() && value.front() == '-';
+}
+
+CliOptions ParseArgs(int argc, char** argv)
+{
+    std::string configFromFlag;
+    std::string configFromPosition;
+
+    for (int i = 1; i < argc; ++i) {
+        const std::string arg = argv[i];
+        if (arg == "--config") {
+            if (i + 1 >= argc || StartsWithDash(argv[i + 1])) {
+                throw std::runtime_error("missing value after --config");
+            }
+            configFromFlag = argv[++i];
+            continue;
+        }
+        if (StartsWithDash(arg)) {
+            throw std::runtime_error("unknown option: " + arg);
+        }
+        if (!configFromPosition.empty()) {
+            throw std::runtime_error("multiple positional config paths are not allowed");
+        }
+        configFromPosition = arg;
+    }
+
+    CliOptions options;
+    options.configPath = configFromFlag.empty() ? configFromPosition : configFromFlag;
+    if (options.configPath.empty()) {
+        throw std::runtime_error("no YAML config path specified");
+    }
+    return options;
+}
+
+}  // namespace
 
 int main(int argc, char** argv)
 {
-    auto runManager = std::unique_ptr<G4RunManager>(
-        G4RunManagerFactory::CreateRunManager(G4RunManagerType::Default));
+    try {
+        const auto options = ParseArgs(argc, argv);
+        SimulationConfigReader reader;
+        const auto config = reader.ReadPathOnly(options.configPath);
 
-    auto config = std::make_shared<SimulationConfig>();
-
-    auto* detectorConstruction = new DetectorConstruction(config);
-    runManager->SetUserInitialization(detectorConstruction);
-    runManager->SetUserInitialization(new PhysicsList);
-    runManager->SetUserInitialization(
-        new ActionInitialization(config,
-                                 detectorConstruction->GetDetectorPlaneConfigs(),
-                                 detectorConstruction->GetPmmaThicknessMm()));
-
-    SimulationMessenger messenger(config);
-
-    auto* visManager = new G4VisExecutive();
-    visManager -> Initialize();
-
-    auto* uiManager = G4UImanager::GetUIpointer();
-    if (argc > 1) {
-        const std::string command = "/control/execute ";
-        uiManager->ApplyCommand(command + argv[1]);
-    } else {
-        auto ui = std::make_unique<G4UIExecutive>(argc, argv);
-        ui->SessionStart();
+        std::cout << "MSS M0 skeleton initialized.\n"
+                  << "Config path: " << config.configFilePath << '\n'
+                  << "YAML parsing and Geant4 simulation are deferred to later milestones.\n";
+        return 0;
+    } catch (const std::exception& error) {
+        std::cerr << "MSS error: " << error.what() << "\n\n";
+        PrintUsage(std::cerr);
+        return 2;
     }
-
-    delete visManager;
-    return 0;
 }
