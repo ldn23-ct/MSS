@@ -1,5 +1,8 @@
 #include "ImagingHeadConstruction.hh"
 
+#include "SlitCollimatorBuilder.hh"
+#include "SlitCollimatorProfileReader.hh"
+
 #include <stdexcept>
 
 namespace {
@@ -29,6 +32,25 @@ ImagingHeadConstruction::ImagingHeadConstruction(
 G4VPhysicalVolume* ImagingHeadConstruction::Construct(G4LogicalVolume* worldLogical)
 {
     RequireConfigured();
+    if (worldLogical == nullptr) {
+        throw std::runtime_error("ImagingHeadConstruction requires a non-null World logical volume");
+    }
+
+    collimatorJawPhysicalVolumes_.clear();
+    if (simulationConfig_->collimator.enable) {
+        const SlitCollimatorProfileReader reader;
+        const SlitCollimatorProfile profile = reader.ReadProfile(
+            simulationConfig_->collimator.profile_file,
+            simulationConfig_->collimator.profile_id);
+        const SlitCollimatorBuilder builder;
+        collimatorJawPhysicalVolumes_ = builder.Build(
+            profile,
+            simulationConfig_->collimator,
+            pose_,
+            worldLogical,
+            *materialManager_);
+    }
+
     virtualDetectorPhysicalVolume_ = detectorPlane_.Construct(worldLogical, *materialManager_);
     return virtualDetectorPhysicalVolume_;
 }
@@ -48,6 +70,11 @@ const VirtualDetectorPlane& ImagingHeadConstruction::DetectorPlane() const
 G4VPhysicalVolume* ImagingHeadConstruction::VirtualDetectorPhysicalVolume() const
 {
     return virtualDetectorPhysicalVolume_;
+}
+
+const std::vector<G4VPhysicalVolume*>& ImagingHeadConstruction::CollimatorJawPhysicalVolumes() const
+{
+    return collimatorJawPhysicalVolumes_;
 }
 
 void ImagingHeadConstruction::RequireConfigured() const

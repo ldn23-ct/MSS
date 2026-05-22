@@ -1,6 +1,7 @@
 #include "DetectorConstruction.hh"
 
 #include "ImagingHeadConstruction.hh"
+#include "SlitCollimatorProfileReader.hh"
 #include "VehicleROIConstruction.hh"
 #include "VirtualDetectorPlane.hh"
 
@@ -10,7 +11,10 @@
 #include "G4SystemOfUnits.hh"
 #include "G4VisAttributes.hh"
 
+#include <algorithm>
+#include <limits>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace {
@@ -31,6 +35,46 @@ std::array<double, 2> DetectorZExtent(const DetectorPlaneActual& actual)
 {
     const double halfThickness = 0.5 * VirtualDetectorPlane::kHelperThicknessMm;
     return {actual.z_mm - halfThickness, actual.z_mm + halfThickness};
+}
+
+struct JawAabb {
+    std::array<double, 2> x = {0.0, 0.0};
+    std::array<double, 2> y = {0.0, 0.0};
+    std::array<double, 2> z = {0.0, 0.0};
+};
+
+JawAabb CalculateJawAabb(
+    const SlitJawProfile& jaw,
+    const CollimatorConfig& collimatorConfig,
+    const ScanPose& pose)
+{
+    if (jaw.vertices.empty()) {
+        throw std::runtime_error(jaw.jaw_id + " has no vertices");
+    }
+
+    JawAabb aabb;
+    aabb.x = {std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest()};
+    aabb.z = {std::numeric_limits<double>::max(), std::numeric_limits<double>::lowest()};
+
+    for (const auto& vertex : jaw.vertices) {
+        const double xActual = vertex.x_mm + pose.head_offset_x_mm;
+        aabb.x[0] = std::min(aabb.x[0], xActual);
+        aabb.x[1] = std::max(aabb.x[1], xActual);
+        aabb.z[0] = std::min(aabb.z[0], vertex.z_mm);
+        aabb.z[1] = std::max(aabb.z[1], vertex.z_mm);
+    }
+
+    const double centerY = jaw.y_zero_mm + pose.head_offset_y_mm;
+    const double halfLengthY = 0.5 * collimatorConfig.jaw_extrusion_length_y_mm;
+    aabb.y = {centerY - halfLengthY, centerY + halfLengthY};
+    return aabb;
+}
+
+bool WorldContainsAabb(const WorldConfig& world, const JawAabb& aabb)
+{
+    return AxisContains(world.center_mm[0], world.size_mm[0], aabb.x)
+        && AxisContains(world.center_mm[1], world.size_mm[1], aabb.y)
+        && AxisContains(world.center_mm[2], world.size_mm[2], aabb.z);
 }
 
 }  // namespace
@@ -137,6 +181,14 @@ void DetectorConstruction::ValidateWorldContainsImagingHeadPoses(const PoseList&
         throw std::runtime_error("at least one ScanPose is required to construct ImagingHead");
     }
 
+    SlitCollimatorProfile collimatorProfile;
+    if (simulationConfig_.collimator.enable) {
+        const SlitCollimatorProfileReader reader;
+        collimatorProfile = reader.ReadProfile(
+            simulationConfig_.collimator.profile_file,
+            simulationConfig_.collimator.profile_id);
+    }
+
     const auto& world = simulationConfig_.world;
     for (const auto& pose : poses) {
         const std::array<double, 3> sourceActual = {
@@ -157,6 +209,16 @@ void DetectorConstruction::ValidateWorldContainsImagingHeadPoses(const PoseList&
             || !AxisContains(world.center_mm[1], world.size_mm[1], {actual.y_min_mm, actual.y_max_mm})
             || !AxisContains(world.center_mm[2], world.size_mm[2], zExtent)) {
             throw std::runtime_error("virtual detector plane is outside fixed World bounds for pose " + pose.pose_id);
+        }
+
+        if (simulationConfig_.collimator.enable) {
+            for (const auto& jaw : collimatorProfile.jaws) {
+                const JawAabb aabb = CalculateJawAabb(jaw, simulationConfig_.collimator, pose);
+                if (!WorldContainsAabb(world, aabb)) {
+                    throw std::runtime_error(
+                        "collimator jaw " + jaw.jaw_id + " is outside fixed World bounds for pose " + pose.pose_id);
+                }
+            }
         }
     }
 }

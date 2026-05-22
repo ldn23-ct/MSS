@@ -6,6 +6,7 @@
 #include "VirtualDetectorPlane.hh"
 
 #include <array>
+#include <vector>
 
 class G4LogicalVolume;
 class G4VPhysicalVolume;
@@ -24,6 +25,7 @@ class ImagingHeadConstruction {
     const std::array<double, 3>& SourcePositionActualMm() const;
     const VirtualDetectorPlane& DetectorPlane() const;
     G4VPhysicalVolume* VirtualDetectorPhysicalVolume() const;
+    const std::vector<G4VPhysicalVolume*>& CollimatorJawPhysicalVolumes() const;
 
   private:
     void RequireConfigured() const;
@@ -34,6 +36,7 @@ class ImagingHeadConstruction {
     std::array<double, 3> sourcePositionActualMm_ = {0.0, 0.0, 0.0};
     VirtualDetectorPlane detectorPlane_;
     G4VPhysicalVolume* virtualDetectorPhysicalVolume_ = nullptr;
+    std::vector<G4VPhysicalVolume*> collimatorJawPhysicalVolumes_;
 };
 
 #endif
