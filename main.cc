@@ -1,4 +1,5 @@
 #include "SimulationConfig.hh"
+#include "ScanPoseManager.hh"
 #include "SimulationConfigReader.hh"
 #include "VehicleROIConfigReader.hh"
 
@@ -79,6 +80,21 @@ void PrintConfigSummary(const SimulationConfig& config)
               << "Geant4 simulation is deferred beyond M1.\n";
 }
 
+
+void PrintPoseSummary(const PoseList& poses)
+{
+    std::cout << "ScanPoseManager M5 pose list generated.\n"
+              << "pose_count: " << poses.size() << "\n";
+    for (const auto& pose : poses) {
+        std::cout << "pose[" << pose.pose_index << "]: "
+                  << pose.pose_id
+                  << " head_offset_x_mm=" << pose.head_offset_x_mm
+                  << " head_offset_y_mm=" << pose.head_offset_y_mm
+                  << " random_seed=" << pose.random_seed << "\n";
+    }
+    std::cout << "Pose run execution is deferred beyond M5.\n";
+}
+
 void PrintVehicleROISummary(const VehicleROIConfig& vehicleROI)
 {
     const auto insertCount = std::count_if(
@@ -106,6 +122,10 @@ int main(int argc, char** argv)
         SimulationConfigReader reader;
         const auto config = reader.Read(options.configPath);
         PrintConfigSummary(config);
+
+        ScanPoseManager poseManager;
+        const auto poses = poseManager.Generate(config);
+        PrintPoseSummary(poses);
 
         VehicleROIConfigReader vehicleReader;
         const auto vehicleROI = vehicleReader.Read(config.vehicle);

@@ -1,5 +1,7 @@
 #include "SimulationConfigReader.hh"
 
+#include <cctype>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -76,6 +78,49 @@ std::optional<std::string> ReadNullableString(
     }
 }
 
+
+bool IsStrictIntegerText(const std::string& value)
+{
+    if (value.empty()) {
+        return false;
+    }
+
+    std::size_t index = 0;
+    if (value[index] == '-') {
+        ++index;
+        if (index == value.size()) {
+            return false;
+        }
+    }
+
+    for (; index < value.size(); ++index) {
+        if (!std::isdigit(static_cast<unsigned char>(value[index]))) {
+            return false;
+        }
+    }
+    return true;
+}
+
+int ParseStrictInt(const YAML::Node& node, const std::string& path)
+{
+    const std::string text = node.Scalar();
+    if (!IsStrictIntegerText(text)) {
+        throw std::runtime_error(path + " contains a non-integer value");
+    }
+
+    try {
+        const long long value = std::stoll(text);
+        if (value < std::numeric_limits<int>::min() || value > std::numeric_limits<int>::max()) {
+            throw std::runtime_error(path + " contains an integer outside int range");
+        }
+        return static_cast<int>(value);
+    } catch (const std::invalid_argument&) {
+        throw std::runtime_error(path + " contains a non-integer value");
+    } catch (const std::out_of_range&) {
+        throw std::runtime_error(path + " contains an integer outside int range");
+    }
+}
+
 template <std::size_t N>
 std::array<double, N> ReadDoubleArray(
     const YAML::Node& parent,
@@ -118,11 +163,7 @@ std::vector<int> ReadIntVector(const YAML::Node& parent, const std::string& key,
         if (!node[i].IsScalar()) {
             throw std::runtime_error(path + " contains a non-scalar value");
         }
-        try {
-            values.push_back(node[i].as<int>());
-        } catch (const YAML::Exception& error) {
-            throw std::runtime_error(path + " contains a non-integer value: " + std::string(error.what()));
-        }
+        values.push_back(ParseStrictInt(node[i], path));
     }
     return values;
 }
