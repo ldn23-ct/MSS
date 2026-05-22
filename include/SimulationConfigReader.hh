@@ -7,6 +7,7 @@
 
 class SimulationConfigReader {
   public:
+    SimulationConfig Read(const std::string& configFilePath) const;
     SimulationConfig ReadPathOnly(const std::string& configFilePath) const;
 };
 

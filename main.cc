@@ -20,7 +20,7 @@ void PrintUsage(std::ostream& os)
 
 bool StartsWithDash(const std::string& value)
 {
-    return !value.empty() && value.front() == '-';
+    return !value.empty() && value.front() == 45;
 }
 
 CliOptions ParseArgs(int argc, char** argv)
@@ -54,6 +54,29 @@ CliOptions ParseArgs(int argc, char** argv)
     return options;
 }
 
+void PrintConfigSummary(const SimulationConfig& config)
+{
+    std::cout << "MSS M1 configuration loaded.\n"
+              << "Config path: " << config.configFilePath << "\n"
+              << "schema_version: " << config.schema_version << "\n"
+              << "run.number_of_threads: " << config.run.number_of_threads << "\n"
+              << "run.n_primary_per_pose: " << config.run.n_primary_per_pose << "\n"
+              << "vehicle.model_type: " << config.vehicle.model_type << "\n"
+              << "vehicle.geometry_file: " << config.vehicle.geometry_file << "\n"
+              << "pose.mode: " << config.pose.mode << "\n"
+              << "source.energy_mode: " << config.source.energy_mode << "\n"
+              << "source.incident_theta_deg: " << config.source.incident_theta_deg << "\n"
+              << "detector.detector_z_zero_mm: " << config.detector.detector_z_zero_mm << "\n"
+              << "detector.detector_x_range_zero_mm: ["
+              << config.detector.detector_x_range_zero_mm[0] << ", "
+              << config.detector.detector_x_range_zero_mm[1] << "]\n"
+              << "detector.detector_y_range_zero_mm: ["
+              << config.detector.detector_y_range_zero_mm[0] << ", "
+              << config.detector.detector_y_range_zero_mm[1] << "]\n"
+              << "output.output_directory: " << config.output.output_directory << "\n"
+              << "Geant4 simulation is deferred beyond M1.\n";
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -61,11 +84,8 @@ int main(int argc, char** argv)
     try {
         const auto options = ParseArgs(argc, argv);
         SimulationConfigReader reader;
-        const auto config = reader.ReadPathOnly(options.configPath);
-
-        std::cout << "MSS M0 skeleton initialized.\n"
-                  << "Config path: " << config.configFilePath << '\n'
-                  << "YAML parsing and Geant4 simulation are deferred to later milestones.\n";
+        const auto config = reader.Read(options.configPath);
+        PrintConfigSummary(config);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "MSS error: " << error.what() << "\n\n";
