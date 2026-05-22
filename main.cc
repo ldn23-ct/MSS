@@ -1,6 +1,8 @@
 #include "SimulationConfig.hh"
 #include "SimulationConfigReader.hh"
+#include "VehicleROIConfigReader.hh"
 
+#include <algorithm>
 #include <exception>
 #include <iostream>
 #include <string>
@@ -77,6 +79,24 @@ void PrintConfigSummary(const SimulationConfig& config)
               << "Geant4 simulation is deferred beyond M1.\n";
 }
 
+void PrintVehicleROISummary(const VehicleROIConfig& vehicleROI)
+{
+    const auto insertCount = std::count_if(
+        vehicleROI.components.begin(),
+        vehicleROI.components.end(),
+        [](const BoxComponentConfig& component) { return component.is_insert; });
+
+    std::cout << "VehicleROI M2 configuration loaded.\n"
+              << "vehicle.geometry_file: " << vehicleROI.geometry_file << "\n"
+              << "vehicle_model_id: " << vehicleROI.vehicle_model_id << "\n"
+              << "root component: " << vehicleROI.root_roi.name << "\n"
+              << "component_count: " << vehicleROI.components.size() << "\n"
+              << "insert_count: " << insertCount << "\n"
+              << "region_count: " << vehicleROI.detailed_region_ids.size() << "\n"
+              << "recommended_target_count: " << vehicleROI.recommended_target_components.size() << "\n"
+              << "VehicleROI geometry construction is deferred beyond M2.\n";
+}
+
 }  // namespace
 
 int main(int argc, char** argv)
@@ -86,6 +106,10 @@ int main(int argc, char** argv)
         SimulationConfigReader reader;
         const auto config = reader.Read(options.configPath);
         PrintConfigSummary(config);
+
+        VehicleROIConfigReader vehicleReader;
+        const auto vehicleROI = vehicleReader.Read(config.vehicle);
+        PrintVehicleROISummary(vehicleROI);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "MSS error: " << error.what() << "\n\n";
