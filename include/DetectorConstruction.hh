@@ -4,6 +4,7 @@
 #include "MaterialManager.hh"
 #include "RegionRegistry.hh"
 #include "RegionResolver.hh"
+#include "ScanPoseManager.hh"
 #include "SimulationConfig.hh"
 #include "VehicleROIConfig.hh"
 
@@ -23,10 +24,12 @@ class DetectorConstruction : public G4VUserDetectorConstruction {
     const RegionResolver& GetRegionResolver() const;
     G4VPhysicalVolume* WorldPhysicalVolume() const;
     G4VPhysicalVolume* VehicleROIPhysicalVolume() const;
+    G4VPhysicalVolume* VirtualDetectorPhysicalVolume() const;
 
   private:
     void RequireConfigured() const;
     void ValidateWorldContainsVehicleROI() const;
+    void ValidateWorldContainsImagingHeadPoses(const PoseList& poses) const;
 
     bool configured_ = false;
     SimulationConfig simulationConfig_;
@@ -36,6 +39,7 @@ class DetectorConstruction : public G4VUserDetectorConstruction {
     RegionResolver regionResolver_{regionRegistry_};
     G4VPhysicalVolume* worldPhysicalVolume_ = nullptr;
     G4VPhysicalVolume* vehicleROIPhysicalVolume_ = nullptr;
+    G4VPhysicalVolume* virtualDetectorPhysicalVolume_ = nullptr;
 };
 
 #endif
