@@ -7,7 +7,7 @@ run:
   debug: false
 
 vehicle:
-  geometry_file: data/vehicle_roi_v03.yaml
+  geometry_file: data/vehicle_roi_v04.yaml
   model_type: normal
   selected_target_component: null
   abnormal_material: G4_POLYETHYLENE

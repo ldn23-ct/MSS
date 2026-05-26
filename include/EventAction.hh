@@ -5,6 +5,8 @@
 
 #include "G4UserEventAction.hh"
 
+#include <string>
+
 class G4Event;
 
 class EventAction : public G4UserEventAction {
@@ -15,9 +17,17 @@ class EventAction : public G4UserEventAction {
     void BeginOfEventAction(const G4Event* event) override;
     void EndOfEventAction(const G4Event* event) override;
 
+    void RecordComptonScatter(const G4ThreeVector& pos, const std::string& region_id);
+    void RecordRayleighScatter(const G4ThreeVector& pos, const std::string& region_id);
+    void RecordDetectorHit(const DetectorHitRecord& hit);
+
+    bool HasDetectorHit() const;
+    const EventRecord& GetRecord() const;
     const EventRecord& CurrentRecord() const;
 
   private:
+    void RecordScatter(const G4ThreeVector& pos, const std::string& region_id);
+
     EventRecord record_;
 };
 
