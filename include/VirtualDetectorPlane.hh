@@ -23,6 +23,8 @@ class VirtualDetectorPlane {
     VirtualDetectorPlane() = default;
     VirtualDetectorPlane(const DetectorConfig& detectorConfig, const ScanPose& pose);
 
+    static DetectorPlaneActual CalculateActual(const DetectorConfig& detectorConfig, const ScanPose& pose);
+
     const DetectorPlaneActual& Actual() const;
     G4VPhysicalVolume* Construct(G4LogicalVolume* motherLogical, const MaterialManager& materialManager);
     G4VPhysicalVolume* PhysicalVolume() const;

@@ -19,7 +19,11 @@ ActionInitialization::ActionInitialization(const SimulationConfig& config, const
 ActionInitialization::ActionInitialization(const SimulationConfig& config,
                                            const ScanPose& pose,
                                            const RegionResolver* regionResolver)
-    : hasConfig_(true), config_(config), pose_(pose), regionResolver_(regionResolver)
+    : hasConfig_(true),
+      config_(config),
+      pose_(pose),
+      detectorPlane_(VirtualDetectorPlane::CalculateActual(config.detector, pose)),
+      regionResolver_(regionResolver)
 {
 }
 
@@ -34,5 +38,5 @@ void ActionInitialization::Build() const
     SetUserAction(new PrimaryGeneratorAction(config_.source, pose_));
     auto* eventAction = new EventAction();
     SetUserAction(eventAction);
-    SetUserAction(new SteppingAction(eventAction, regionResolver_));
+    SetUserAction(new SteppingAction(eventAction, regionResolver_, detectorPlane_));
 }

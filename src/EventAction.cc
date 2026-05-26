@@ -78,6 +78,7 @@ void EventAction::RecordDetectorHit(int track_id, const DetectorHitRecord& hit)
     }
 
     found->second.hit = hit;
+    found->second.hit.hit_id = record_.next_hit_id++;
     found->second.hit.detected = true;
 }
 

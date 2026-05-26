@@ -6,12 +6,15 @@
 #include "G4StepPoint.hh"
 #include "G4SystemOfUnits.hh"
 #include "G4Track.hh"
+#include "G4ThreeVector.hh"
 #include "G4VPhysicalVolume.hh"
 #include "G4VProcess.hh"
 #include "RegionResolver.hh"
 
-SteppingAction::SteppingAction(EventAction* eventAction, const RegionResolver* regionResolver)
-    : eventAction_(eventAction), regionResolver_(regionResolver)
+SteppingAction::SteppingAction(EventAction* eventAction,
+                               const RegionResolver* regionResolver,
+                               const DetectorPlaneActual& detectorPlane)
+    : eventAction_(eventAction), regionResolver_(regionResolver), detectorPlane_(detectorPlane)
 {
 }
 
@@ -33,6 +36,14 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
 
     eventAction_->EnsureGammaTrackSummary(*track, preStepVolume, regionResolver_);
 
+    if (eventAction_->HasDetectorHit(track->GetTrackID())) {
+        return;
+    }
+
+    if (TryRecordDetectorCrossing(*step, *track)) {
+        return;
+    }
+
     if (postStep == nullptr || postStep->GetProcessDefinedStep() == nullptr) {
         return;
     }
@@ -52,4 +63,51 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
     } else {
         eventAction_->RecordRayleighScatter(track->GetTrackID(), scatterPosMm, regionId);
     }
+}
+
+bool SteppingAction::TryRecordDetectorCrossing(const G4Step& step, const G4Track& track)
+{
+    const G4StepPoint* preStep = step.GetPreStepPoint();
+    const G4StepPoint* postStep = step.GetPostStepPoint();
+    if (preStep == nullptr || postStep == nullptr) {
+        return false;
+    }
+
+    const G4ThreeVector prePosMm = preStep->GetPosition() / mm;
+    const G4ThreeVector postPosMm = postStep->GetPosition() / mm;
+    if (prePosMm.z() <= detectorPlane_.z_mm || postPosMm.z() > detectorPlane_.z_mm) {
+        return false;
+    }
+
+    if (preStep->GetMomentumDirection().z() >= 0.0) {
+        return false;
+    }
+
+    const double dz = postPosMm.z() - prePosMm.z();
+    if (dz == 0.0) {
+        return false;
+    }
+
+    const double t = (detectorPlane_.z_mm - prePosMm.z()) / dz;
+    const double detX = prePosMm.x() + t * (postPosMm.x() - prePosMm.x());
+    const double detY = prePosMm.y() + t * (postPosMm.y() - prePosMm.y());
+    if (!IsInsideDetectorBounds(detX, detY)) {
+        return false;
+    }
+
+    DetectorHitRecord hit;
+    hit.det_x_mm = detX;
+    hit.det_y_mm = detY;
+    hit.det_z_mm = detectorPlane_.z_mm;
+    hit.det_energy_keV = preStep->GetKineticEnergy() / keV;
+    eventAction_->RecordDetectorHit(track.GetTrackID(), hit);
+    return eventAction_->HasDetectorHit(track.GetTrackID());
+}
+
+bool SteppingAction::IsInsideDetectorBounds(double x_mm, double y_mm) const
+{
+    return x_mm >= detectorPlane_.x_min_mm
+        && x_mm <= detectorPlane_.x_max_mm
+        && y_mm >= detectorPlane_.y_min_mm
+        && y_mm <= detectorPlane_.y_max_mm;
 }

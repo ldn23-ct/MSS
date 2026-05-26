@@ -11,9 +11,7 @@
 
 #include <stdexcept>
 
-namespace {
-
-DetectorPlaneActual CalculateActual(const DetectorConfig& detectorConfig, const ScanPose& pose)
+DetectorPlaneActual VirtualDetectorPlane::CalculateActual(const DetectorConfig& detectorConfig, const ScanPose& pose)
 {
     DetectorPlaneActual actual;
     actual.z_mm = detectorConfig.detector_z_zero_mm;
@@ -24,12 +22,10 @@ DetectorPlaneActual CalculateActual(const DetectorConfig& detectorConfig, const 
     return actual;
 }
 
-}  // namespace
-
 VirtualDetectorPlane::VirtualDetectorPlane(const DetectorConfig& detectorConfig, const ScanPose& pose)
     : detectorConfig_(detectorConfig),
       pose_(pose),
-      actual_(CalculateActual(detectorConfig, pose))
+      actual_(VirtualDetectorPlane::CalculateActual(detectorConfig, pose))
 {
 }
 

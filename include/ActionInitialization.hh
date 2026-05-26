@@ -3,6 +3,7 @@
 
 #include "ScanPoseManager.hh"
 #include "SimulationConfig.hh"
+#include "VirtualDetectorPlane.hh"
 
 #include "G4VUserActionInitialization.hh"
 
@@ -25,6 +26,7 @@ class ActionInitialization : public G4VUserActionInitialization {
     bool hasConfig_ = false;
     SimulationConfig config_;
     ScanPose pose_;
+    DetectorPlaneActual detectorPlane_;
     const RegionResolver* regionResolver_ = nullptr;
 };
 
