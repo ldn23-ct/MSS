@@ -1,6 +1,8 @@
 #include "ActionInitialization.hh"
 
+#include "EventAction.hh"
 #include "PrimaryGeneratorAction.hh"
+#include "SteppingAction.hh"
 
 #include <stdexcept>
 
@@ -10,7 +12,14 @@ ActionInitialization::ActionInitialization(const SimulationConfig& config)
 }
 
 ActionInitialization::ActionInitialization(const SimulationConfig& config, const ScanPose& pose)
-    : hasConfig_(true), config_(config), pose_(pose)
+    : ActionInitialization(config, pose, nullptr)
+{
+}
+
+ActionInitialization::ActionInitialization(const SimulationConfig& config,
+                                           const ScanPose& pose,
+                                           const RegionResolver* regionResolver)
+    : hasConfig_(true), config_(config), pose_(pose), regionResolver_(regionResolver)
 {
 }
 
@@ -23,4 +32,7 @@ void ActionInitialization::Build() const
     }
 
     SetUserAction(new PrimaryGeneratorAction(config_.source, pose_));
+    auto* eventAction = new EventAction();
+    SetUserAction(eventAction);
+    SetUserAction(new SteppingAction(eventAction, regionResolver_));
 }

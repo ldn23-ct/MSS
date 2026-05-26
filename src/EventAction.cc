@@ -1,7 +1,11 @@
 #include "EventAction.hh"
 
 #include "G4Event.hh"
+#include "G4SystemOfUnits.hh"
 #include "G4ThreeVector.hh"
+#include "G4Track.hh"
+#include "G4VProcess.hh"
+#include "RegionResolver.hh"
 
 void EventAction::BeginOfEventAction(const G4Event* event)
 {
@@ -13,31 +17,74 @@ void EventAction::BeginOfEventAction(const G4Event* event)
 
 void EventAction::EndOfEventAction(const G4Event*) {}
 
-void EventAction::RecordComptonScatter(const G4ThreeVector& pos, const std::string& region_id)
+GammaTrackSummary& EventAction::EnsureGammaTrackSummary(const G4Track& track,
+                                                        const G4VPhysicalVolume* sourceVolume,
+                                                        const RegionResolver* resolver)
 {
-    ++record_.scatter.compton_count;
-    RecordScatter(pos, region_id);
+    const int trackId = track.GetTrackID();
+    auto found = record_.gamma_tracks.find(trackId);
+    if (found != record_.gamma_tracks.end()) {
+        return found->second;
+    }
+
+    GammaTrackSummary summary;
+    summary.track_id = trackId;
+    summary.parent_id = track.GetParentID();
+    summary.is_primary_gamma = (summary.track_id == 1 && summary.parent_id == 0);
+    summary.gamma_source_pos = track.GetVertexPosition() / mm;
+
+    if (summary.is_primary_gamma) {
+        summary.gamma_source_type = "primary";
+        summary.gamma_source_process = "primary_generator";
+        summary.gamma_source_region_id = "source";
+    } else {
+        summary.gamma_source_type = "secondary";
+        const G4VProcess* creator = track.GetCreatorProcess();
+        summary.gamma_source_process = (creator != nullptr) ? creator->GetProcessName() : "none";
+        summary.gamma_source_region_id = ResolveSourceRegion(sourceVolume, resolver);
+    }
+
+    const auto inserted = record_.gamma_tracks.emplace(trackId, summary);
+    return inserted.first->second;
 }
 
-void EventAction::RecordRayleighScatter(const G4ThreeVector& pos, const std::string& region_id)
+void EventAction::RecordComptonScatter(int track_id, const G4ThreeVector& pos, const std::string& region_id)
 {
-    ++record_.scatter.rayleigh_count;
-    RecordScatter(pos, region_id);
-}
-
-void EventAction::RecordDetectorHit(const DetectorHitRecord& hit)
-{
-    if (record_.hit.detected) {
+    auto found = record_.gamma_tracks.find(track_id);
+    if (found == record_.gamma_tracks.end()) {
         return;
     }
 
-    record_.hit = hit;
-    record_.hit.detected = true;
+    ++found->second.scatter.compton_count;
+    RecordScatter(found->second, pos, region_id);
 }
 
-bool EventAction::HasDetectorHit() const
+void EventAction::RecordRayleighScatter(int track_id, const G4ThreeVector& pos, const std::string& region_id)
 {
-    return record_.hit.detected;
+    auto found = record_.gamma_tracks.find(track_id);
+    if (found == record_.gamma_tracks.end()) {
+        return;
+    }
+
+    ++found->second.scatter.rayleigh_count;
+    RecordScatter(found->second, pos, region_id);
+}
+
+void EventAction::RecordDetectorHit(int track_id, const DetectorHitRecord& hit)
+{
+    auto found = record_.gamma_tracks.find(track_id);
+    if (found == record_.gamma_tracks.end() || found->second.hit.detected) {
+        return;
+    }
+
+    found->second.hit = hit;
+    found->second.hit.detected = true;
+}
+
+bool EventAction::HasDetectorHit(int track_id) const
+{
+    const auto found = record_.gamma_tracks.find(track_id);
+    return found != record_.gamma_tracks.end() && found->second.hit.detected;
 }
 
 const EventRecord& EventAction::GetRecord() const
@@ -50,15 +97,31 @@ const EventRecord& EventAction::CurrentRecord() const
     return GetRecord();
 }
 
-void EventAction::RecordScatter(const G4ThreeVector& pos, const std::string& region_id)
+void EventAction::RecordScatter(GammaTrackSummary& summary,
+                                const G4ThreeVector& pos,
+                                const std::string& region_id)
 {
-    ++record_.scatter.scatter_count_total;
+    ++summary.scatter.scatter_count_total;
 
-    if (record_.scatter.scatter_count_total == 1) {
-        record_.scatter.first_scatter_pos = pos;
-        record_.scatter.first_scatter_region_id = region_id;
+    if (summary.scatter.scatter_count_total == 1) {
+        summary.scatter.first_scatter_pos = pos;
+        summary.scatter.first_scatter_region_id = region_id;
     }
 
-    record_.scatter.last_scatter_pos = pos;
-    record_.scatter.last_scatter_region_id = region_id;
+    summary.scatter.last_scatter_pos = pos;
+    summary.scatter.last_scatter_region_id = region_id;
+}
+
+std::string EventAction::ResolveSourceRegion(const G4VPhysicalVolume* sourceVolume,
+                                             const RegionResolver* resolver) const
+{
+    if (sourceVolume == nullptr) {
+        return "none";
+    }
+
+    if (resolver == nullptr) {
+        return "other";
+    }
+
+    return resolver->ResolvePreStepVolume(sourceVolume);
 }

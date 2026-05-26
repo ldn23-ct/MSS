@@ -413,27 +413,37 @@ y_mm
 
 输出事件范围以 `docs/spec.md` 为准。
 
-不得默认沿用第一轮“只输出到达探测器的 primary gamma”的完整 schema，除非第二轮规格明确要求。
+不得默认沿用第一轮 primary-only 事件输出 schema，除非第二轮规格明确要求。
 
 事件级记录应围绕以下信息设计：
 
-- 初始能量；
-- 初始位置；
-- 初始方向；
-- 入射角 `theta`；
-- `pose_id`；
-- `head_offset_x_mm`；
-- `head_offset_y_mm`;
+- detected gamma 的 source 类型、source process、source 位置和 source region；
 - 探测位置；
 - 探测能量；
-- 探测方向；
-- 散射次数；
-- 不同物理过程次数；
-- first scatter 位置；
-- last scatter 位置；
-- first / last scatter 所在 volume / material / region；
-- 各车辆材料区内散射次数；
-- 是否与内部目标物发生过相互作用。
+- detected gamma track 自身的散射次数；
+- detected gamma track 自身的 Compton / Rayleigh 过程次数；
+- detected gamma track 自身的 first scatter 位置；
+- detected gamma track 自身的 last scatter 位置；
+- detected gamma track 自身的 first / last scatter 所在 region。
+
+当前事件追踪模型以 `docs/spec.md` 为准：
+
+```text
+detector-hit 模型 + per-gamma-track scatter history
+```
+
+基本语义为：
+
+```text
+1 event = 1 source primary gamma
+1 row in events.csv = 1 detected gamma hit
+```
+
+所有 gamma track 均可产生 detector hit。真实探测器不区分 primary gamma 与 secondary gamma，因此不得把正式事件输出限制为 `track_id == 1 && parent_id == 0`。
+
+同一 event 可输出 0 行、1 行或多行 detected gamma hit；同一 gamma track 只记录第一次有效 detector crossing。每个 detected gamma hit 由 `event_id + hit_id` 唯一标识，`hit_id` 在同一 event 内从 `0` 开始递增。
+
+每条 gamma track 独立维护自身的 Compton / Rayleigh scatter history。secondary gamma 的散射阶次从自身产生时从 `0` 开始，不继承 parent track 的散射次数。
 
 字段的最小集合、扩展集合、顺序和单位以 `docs/spec.md` 为准。
 
@@ -457,7 +467,7 @@ CSV 输出必须保持可追踪性。
 
 run-level 元数据写入文件名和 `metadata.yaml`。本轮不输出独立 pose-level summary 或 scan-level summary。是否写入每一行 CSV 以 `docs/spec.md` 为准。
 
-正式 `events.csv` 只记录 detected primary gamma。Debug `events_debug.csv` 记录 detected 与 undetected primary gamma，并且只比正式 CSV 增加 `detected` 字段。
+正式 `events.csv` 输出所有 detected gamma hit，语义为 `1 row = 1 detected gamma hit`。Debug `events_debug.csv` 语义为 `1 row = 1 gamma track summary`，包含 detected 与 undetected gamma track；debug 文件会明显大于正式 CSV。
 
 长度单位默认使用 `mm`。
 
@@ -490,8 +500,8 @@ run-level 元数据写入文件名和 `metadata.yaml`。本轮不输出独立 po
 | `ScanPoseManager` | 根据 list / grid 配置生成 pose 列表和自动 `pose_id` |
 | `PoseRunController` | 按 pose 顺序执行多个 run；每个 run 对应一个 pose 和一个 seed |
 | `PrimaryGeneratorAction` | 每个 event 生成一个 primary gamma |
-| `EventAction` | 保存单个 event 的散射摘要、探测命中信息，并在 event end 触发写出 |
-| `SteppingAction` | 记录散射、volume / material / region、探测平面穿越 |
+| `EventAction` | 保存单个 event 内 per-gamma-track scatter summary、gamma source 信息和后续 detector hit 信息，并在 event end 触发写出 |
+| `SteppingAction` | 对所有 gamma track 记录 `compt` / `Rayl` 散射、preStep region 和后续探测平面穿越判定 |
 | `CsvWriter` | 写 CSV，管理 thread-local 文件与合并 |
 | `RunAction` | 管理当前 run 的 seed、输出模式、文件命名、writer 生命周期和 run-end merge |
 | `MetadataWriter` | 为每个 run 写出 `metadata.yaml` |
