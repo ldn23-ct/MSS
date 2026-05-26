@@ -25,7 +25,7 @@
 构建固定 VehicleROI
 构建按 pose 平移的 ImagingHead
 产生斜入射有限焦点 primary gamma
-记录 detected primary gamma 的事件级统计量
+记录 detected gamma hit 的事件级统计量
 输出 events.csv / events_debug.csv 与 metadata.yaml
 本轮不实现 pose-level / scan-level 数据、summary、图表、统计指标或后处理脚本
 ```
@@ -79,7 +79,7 @@
 | 旧 `SimulationConfig` | 不应继续扩展旧 macro 字段；第二轮应替换为 YAML-based `SimulationConfig`，字段与 `spec.md` 中 `simulation_config_v2.yaml` 对齐。 |
 | `SpectrumSampler` | 可复用 spectrum CSV 读取、验证和 CDF sampling 机制。 |
 | `CsvWriter` / `RunAction` | 可复用 worker 临时 CSV 与 master merge 机制；formal/debug header、run_id、目录结构和 metadata 必须按第二轮 schema 重写。 |
-| `EventAction` / `SteppingAction` | 可复用 event reset、primary gamma 过滤、detector crossing 插值和 first/last scatter 更新思路；散射统计范围、region 归因和 CSV 字段必须按第二轮规则重写。 |
+| `EventAction` / `SteppingAction` | 可复用 event reset、gamma track 过滤、detector crossing 插值和 first/last scatter 更新思路；散射统计范围、region 归因和 CSV 字段必须按第二轮规则重写。 |
 | `README.md` / `macros/*.mac` | 当前属于第一轮 legacy 运行说明；第二轮实现时不得作为主入口依据，最终应改为 `--config data/simulation_config_v2.yaml` 样例。 |
 
 不得从现有代码继承：PMMA 主模型、air defect、`PMMALogical` 散射过滤、mirror collimator、mirror detector、macro 主配置入口、`hits_profile_*` 文件名、compact/debug 旧 CSV header。
@@ -759,16 +759,31 @@ struct ScatterSummary {
 
 struct DetectorHitRecord {
     bool detected = false;
+    int hit_id = -1;
     double det_x_mm = std::numeric_limits<double>::quiet_NaN();
     double det_y_mm = std::numeric_limits<double>::quiet_NaN();
     double det_z_mm = std::numeric_limits<double>::quiet_NaN();
     double det_energy_keV = std::numeric_limits<double>::quiet_NaN();
 };
 
-struct EventRecord {
-    int event_id = -1;
+struct GammaTrackSummary {
+    int track_id = -1;
+    int parent_id = -1;
+    bool is_primary_gamma = false;
+
+    std::string gamma_source_type;      // primary | secondary
+    std::string gamma_source_process;   // primary_generator or creator process
+    G4ThreeVector gamma_source_pos;
+    std::string gamma_source_region_id = "none";
+
     ScatterSummary scatter;
     DetectorHitRecord hit;
+};
+
+struct EventRecord {
+    int event_id = -1;
+    int next_hit_id = 0;
+    std::unordered_map<int, GammaTrackSummary> gamma_tracks;
 };
 ```
 
@@ -777,13 +792,22 @@ struct EventRecord {
 每个 event 开始时：
 
 ```text
+next_hit_id = 0
+gamma_tracks cleared
+```
+
+每条 gamma track summary 创建时：
+
+```text
 detected = false
+hit_id = -1
 scatter_count_total = 0
 compton_count = 0
 rayleigh_count = 0
 first / last scatter position = NaN
 first / last scatter region = none
 det fields = NaN
+gamma_source_* 按 track 类型填写
 ```
 
 ---
@@ -792,7 +816,7 @@ det fields = NaN
 
 ### 15.1 职责
 
-`EventAction` 持有当前 event 的 `EventRecord`。
+`EventAction` 持有当前 event 的 `EventRecord`，并按 track_id 管理每条 gamma track 的 summary。
 
 提供接口：
 
@@ -800,12 +824,13 @@ det fields = NaN
 void BeginOfEventAction(const G4Event*) override;
 void EndOfEventAction(const G4Event*) override;
 
-void RecordComptonScatter(const G4ThreeVector& pos, const std::string& region_id);
-void RecordRayleighScatter(const G4ThreeVector& pos, const std::string& region_id);
-void RecordDetectorHit(const DetectorHitRecord& hit);
+void EnsureGammaTrackSummary(const G4Track* track);
+void RecordComptonScatter(int track_id, const G4ThreeVector& pos, const std::string& region_id);
+void RecordRayleighScatter(int track_id, const G4ThreeVector& pos, const std::string& region_id);
+void RecordDetectorHit(int track_id, const DetectorHitRecord& hit);
 
 const EventRecord& GetRecord() const;
-bool HasDetectorHit() const;
+bool HasDetectorHit(int track_id) const;
 ```
 
 ### 15.2 写出规则
@@ -814,8 +839,8 @@ End of event：
 
 | 模式 | 行为 |
 |---|---|
-| 正式模式 | 只有 `detected == true` 才写一行。 |
-| debug 模式 | detected 和 undetected 都写一行，并写 `detected` 字段。 |
+| 正式模式 | 对每个 detected gamma hit 写一行。 |
+| debug 模式 | 对每条 gamma track summary 写一行，并写 `detected` 字段。 |
 
 `EventAction` 不负责判断 step 是否为散射，也不负责 detector crossing 插值。
 
@@ -825,12 +850,10 @@ End of event：
 
 ### 16.1 过滤对象
 
-只处理 primary gamma：
+处理所有 gamma track：
 
 ```text
 particle_name == gamma
-track_id == 1
-parent_id == 0
 ```
 
 ### 16.2 散射统计
@@ -845,10 +868,9 @@ processName == "Rayl"
 不计入：
 
 - photoelectric effect；
-- secondary interactions；
 - 非 gamma 粒子。
 
-事件是否进入正式 CSV 不由散射发生位置决定。
+每条 gamma track 独立维护自身散射历史。secondary gamma 的散射阶次从自身产生时从 `0` 开始，不继承 parent track 的散射阶次。gamma track 是否进入正式 CSV 不由散射发生位置决定。
 
 散射位置：
 
@@ -883,7 +905,7 @@ det_z = detector_z
 
 若穿越点落在当前 pose 的 detector bounds 内，则记录 detector hit。
 
-同一 event 只记录第一次有效 detector hit。
+同一 gamma track 只记录第一次有效 detector crossing。同一 event 内不同 gamma track 可分别形成 detected gamma hit。
 
 ---
 
@@ -904,13 +926,13 @@ det_z = detector_z
 ### 17.2 正式 CSV header
 
 ```csv
-event_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
+event_id,hit_id,track_id,parent_id,is_primary_gamma,gamma_source_type,gamma_source_process,gamma_source_x,gamma_source_y,gamma_source_z,gamma_source_region_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
 ```
 
 ### 17.3 Debug CSV header
 
 ```csv
-event_id,detected,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
+event_id,track_id,parent_id,is_primary_gamma,gamma_source_type,gamma_source_process,gamma_source_x,gamma_source_y,gamma_source_z,gamma_source_region_id,detected,hit_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
 ```
 
 ### 17.4 线程文件组织
@@ -1109,8 +1131,8 @@ PrimaryGeneratorAction
   └── Generate primary gamma
 
 SteppingAction
-  ├── filter primary gamma
-  ├── record Compton / Rayleigh scatter
+  ├── filter gamma tracks
+  ├── record per-gamma-track Compton / Rayleigh scatter
   ├── resolve region from preStep volume
   └── detect virtual detector crossing
 
@@ -1233,8 +1255,8 @@ Geant4 程序不负责：
 - detector crossing 由当前 pose detector bounds 决定；
 - 散射位置用 postStep position；
 - region 归属用 preStep volume；
-- 正式 CSV 只写 detected primary gamma；
-- debug CSV 写 detected 与 undetected，并仅额外增加 `detected` 字段；
+- 正式 CSV 输出所有 detected gamma hit；
+- debug CSV 输出 gamma track summary，并使用 `detected` 字段区分该 track 是否有效穿越探测平面；
 - metadata 使用 `head_offset_x/y`，不使用 `vehicle_shift_x/y`；
 - metadata 记录固定 World、output policy、pose_index、base_random_seed 和该 pose run 最终实际使用的 random_seed；
 - 多线程输出不共享输出流；

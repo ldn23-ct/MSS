@@ -63,9 +63,12 @@ After implementation, summarize:
 - 不构建镜像准直器。
 - 不构建镜像探测器。
 - detector 为单个理想虚拟平面。
-- 正式 CSV 只写 detected primary gamma。
-- debug CSV 写 detected 与 undetected，并且只比正式 CSV 多 `detected` 字段。
-- 事件是否进入正式输出只由 detector hit 决定。
+- 正式 CSV 输出所有 detected gamma hit。
+- debug CSV 输出 gamma track summary，并使用 `detected` 字段区分该 track 是否有效穿越探测平面。
+- 同一 event 可输出 0 行、1 行或多行 detected gamma hit。
+- 同一 gamma track 只记录第一次有效 detector crossing。
+- 每条 gamma track 维护自身 Compton / Rayleigh 散射历史，secondary gamma 不继承 parent track 的散射阶次。
+- 事件是否进入正式输出只由 detected gamma hit 决定。
 - 散射坐标使用 postStep position。
 - 散射 region 归属使用 preStep volume。
 - 输出采用 `events.csv` / `events_debug.csv` + `metadata.yaml`。
@@ -102,7 +105,7 @@ After implementation, summarize:
 
 - `SpectrumSampler` 的 spectrum CSV 验证和 CDF sampling；
 - `CsvWriter` / `RunAction` 中 worker 临时 CSV 与 master merge 的基本思路；
-- `SteppingAction` 中 primary gamma 过滤和 detector plane crossing 插值；
+- `SteppingAction` 中 gamma track 过滤和 detector plane crossing 插值；
 - `CollimatorProfileReader` 中 CSV 基础解析和凸多边形检查；
 - `CollimatorBuilder` 中 `G4ExtrudedSolid` 构建经验；
 - `PhysicsList` 中 `G4EmLivermorePhysics` 和 `0.1 mm` production cut。
@@ -134,7 +137,7 @@ After implementation, summarize:
 | M8 | 第二版准直器 profile reader | 可变 jaw 数量 CSV reader 与 validator |
 | M9 | 无镜像狭缝准直器几何 | `SlitCollimatorBuilder`、offset 应用、钨 jaw 构建 |
 | M10 | EventRecord 与 EventAction | event 状态、detected/debug 写出接口占位 |
-| M11 | Stepping 散射追踪 | primary gamma 过滤、Compton/Rayleigh 计数、region 归属 |
+| M11 | Stepping 散射追踪 | gamma track 过滤、per-track Compton/Rayleigh 计数、region 归属 |
 | M12 | Detector crossing | negative_z crossing、detector hit 记录 |
 | M13 | 正式与 debug CSV 输出 | 精确 header、detected/undetected 规则 |
 | M14 | metadata.yaml 输出 | 每 pose run-level metadata |
@@ -959,25 +962,36 @@ y_actual = y_zero + head_offset_y
 保存：
 
 - `event_id`；
-- detector hit；
-- scatter counts；
-- first scatter position；
-- last scatter position；
-- first scatter region；
-- last scatter region。
+- `next_hit_id`；
+- per-track gamma summary map；
+- 每条 gamma track 的 `track_id`、`parent_id`、`is_primary_gamma`；
+- 每条 gamma track 的 `gamma_source_type/process/x/y/z/region_id`；
+- 每条 gamma track 的 detector hit；
+- 每条 gamma track 的 scatter counts；
+- 每条 gamma track 的 first / last scatter position；
+- 每条 gamma track 的 first / last scatter region。
 
 ### M10.2 reset 规则
 
 每个 event 开始时：
 
 ```text
+next_hit_id = 0
+per-track gamma summary map cleared
+```
+
+每条 gamma track summary 创建时：
+
+```text
 detected = false
+hit_id = -1
 scatter_count_total = 0
 compton_count = 0
 rayleigh_count = 0
 first / last scatter position = NaN
 first / last scatter region = none
 det fields = NaN
+gamma_source_* 按 track 类型填写
 ```
 
 ### M10.3 更新接口
@@ -985,18 +999,21 @@ det fields = NaN
 提供：
 
 ```cpp
-RecordComptonScatter(pos, region_id)
-RecordRayleighScatter(pos, region_id)
-RecordDetectorHit(hit)
-HasDetectorHit()
+EnsureGammaTrackSummary(track)
+RecordComptonScatter(track_id, pos, region_id)
+RecordRayleighScatter(track_id, pos, region_id)
+RecordDetectorHit(track_id, hit)
+HasDetectorHit(track_id)
 GetRecord()
 ```
 
 ## 完成标准
 
 - event begin 正确重置。
-- scatter 更新接口正确维护 first / last。
-- detector hit 只能记录一次有效 hit。
+- gamma track summary 创建时正确设置 `gamma_source_*`。
+- scatter 更新接口按 track 正确维护 first / last。
+- 同一 gamma track 只能记录一次有效 hit。
+- 同一 event 内不同 gamma track 可分别记录 hit。
 - 未写 CSV 或仅使用占位 writer。
 
 ## 不做
@@ -1011,7 +1028,7 @@ GetRecord()
 
 ## 目标
 
-实现 primary gamma 的 Compton / Rayleigh 散射记录。
+实现所有 gamma track 的 Compton / Rayleigh 散射记录。
 
 ## 修改文件
 
@@ -1022,14 +1039,12 @@ GetRecord()
 
 ## 任务
 
-### M11.1 primary gamma 过滤
+### M11.1 gamma track 过滤
 
-只处理：
+处理所有：
 
 ```text
 particle_name == gamma
-track_id == 1
-parent_id == 0
 ```
 
 ### M11.2 process 过滤
@@ -1044,8 +1059,9 @@ Rayl
 不计入：
 
 - photoelectric effect；
-- secondary interactions；
 - 非 gamma 粒子过程。
+
+secondary gamma 的散射阶次从自身产生时从 `0` 开始，不继承 parent track 的散射阶次。
 
 ### M11.3 坐标与 region
 
@@ -1054,13 +1070,14 @@ Rayl
 
 ### M11.4 事件保留边界
 
-事件是否进入正式 CSV 不在 M11 决定，由 detector hit 决定。
+gamma track 是否进入正式 CSV 不在 M11 决定，由 detected gamma hit 决定。
 
 ## 完成标准
 
-- Compton / Rayleigh 计数正确。
+- 每条 gamma track 的 Compton / Rayleigh 计数正确。
 - `scatter_count_total = compton_count + rayleigh_count`。
-- first / last scatter 更新正确。
+- first / last scatter 按 gamma track 更新正确。
+- secondary gamma 不继承 parent track 的散射阶次。
 - region 归属使用 preStep volume。
 
 ## 不做
@@ -1100,8 +1117,6 @@ direction.z < 0
 
 ```text
 particle == gamma
-track_id == 1
-parent_id == 0
 ```
 
 ### M12.2 线性插值
@@ -1116,16 +1131,17 @@ det_y = pre_y + t * (post_y - pre_y)
 
 使用当前 pose 下的 detector actual bounds。
 
-### M12.4 一 event 一 hit
+### M12.4 hit 记录规则
 
-同一 event 只记录第一次有效 detector hit。
+同一 gamma track 只记录第一次有效 detector crossing。同一 event 内不同 gamma track 可分别记录 hit。
 
 ## 完成标准
 
 - 探测面穿越点插值正确。
 - pose offset 改变时 detector bounds 随之改变。
-- 第一有效 hit 被记录。
-- 未命中 event 保持 `detected=false`。
+- 每条 gamma track 的第一有效 hit 被记录。
+- 同一 event 可输出 0 行、1 行或多行 detected gamma hit。
+- 未命中 gamma track 保持 `detected=false`。
 
 ## 不做
 
@@ -1157,7 +1173,7 @@ det_y = pre_y + t * (post_y - pre_y)
 必须精确为：
 
 ```csv
-event_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
+event_id,hit_id,track_id,parent_id,is_primary_gamma,gamma_source_type,gamma_source_process,gamma_source_x,gamma_source_y,gamma_source_z,gamma_source_region_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
 ```
 
 ### M13.2 Debug CSV header
@@ -1165,7 +1181,7 @@ event_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh
 必须精确为：
 
 ```csv
-event_id,detected,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
+event_id,track_id,parent_id,is_primary_gamma,gamma_source_type,gamma_source_process,gamma_source_x,gamma_source_y,gamma_source_z,gamma_source_region_id,detected,hit_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
 ```
 
 ### M13.3 写出规则
@@ -1173,25 +1189,27 @@ event_id,detected,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count
 正式模式：
 
 ```text
-只写 detected event
+写所有 detected gamma hit
 ```
 
 Debug 模式：
 
 ```text
-写 detected 和 undetected event
+写所有 gamma track summary
 ```
 
-未探测 event 的 det 字段为 `NaN`。
+未探测 gamma track 的 `hit_id = -1`，det 字段为 `NaN`。
 
 ## 完成标准
 
 - 正式 CSV 不包含 `detected` 字段。
-- Debug CSV 只额外包含 `detected` 字段。
+- Debug CSV 包含 `detected` 字段，并采用 gamma track summary schema。
 - 不输出 termination 字段。
 - 无散射字段按 NaN / none 写出。
+- 正式 CSV 包含 `hit_id`、`track_id`、`parent_id`、`is_primary_gamma` 和 `gamma_source_*` 字段。
+- `hit_id` 在同一 event 内从 `0` 开始递增。
 - 单线程运行可生成最终 CSV。
-- 不再输出旧 compact/debug header、`initial_energy`、`initial_dir_*`、`is_multiple_scatter` 或 `track_id` / `parent_id` 字段。
+- 不再输出旧 compact/debug header、`initial_energy`、`initial_dir_*` 或 `is_multiple_scatter` 字段。
 
 ## 不做
 

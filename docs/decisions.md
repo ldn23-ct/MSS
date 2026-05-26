@@ -23,6 +23,7 @@
 - VehicleROI YAML schema 与最小可用样例；
 - collimator 的 `y` 向 placement 规则；
 - 正式 CSV / Debug CSV 的字段边界；
+- detector-hit 事件追踪模型与 per-gamma-track scatter history；
 - pose-level / scan-level 数据、summary、图表、统计指标和后处理模块留到下一轮项目迭代；
 - 一个 run 对应一个 pose 和一个实际 seed；
 - 固定 World 策略和输出目录已存在时的处理策略。
@@ -55,7 +56,7 @@
 | D009 | 狭缝准直器沿用 CSV 表头，但 jaw 数量可变且不构建镜像 | Accepted |
 | D010 | 探测器为单个理想虚拟平面，不模拟真实探测器响应 | Accepted |
 | D011 | 探测器位于准直器之后，采用 `negative_z` 有效穿越方向 | Accepted |
-| D012 | 正式 CSV 只记录 detected primary gamma，debug CSV 记录 detected 与 undetected | Accepted |
+| D012 | 旧 CSV 输出语义 | Superseded |
 | D013 | 正式事件级 CSV 同时服务项目摸底线和论文数据线 | Accepted |
 | D014 | 输出组织采用 `events.csv` + `metadata.yaml` | Accepted |
 | D015 | 事件是否进入正式输出只由 detector hit 决定，不由散射发生位置决定 | Accepted |
@@ -71,6 +72,7 @@
 | D025 | World 使用固定 4000 mm 立方体并进行边界检查 | Accepted |
 | D026 | 一个 run 对应一个 pose 和一个实际 seed，可在 run 内使用多线程 | Accepted |
 | D027 | 现有第一轮代码只允许机制级复用，不允许语义级继承 | Accepted |
+| D028 | 正式 CSV 输出 detected gamma hit，debug CSV 输出 gamma track summary | Accepted |
 
 ---
 
@@ -413,7 +415,7 @@ CSV 中的 `x_mm,z_mm` 表示零位姿 global `x-z` 坐标。
 
 ### 影响
 
-- `det_energy` 表示 primary gamma 穿越虚拟探测平面时的能量。
+- `det_energy` 表示 gamma track 穿越虚拟探测平面时的能量。
 - detector region mapping 和 depth mapping 留到下一轮后处理项目迭代。
 
 ---
@@ -455,62 +457,31 @@ direction.z < 0
 
 - 探测器位置和接收范围仍由 YAML 配置。
 - 样例配置可使用第一版链路验证数值。
-- 同一 event 只记录第一次有效 detector hit。
+- 同一 gamma track 只记录第一次有效 detector crossing；同一 event 内不同 gamma track 可分别形成 detected gamma hit。
 
 ---
 
-## D012：正式 CSV 只记录 detected primary gamma，debug CSV 记录 detected 与 undetected
+## D012：旧 CSV 输出语义
 
-**状态：** Accepted  
+**状态：** Superseded
 **日期：** 2026-05-21
+**取代：** D028
 
 ### 背景
 
-正式统计文件应聚焦探测器可见事件，避免未探测事件显著增加文件体积。调试阶段需要检查未探测 event 的散射记录和事件生命周期。
+该决策曾定义第二版早期 CSV 输出语义。随着 `spec.md` 改为 detector-hit 模型，该旧输出语义不再适用。
 
 ### 决策
 
-正式 `events.csv`：
-
-```text
-只记录 detected primary gamma
-```
-
-Debug CSV：
-
-```text
-记录 detected primary gamma 和 undetected primary gamma
-```
-
-Debug CSV 只比正式 CSV 增加一个字段：
-
-```csv
-detected
-```
-
-不增加其他 termination 类可选字段。
-
-以下字段不进入第二版基础 formal CSV：
-
-```text
-pose_id
-head_offset_x_mm/head_offset_y_mm
-source_start_x/y/z
-source_dir_x/y/z
-source_energy_keV
-target_interaction
-per-region scatter counts
-```
-
-其中 pose 与 run 条件由 `metadata.yaml` 记录；initial source state、target interaction boolean、per-region scatter counts 可在后续 debug 扩展或后处理阶段单独设计，但不改变当前 accepted formal CSV schema。
+本决策已被 D028 取代。当前正式 CSV / debug CSV schema、detector crossing 对象、hit 记录规则和 scatter history 语义均以 `spec.md` 与 D028 为准。
 
 ### 影响
 
-- 正式 CSV 无 `detected` 字段。
-- Debug CSV 中未探测 event 的 det 字段填 `NaN`。
-- debug 模式不输出 `termination_process`、`termination_volume` 或 `termination_region_id`。
-- Codex 不应在基础实现中自行扩展 formal CSV header。
-- 若未来需要新增事件字段，必须新增决策并同步更新 `spec.md`、验收清单和后处理读取逻辑。
+- 实现阶段不得再依据 D012 的旧输出语义设计 `EventRecord`、`SteppingAction` 或 `CsvWriter`。
+
+### 取代原因
+
+真实探测器不区分 gamma 是否为 source primary。第二版事件追踪模型已从 primary-history 改为 detector-hit 模型，正式 CSV 和 debug CSV 语义由 D028 重新定义。
 
 ---
 
@@ -527,11 +498,12 @@ per-region scatter counts
 
 正式 `events.csv` 采用统一 schema，同时包含：
 
+- hit、track 和 gamma 来源信息；
 - 探测位置；
 - 探测能量；
-- scatter_count_total；
-- compton_count；
-- rayleigh_count；
+- 当前 gamma track 自身的 scatter_count_total；
+- 当前 gamma track 自身的 compton_count；
+- 当前 gamma track 自身的 rayleigh_count；
 - first / last scatter 坐标；
 - first / last scatter region_id。
 
@@ -591,23 +563,23 @@ metadata.yaml
 
 ### 背景
 
-事件保留条件应反映探测器是否观察到该 primary gamma，而不是预先根据散射发生在哪种材料或 region 过滤事件。
+事件保留条件应反映探测器是否观察到 gamma track，而不是预先根据散射发生在哪种材料或 region 过滤事件。
 
 ### 决策
 
 正式事件输出条件为：
 
 ```text
-detected == true
+detected gamma hit
 ```
 
-对于 detected primary gamma，记录其 Compton / Rayleigh 散射历史。散射发生在哪个 region 只用于归因解释，不用于决定事件是否输出。
+对于 detected gamma hit，记录该 gamma track 自身的 Compton / Rayleigh 散射历史。散射发生在哪个 region 只用于归因解释，不用于决定该 gamma track 是否输出。
 
 ### 影响
 
 - 不使用“只统计实体车辆材料区”作为事件保留条件。
 - region_id 是解释字段，不是事件筛选字段。
-- `vehicle_background_air`、`cabin_air` 等 region 可以作为散射归属结果出现，若 primary gamma 在相应区域发生有效 Compton / Rayleigh。
+- `vehicle_background_air`、`cabin_air` 等 region 可以作为散射归属结果出现，若 gamma track 在相应区域发生有效 Compton / Rayleigh。
 
 ---
 
@@ -854,8 +826,8 @@ detector_y_range_zero_mm: [-50.0, 50.0]
 | Vehicle ROI construction | 构建车辆 ROI，不处理 pose offset。 |
 | Imaging head construction | 构建 source 辅助体、准直器和探测器辅助体，统一应用 pose offset。 |
 | Source model | 生成 primary gamma。 |
-| Stepping action | 记录 primary gamma 散射和探测穿越。 |
-| Event action | 维护单 event 状态，控制 event 写出。 |
+| Stepping action | 记录 gamma track 散射和探测穿越。 |
+| Event action | 维护单 event 内的 per-track summary，控制 event 写出。 |
 | Csv writer | 写线程本地 CSV 并合并。 |
 | Metadata writer | 写 run-level metadata。 |
 | DetectorConstruction / GeometryAssembly | 在 Geant4 生命周期内总装 World、VehicleROI、ImagingHead 和 virtual detector。 |
@@ -1028,7 +1000,7 @@ pose_seed = base_random_seed + pose_index
 - Geant4 项目组织和 action 注册经验；
 - spectrum CSV 读取和 sampling；
 - CSV writer 的文件打开、格式化和线程临时文件合并思路；
-- primary gamma 过滤和 detector crossing 插值思路；
+- gamma track 过滤和 detector crossing 插值思路；
 - collimator CSV 基础解析和 `G4ExtrudedSolid` 构建经验。
 
 禁止语义级继承：
@@ -1048,6 +1020,57 @@ pose_seed = base_random_seed + pose_index
 - 后续里程碑应优先隔离 legacy 语义，再逐步迁移可复用机制。
 - 若复用旧类名，必须保证其职责已符合第二版文档；否则应重命名或替换为第二版模块。
 - README 和 `macros/*.mac` 在完成第二版主链路前只能视为 legacy 参考，不得作为第二版验收入口。
+
+---
+
+## D028：正式 CSV 输出 detected gamma hit，debug CSV 输出 gamma track summary
+
+**状态：** Accepted
+**日期：** 2026-05-26
+**取代：** D012
+
+### 背景
+
+真实探测器不会区分 gamma 是否为 source primary。第二版论文数据目标需要分析探测器能探测到的 gamma，而不是只分析 `track_id == 1 && parent_id == 0` 的 primary gamma。
+
+### 决策
+
+事件追踪模型采用：
+
+```text
+detector-hit 模型 + per-gamma-track scatter history
+```
+
+基本定义：
+
+```text
+1 event = 1 source primary gamma
+1 row in events.csv = 1 detected gamma hit
+```
+
+探测器记录对象为所有 gamma track。有效 detector crossing 条件不包含 `track_id == 1` 或 `parent_id == 0` 限制。同一 gamma track 只记录第一次有效 detector crossing；同一 event 内不同 gamma track 可分别记录为不同 hit。
+
+正式 `events.csv` 输出所有 detected gamma hit，并使用 `event_id + hit_id` 唯一标识每个 hit。`hit_id` 在同一 event 内从 `0` 开始。
+
+Debug CSV 采用：
+
+```text
+1 row = 1 gamma track summary
+```
+
+Debug CSV 使用 `detected` 字段区分该 gamma track 是否至少一次有效穿越探测平面。由于所有 gamma track 都可能被记录，debug CSV 文件会明显大于正式 CSV。
+
+每条 gamma track 必须维护自身的 `compt` / `Rayl` 散射历史。secondary gamma 的散射阶次从自身产生时从 `0` 开始，不继承 parent track 的散射阶次。
+
+正式 CSV 和 debug CSV 必须包含 `gamma_source_*` 字段；primary gamma 的 `gamma_source_x/y/z` 为焦点面随机采样后的实际 `gamma_start`，secondary gamma 的 `gamma_source_x/y/z` 为 track vertex position。
+
+### 影响
+
+- D012 被取代，不再使用 primary-only CSV 语义。
+- `events.csv` 可在同一 event 中输出 0 行、1 行或多行。
+- Formal CSV 不包含 `detected` 字段，但包含 `hit_id`、`track_id`、`parent_id`、`is_primary_gamma` 和 `gamma_source_*` 字段。
+- Debug CSV 不再只是 formal CSV 加一个 `detected` 字段，而是 gamma track summary schema。
+- 仍不输出 pose-level / scan-level summary、后处理图表、detector region ID、depth region ID、target interaction boolean 或 per-region scatter counts。
 
 ---
 

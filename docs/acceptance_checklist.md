@@ -149,7 +149,7 @@ cmake --build build -j
 - 源码中不存在固定三 jaw 假设作为第二轮 profile 结构。
 - 不构建 `Mirror` jaw 或 mirror detector。
 - `SteppingAction` 不按 `PMMALogical` 过滤散射。
-- 正式 CSV header 精确等于 `spec.md`，不包含旧 `initial_energy`、`initial_dir_*`、`is_multiple_scatter`、`track_id` 或 `parent_id` 字段。
+- 正式 CSV header 精确等于 `spec.md`，不包含旧 `initial_energy`、`initial_dir_*` 或 `is_multiple_scatter` 字段。
 
 ---
 
@@ -712,8 +712,6 @@ accept_direction: negative_z
 
 ```text
 particle == gamma
-track_id == 1
-parent_id == 0
 preStep.z > detector_z
 postStep.z <= detector_z
 direction.z < 0
@@ -728,28 +726,25 @@ det_x = pre_x + t * (post_x - pre_x)
 det_y = pre_y + t * (post_y - pre_y)
 ```
 
-同一 event 只记录第一次有效 detector hit。
+同一 gamma track 只记录第一次有效 detector crossing。同一 event 内不同 gamma track 可分别记录为 detected gamma hit。
 
 ---
 
 ## 13. event 追踪验收
 
-### 13.1 primary gamma 过滤
+### 13.1 gamma track 过滤
 
-只处理：
+处理所有：
 
 ```text
 particle_name == gamma
-track_id == 1
-parent_id == 0
 ```
 
 不处理：
 
-- secondary gamma；
 - electron；
 - positron；
-- 其他非 primary 粒子。
+- 其他非 gamma 粒子。
 
 ### 13.2 散射计数
 
@@ -763,14 +758,15 @@ processName == Rayl
 不计入：
 
 - photoelectric effect；
-- secondary interactions；
 - 非 gamma 粒子过程。
 
 验收点：
 
+- 每条 gamma track 独立维护 `scatter_count_total`、`compton_count` 和 `rayleigh_count`。
 - `scatter_count_total = compton_count + rayleigh_count`。
-- first scatter 为第一次有效 Compton / Rayleigh。
-- last scatter 为最后一次有效 Compton / Rayleigh。
+- secondary gamma 的散射阶次从自身产生时从 `0` 开始，不继承 parent track 的散射阶次。
+- first scatter 为当前 gamma track 自身第一次有效 Compton / Rayleigh。
+- last scatter 为当前 gamma track 自身最后一次有效 Compton / Rayleigh。
 - 无有效散射时 first / last scatter 坐标为 `NaN`，region 为 `none`。
 
 ### 13.3 region 归属
@@ -789,9 +785,9 @@ processName == Rayl
 验收点：
 
 - `scatter_count_total`、`compton_count`、`rayleigh_count` 不限于 VehicleROI 内。
-- primary gamma 在 VehicleROI、collimator、World air 或其他 registered / unregistered volume 中发生的 `compt` / `Rayl` 均计入。
+- gamma track 在 VehicleROI、collimator、World air 或其他 registered / unregistered volume 中发生的 `compt` / `Rayl` 均计入。
 - 未注册 region 返回 `other`。
-- 事件是否进入正式 CSV 只由 detector hit 决定。
+- gamma track 是否进入正式 CSV 只由 detected gamma hit 决定。
 
 ---
 
@@ -818,21 +814,26 @@ results/{run_id}/metadata.yaml
 `events.csv` header 必须精确等于：
 
 ```csv
-event_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
+event_id,hit_id,track_id,parent_id,is_primary_gamma,gamma_source_type,gamma_source_process,gamma_source_x,gamma_source_y,gamma_source_z,gamma_source_region_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
 ```
 
 ### 14.3 行语义
 
 验收点：
 
-- `1 row = 1 detected primary gamma`。
-- 未探测 event 不写入正式 CSV。
+- `1 row = 1 detected gamma hit`。
+- 同一 event 可输出 0 行、1 行或多行。
+- 未探测 gamma track 不写入正式 CSV。
 - CSV 不包含 `detected` 字段。
 - CSV 不包含 `pose_id`、`model_type`、`head_offset_x/y`，这些信息写入 metadata。
-- CSV 不包含 `source_start_x/y/z`、`source_dir_x/y/z`、`source_energy_keV`、`target_interaction`、per-region scatter counts、detector region ID 或 depth region ID。
+- CSV 包含 `hit_id`、`track_id`、`parent_id`、`is_primary_gamma` 和 `gamma_source_*` 字段。
+- `hit_id` 在同一 event 内从 `0` 开始递增。
+- primary gamma 的 `gamma_source_x/y/z` 为焦点面随机采样后的实际 `gamma_start`。
+- secondary gamma 的 `gamma_source_x/y/z` 为 track vertex position。
+- CSV 不包含 `source_dir_x/y/z`、`source_energy_keV`、`target_interaction`、per-region scatter counts、detector region ID 或 depth region ID。
 - 长度单位为 mm。
 - 能量单位为 keV。
-- 无散射事件 first / last scatter 坐标为 `NaN`，region 为 `none`。
+- 无散射 gamma track 的 first / last scatter 坐标为 `NaN`，region 为 `none`。
 
 ---
 
@@ -859,27 +860,31 @@ results/{run_id}/metadata.yaml
 `events_debug.csv` header 必须精确等于：
 
 ```csv
-event_id,detected,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
+event_id,track_id,parent_id,is_primary_gamma,gamma_source_type,gamma_source_process,gamma_source_x,gamma_source_y,gamma_source_z,gamma_source_region_id,detected,hit_id,det_x,det_y,det_z,det_energy,scatter_count_total,compton_count,rayleigh_count,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z,first_scatter_region_id,last_scatter_region_id
 ```
 
 ### 15.3 行语义
 
 验收点：
 
-- detected event 与 undetected event 均写入。
+- `1 row = 1 gamma track summary`。
+- detected gamma track 与 undetected gamma track 均写入。
 - `detected` 只允许为 `0` 或 `1`。
+- `detected = 1` 时，`hit_id` 为同一 event 内 detected gamma hit 的递增编号，从 `0` 开始。
 - `detected = 0` 时：
 
 ```text
+hit_id = -1
 det_x = NaN
 det_y = NaN
 det_z = NaN
 det_energy = NaN
 ```
 
-- scatter 字段仍按 event 已发生的追踪结果填写。
+- scatter 字段按该 gamma track 自身已发生的追踪结果填写。
+- Debug CSV 会明显大于正式 CSV，因为所有 gamma track 都可能被记录。
 - Debug CSV 不包含 `termination_process`、`termination_volume`、`termination_region_id` 或其他额外字段。
-- Debug CSV 不包含 `source_start_x/y/z`、`source_dir_x/y/z`、`source_energy_keV`、`target_interaction`、per-region scatter counts、detector region ID 或 depth region ID。
+- Debug CSV 不包含 `source_dir_x/y/z`、`source_energy_keV`、`target_interaction`、per-region scatter counts、detector region ID 或 depth region ID。
 
 ---
 
