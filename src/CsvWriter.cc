@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <sstream>
 #include <stdexcept>
@@ -200,12 +202,85 @@ bool CsvWriter::IsOpen() const
     return isOpen_ && output_.is_open();
 }
 
-void CsvWriter::MergeFiles(const std::vector<std::string>&,
-                           const std::string&,
-                           bool,
-                           bool)
+void CsvWriter::MergeFiles(const std::vector<std::string>& inputFilePaths,
+                           const std::string& outputFilePath,
+                           bool debugOutput,
+                           bool deleteInputFiles)
 {
-    throw std::runtime_error("CSV merge is deferred to M15");
+    if (inputFilePaths.empty()) {
+        throw std::runtime_error("CSV merge requires at least one input file");
+    }
+    if (outputFilePath.empty()) {
+        throw std::runtime_error("CSV merge output path must be non-empty");
+    }
+
+    const std::string expectedHeader = debugOutput ? kDebugHeader : kFormalHeader;
+    std::ofstream output(outputFilePath, std::ios::out | std::ios::trunc);
+    if (!output) {
+        throw std::runtime_error("failed to open merged CSV output file: " + outputFilePath);
+    }
+
+    bool wroteHeader = false;
+    for (const auto& inputFilePath : inputFilePaths) {
+        if (inputFilePath.empty()) {
+            throw std::runtime_error("CSV merge input path must be non-empty");
+        }
+
+        std::ifstream input(inputFilePath);
+        if (!input) {
+            throw std::runtime_error("failed to open thread CSV input file for merge: " + inputFilePath);
+        }
+
+        std::string header;
+        if (!std::getline(input, header)) {
+            throw std::runtime_error("thread CSV input file is empty: " + inputFilePath);
+        }
+        if (!header.empty() && header.back() == '\r') {
+            header.pop_back();
+        }
+        if (header != expectedHeader) {
+            throw std::runtime_error("thread CSV header does not match expected schema: " + inputFilePath);
+        }
+
+        if (!wroteHeader) {
+            output << header << '\n';
+            wroteHeader = true;
+        }
+
+        std::string line;
+        while (std::getline(input, line)) {
+            output << line << '\n';
+        }
+        if (!input.eof()) {
+            throw std::runtime_error("failed while reading thread CSV input file: " + inputFilePath);
+        }
+        if (!output) {
+            throw std::runtime_error("failed while writing merged CSV output file: " + outputFilePath);
+        }
+    }
+
+    if (!wroteHeader) {
+        throw std::runtime_error("CSV merge failed to write a header");
+    }
+
+    output.flush();
+    if (!output) {
+        throw std::runtime_error("failed to flush merged CSV output file: " + outputFilePath);
+    }
+    output.close();
+
+    if (deleteInputFiles) {
+        for (const auto& inputFilePath : inputFilePaths) {
+            std::error_code ec;
+            if (!std::filesystem::remove(inputFilePath, ec)) {
+                if (ec) {
+                    throw std::runtime_error("failed to delete thread CSV input file after merge: "
+                                             + inputFilePath + ": " + ec.message());
+                }
+                throw std::runtime_error("thread CSV input file disappeared before deletion: " + inputFilePath);
+            }
+        }
+    }
 }
 
 void CsvWriter::WriteHeader()

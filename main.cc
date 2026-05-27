@@ -146,10 +146,6 @@ void RunFirstPose(const SimulationConfig& config, const VehicleROIConfig& vehicl
     if (poses.empty()) {
         throw std::runtime_error("no scan poses were generated");
     }
-    if (config.run.number_of_threads != 1) {
-        throw std::runtime_error("M13 run execution supports single-thread configs only; set run.number_of_threads to 1");
-    }
-
     const ScanPose& pose = poses.front();
     ValidateRunOutputDirectoryAvailable(config, pose);
     CLHEP::HepRandom::setTheSeed(pose.random_seed);
@@ -168,7 +164,7 @@ void RunFirstPose(const SimulationConfig& config, const VehicleROIConfig& vehicl
     runManager->Initialize();
     runManager->BeamOn(static_cast<G4int>(config.run.n_primary_per_pose));
 
-    std::cout << "M14 single-pose run completed: " << pose.pose_id << "\n";
+    std::cout << "M15 single-pose run completed: " << pose.pose_id << "\n";
 }
 
 }  // namespace

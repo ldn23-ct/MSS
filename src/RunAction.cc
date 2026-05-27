@@ -1,13 +1,29 @@
 #include "RunAction.hh"
 
+#include "G4Threading.hh"
+
 #include <filesystem>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 namespace fs = std::filesystem;
 
-RunAction::RunAction(SimulationConfig config, VehicleROIConfig vehicleROI, ScanPose pose)
+namespace {
+
+bool DirectoryIsNonEmpty(const fs::path& directory)
+{
+    return fs::directory_iterator(directory) != fs::directory_iterator();
+}
+
+}  // namespace
+
+RunAction::RunAction(SimulationConfig config,
+                     VehicleROIConfig vehicleROI,
+                     ScanPose pose,
+                     OutputRole role)
     : configured_(true),
+      role_(role),
       config_(std::move(config)),
       vehicleROI_(std::move(vehicleROI)),
       pose_(std::move(pose))
@@ -19,12 +35,14 @@ void RunAction::BeginOfRunAction(const G4Run*)
     if (!configured_) {
         return;
     }
-    if (config_.run.number_of_threads != 1) {
-        throw std::runtime_error("M13 CSV output supports single-thread runs only; multi-thread merge is deferred to M15");
+
+    if (role_ == OutputRole::Master) {
+        PrepareRunOutputDirectory();
+        return;
     }
 
-    PrepareOutputDirectory();
-    writer_.Open(OutputCsvPath(), config_.run.debug);
+    EnsureTmpDirectory();
+    writer_.Open(TempCsvPath(CurrentThreadId()), config_.run.debug);
 }
 
 void RunAction::EndOfRunAction(const G4Run*)
@@ -33,9 +51,12 @@ void RunAction::EndOfRunAction(const G4Run*)
         writer_.Close();
     }
 
-    if (configured_) {
-        metadataWriter_.Write(MetadataPath(), config_, vehicleROI_, pose_, BuildRunId(), OutputCsvName());
+    if (!configured_ || role_ == OutputRole::Worker) {
+        return;
     }
+
+    MergeThreadCsvFiles();
+    metadataWriter_.Write(MetadataPath(), config_, vehicleROI_, pose_, BuildRunId(), OutputCsvName());
 }
 
 CsvWriter* RunAction::Writer()
@@ -56,20 +77,65 @@ std::string RunAction::OutputCsvName() const
     return config_.output.events_csv_name;
 }
 
-std::string RunAction::OutputCsvPath() const
+std::string RunAction::FinalCsvPath() const
 {
-    return (fs::path(config_.output.output_directory) / BuildRunId() / OutputCsvName()).string();
+    return (fs::path(RunDirectory()) / OutputCsvName()).string();
 }
 
 std::string RunAction::MetadataPath() const
 {
-    return (fs::path(config_.output.output_directory) / BuildRunId() / config_.output.metadata_yaml_name).string();
+    return (fs::path(RunDirectory()) / config_.output.metadata_yaml_name).string();
 }
 
-void RunAction::PrepareOutputDirectory() const
+std::string RunAction::RunDirectory() const
+{
+    return (fs::path(config_.output.output_directory) / BuildRunId()).string();
+}
+
+std::string RunAction::TmpDirectory() const
+{
+    return (fs::path(RunDirectory()) / config_.output.thread_tmp_directory).string();
+}
+
+std::string RunAction::TempCsvName(int threadId) const
+{
+    const std::string prefix = config_.run.debug ? "events_debug_thread" : "events_thread";
+    return prefix + std::to_string(threadId) + ".csv";
+}
+
+std::string RunAction::TempCsvPath(int threadId) const
+{
+    return (fs::path(TmpDirectory()) / TempCsvName(threadId)).string();
+}
+
+std::vector<std::string> RunAction::ExpectedTempCsvPaths() const
+{
+    const int threadCount = (config_.run.number_of_threads > 1) ? config_.run.number_of_threads : 1;
+    std::vector<std::string> paths;
+    paths.reserve(static_cast<std::size_t>(threadCount));
+    for (int threadId = 0; threadId < threadCount; ++threadId) {
+        paths.push_back(TempCsvPath(threadId));
+    }
+    return paths;
+}
+
+int RunAction::CurrentThreadId() const
+{
+    if (role_ == OutputRole::Serial) {
+        return 0;
+    }
+
+    const int threadId = G4Threading::G4GetThreadId();
+    if (threadId < 0) {
+        throw std::runtime_error("worker RunAction received invalid Geant4 thread id");
+    }
+    return threadId;
+}
+
+void RunAction::PrepareRunOutputDirectory() const
 {
     const fs::path baseDir(config_.output.output_directory);
-    const fs::path runDir = baseDir / BuildRunId();
+    const fs::path runDir(RunDirectory());
 
     std::error_code ec;
     fs::create_directories(baseDir, ec);
@@ -81,14 +147,35 @@ void RunAction::PrepareOutputDirectory() const
         if (!fs::is_directory(runDir)) {
             throw std::runtime_error("run output path exists but is not a directory: " + runDir.string());
         }
-        if (fs::directory_iterator(runDir) != fs::directory_iterator()) {
+        if (DirectoryIsNonEmpty(runDir)) {
             throw std::runtime_error("run output directory already exists and is non-empty: " + runDir.string());
         }
-        return;
+    } else {
+        fs::create_directories(runDir, ec);
+        if (ec) {
+            throw std::runtime_error("failed to create run output directory: " + runDir.string() + ": " + ec.message());
+        }
     }
 
-    fs::create_directories(runDir, ec);
+    EnsureTmpDirectory();
+}
+
+void RunAction::EnsureTmpDirectory() const
+{
+    const fs::path tmpDir(TmpDirectory());
+    std::error_code ec;
+    fs::create_directories(tmpDir, ec);
     if (ec) {
-        throw std::runtime_error("failed to create run output directory: " + runDir.string() + ": " + ec.message());
+        throw std::runtime_error("failed to create thread temporary CSV directory: "
+                                 + tmpDir.string() + ": " + ec.message());
     }
+    if (!fs::is_directory(tmpDir)) {
+        throw std::runtime_error("thread temporary CSV path exists but is not a directory: " + tmpDir.string());
+    }
+}
+
+void RunAction::MergeThreadCsvFiles()
+{
+    const bool deleteInputFiles = !config_.run.debug;
+    CsvWriter::MergeFiles(ExpectedTempCsvPaths(), FinalCsvPath(), config_.run.debug, deleteInputFiles);
 }

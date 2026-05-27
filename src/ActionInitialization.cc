@@ -37,7 +37,16 @@ ActionInitialization::ActionInitialization(const SimulationConfig& config,
 {
 }
 
-void ActionInitialization::BuildForMaster() const {}
+void ActionInitialization::BuildForMaster() const
+{
+    if (!hasConfig_) {
+        throw std::runtime_error("ActionInitialization requires SimulationConfig and ScanPose for master RunAction");
+    }
+
+    if (config_.run.number_of_threads > 1) {
+        SetUserAction(new RunAction(config_, vehicleROI_, pose_, RunAction::OutputRole::Master));
+    }
+}
 
 void ActionInitialization::Build() const
 {
@@ -45,7 +54,10 @@ void ActionInitialization::Build() const
         throw std::runtime_error("ActionInitialization requires SimulationConfig and ScanPose for M7 primary generation");
     }
 
-    auto* runAction = new RunAction(config_, vehicleROI_, pose_);
+    const auto role = (config_.run.number_of_threads > 1)
+                          ? RunAction::OutputRole::Worker
+                          : RunAction::OutputRole::Serial;
+    auto* runAction = new RunAction(config_, vehicleROI_, pose_, role);
     SetUserAction(runAction);
     SetUserAction(new PrimaryGeneratorAction(config_.source, pose_));
     auto* eventAction = new EventAction(runAction->Writer());
