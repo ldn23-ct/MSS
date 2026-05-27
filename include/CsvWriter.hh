@@ -1,6 +1,7 @@
 #ifndef CSV_WRITER_HH
 #define CSV_WRITER_HH
 
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -21,7 +22,11 @@ class CsvWriter {
                            bool deleteInputFiles);
 
   private:
+    void WriteHeader();
+
     bool isOpen_ = false;
+    bool debugOutput_ = false;
+    std::ofstream output_;
 };
 
 #endif

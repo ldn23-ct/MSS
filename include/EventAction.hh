@@ -7,6 +7,7 @@
 
 #include <string>
 
+class CsvWriter;
 class G4Event;
 class G4Track;
 class G4VPhysicalVolume;
@@ -14,7 +15,7 @@ class RegionResolver;
 
 class EventAction : public G4UserEventAction {
   public:
-    EventAction() = default;
+    explicit EventAction(CsvWriter* writer = nullptr);
     ~EventAction() override = default;
 
     void BeginOfEventAction(const G4Event* event) override;
@@ -35,6 +36,7 @@ class EventAction : public G4UserEventAction {
     void RecordScatter(GammaTrackSummary& summary, const G4ThreeVector& pos, const std::string& region_id);
     std::string ResolveSourceRegion(const G4VPhysicalVolume* sourceVolume, const RegionResolver* resolver) const;
 
+    CsvWriter* writer_ = nullptr;
     EventRecord record_;
 };
 

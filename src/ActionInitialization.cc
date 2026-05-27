@@ -2,6 +2,7 @@
 
 #include "EventAction.hh"
 #include "PrimaryGeneratorAction.hh"
+#include "RunAction.hh"
 #include "SteppingAction.hh"
 
 #include <stdexcept>
@@ -35,8 +36,10 @@ void ActionInitialization::Build() const
         throw std::runtime_error("ActionInitialization requires SimulationConfig and ScanPose for M7 primary generation");
     }
 
+    auto* runAction = new RunAction(config_, pose_);
+    SetUserAction(runAction);
     SetUserAction(new PrimaryGeneratorAction(config_.source, pose_));
-    auto* eventAction = new EventAction();
+    auto* eventAction = new EventAction(runAction->Writer());
     SetUserAction(eventAction);
     SetUserAction(new SteppingAction(eventAction, regionResolver_, detectorPlane_));
 }

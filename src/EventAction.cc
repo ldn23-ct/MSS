@@ -1,11 +1,17 @@
 #include "EventAction.hh"
 
+#include "CsvWriter.hh"
 #include "G4Event.hh"
 #include "G4SystemOfUnits.hh"
 #include "G4ThreeVector.hh"
 #include "G4Track.hh"
 #include "G4VProcess.hh"
 #include "RegionResolver.hh"
+
+EventAction::EventAction(CsvWriter* writer)
+    : writer_(writer)
+{
+}
 
 void EventAction::BeginOfEventAction(const G4Event* event)
 {
@@ -15,7 +21,12 @@ void EventAction::BeginOfEventAction(const G4Event* event)
     }
 }
 
-void EventAction::EndOfEventAction(const G4Event*) {}
+void EventAction::EndOfEventAction(const G4Event*)
+{
+    if (writer_ != nullptr && writer_->IsOpen()) {
+        writer_->WriteRow(record_);
+    }
+}
 
 GammaTrackSummary& EventAction::EnsureGammaTrackSummary(const G4Track& track,
                                                         const G4VPhysicalVolume* sourceVolume,

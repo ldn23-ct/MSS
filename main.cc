@@ -1,11 +1,20 @@
+#include "ActionInitialization.hh"
+#include "DetectorConstruction.hh"
+#include "PhysicsList.hh"
 #include "SimulationConfig.hh"
 #include "ScanPoseManager.hh"
 #include "SimulationConfigReader.hh"
 #include "VehicleROIConfigReader.hh"
 
+#include "G4RunManagerFactory.hh"
+#include "G4RunManager.hh"
+#include "Randomize.hh"
+
 #include <algorithm>
 #include <exception>
 #include <iostream>
+#include <memory>
+#include <stdexcept>
 #include <string>
 
 namespace {
@@ -59,7 +68,7 @@ CliOptions ParseArgs(int argc, char** argv)
 
 void PrintConfigSummary(const SimulationConfig& config)
 {
-    std::cout << "MSS M1 configuration loaded.\n"
+    std::cout << "MSS configuration loaded.\n"
               << "Config path: " << config.configFilePath << "\n"
               << "schema_version: " << config.schema_version << "\n"
               << "run.number_of_threads: " << config.run.number_of_threads << "\n"
@@ -76,14 +85,13 @@ void PrintConfigSummary(const SimulationConfig& config)
               << "detector.detector_y_range_zero_mm: ["
               << config.detector.detector_y_range_zero_mm[0] << ", "
               << config.detector.detector_y_range_zero_mm[1] << "]\n"
-              << "output.output_directory: " << config.output.output_directory << "\n"
-              << "Geant4 simulation is deferred beyond M1.\n";
+              << "output.output_directory: " << config.output.output_directory << "\n";
 }
 
 
 void PrintPoseSummary(const PoseList& poses)
 {
-    std::cout << "ScanPoseManager M5 pose list generated.\n"
+    std::cout << "ScanPoseManager pose list generated.\n"
               << "pose_count: " << poses.size() << "\n";
     for (const auto& pose : poses) {
         std::cout << "pose[" << pose.pose_index << "]: "
@@ -92,7 +100,6 @@ void PrintPoseSummary(const PoseList& poses)
                   << " head_offset_y_mm=" << pose.head_offset_y_mm
                   << " random_seed=" << pose.random_seed << "\n";
     }
-    std::cout << "Pose run execution is deferred beyond M5.\n";
 }
 
 void PrintVehicleROISummary(const VehicleROIConfig& vehicleROI)
@@ -109,8 +116,35 @@ void PrintVehicleROISummary(const VehicleROIConfig& vehicleROI)
               << "component_count: " << vehicleROI.components.size() << "\n"
               << "insert_count: " << insertCount << "\n"
               << "region_count: " << vehicleROI.detailed_region_ids.size() << "\n"
-              << "recommended_target_count: " << vehicleROI.recommended_target_components.size() << "\n"
-              << "VehicleROI geometry construction is deferred beyond M2.\n";
+              << "recommended_target_count: " << vehicleROI.recommended_target_components.size() << "\n";
+}
+
+void RunFirstPose(const SimulationConfig& config, const VehicleROIConfig& vehicleROI, const PoseList& poses)
+{
+    if (poses.empty()) {
+        throw std::runtime_error("no scan poses were generated");
+    }
+    if (config.run.number_of_threads != 1) {
+        throw std::runtime_error("M13 run execution supports single-thread configs only; set run.number_of_threads to 1");
+    }
+
+    const ScanPose& pose = poses.front();
+    CLHEP::HepRandom::setTheSeed(pose.random_seed);
+
+    auto* detectorConstruction = new DetectorConstruction(config, vehicleROI);
+    std::unique_ptr<G4RunManager> runManager(
+        G4RunManagerFactory::CreateRunManager(G4RunManagerType::Default, config.run.number_of_threads));
+    runManager->SetUserInitialization(detectorConstruction);
+    runManager->SetUserInitialization(new PhysicsList());
+    runManager->SetUserInitialization(new ActionInitialization(
+        config,
+        pose,
+        &detectorConstruction->GetRegionResolver()));
+
+    runManager->Initialize();
+    runManager->BeamOn(static_cast<G4int>(config.run.n_primary_per_pose));
+
+    std::cout << "M13 single-pose run completed: " << pose.pose_id << "\n";
 }
 
 }  // namespace
@@ -130,6 +164,8 @@ int main(int argc, char** argv)
         VehicleROIConfigReader vehicleReader;
         const auto vehicleROI = vehicleReader.Read(config.vehicle);
         PrintVehicleROISummary(vehicleROI);
+
+        RunFirstPose(config, vehicleROI, poses);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "MSS error: " << error.what() << "\n\n";
