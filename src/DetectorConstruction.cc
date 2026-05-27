@@ -77,12 +77,31 @@ bool WorldContainsAabb(const WorldConfig& world, const JawAabb& aabb)
         && AxisContains(world.center_mm[2], world.size_mm[2], aabb.z);
 }
 
+ScanPose FirstConfiguredPose(const SimulationConfig& simulationConfig)
+{
+    ScanPoseManager poseManager;
+    const PoseList poses = poseManager.Generate(simulationConfig);
+    if (poses.empty()) {
+        throw std::runtime_error("at least one ScanPose is required to construct DetectorConstruction");
+    }
+    return poses.front();
+}
+
 }  // namespace
 
 DetectorConstruction::DetectorConstruction(SimulationConfig simulationConfig, VehicleROIConfig vehicleROIConfig)
+    : DetectorConstruction(simulationConfig, std::move(vehicleROIConfig), FirstConfiguredPose(simulationConfig))
+{
+}
+
+DetectorConstruction::DetectorConstruction(
+    SimulationConfig simulationConfig,
+    VehicleROIConfig vehicleROIConfig,
+    ScanPose currentPose)
     : configured_(true),
       simulationConfig_(std::move(simulationConfig)),
-      vehicleROIConfig_(std::move(vehicleROIConfig))
+      vehicleROIConfig_(std::move(vehicleROIConfig)),
+      currentPose_(std::move(currentPose))
 {
 }
 
@@ -126,7 +145,7 @@ G4VPhysicalVolume* DetectorConstruction::Construct()
     vehicleROIPhysicalVolume_ = vehicleConstruction.Construct(worldLogical);
     regionResolver_.SetVehicleROIVolume(vehicleROIPhysicalVolume_);
 
-    ImagingHeadConstruction imagingHead(simulationConfig_, poses.front(), materialManager_);
+    ImagingHeadConstruction imagingHead(simulationConfig_, currentPose_, materialManager_);
     virtualDetectorPhysicalVolume_ = imagingHead.Construct(worldLogical);
 
     return worldPhysicalVolume_;

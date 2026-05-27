@@ -1,8 +1,8 @@
 # MSS
 
-`MSS` 是一个 Geant4 gamma 背散射 Monte Carlo 仿真项目。第一版目标是生成事件级 CSV，用于统计到达理想探测平面的 primary gamma 在 PMMA 内的 Compton / Rayleigh 散射历史。
+`MSS` 是一个 Geant4 gamma 背散射 Monte Carlo 仿真项目。当前阶段是第二轮车辆侧向 ROI 重构：固定车辆 ROI，移动成像头，在每个离散 pose 下输出事件级 CSV 和 run-level `metadata.yaml`。
 
-第一版不实现图像重建、真实探测器响应、探测器能量沉积 scoring、profile 批处理或 Python 后处理分析。
+本轮只生成事件级数据，不实现 pose-level summary、scan-level summary、后处理脚本、统计图、图像重建或真实探测器响应。
 
 ## 环境
 
@@ -10,7 +10,6 @@
 |---|---|
 | Geant4 | 11.2.0 |
 | 操作系统 | Ubuntu 24.04 |
-| 编译器 | Ubuntu 24.04 系统默认 GCC |
 | 构建系统 | CMake |
 | C++ 标准 | C++17 |
 | 可执行文件 | `MSS` |
@@ -24,167 +23,104 @@ cmake -S . -B build
 cmake --build build -j
 ```
 
-当前 CMake 不复制 `macros/` 或 `data/` 到 `build/`。下面的运行命令都假设当前工作目录是仓库根目录。
+当前运行命令假设工作目录是仓库根目录，这样 YAML 中的 `data/...` 相对路径可以直接解析。
 
-## 运行
+## 运行入口
 
-单线程 debug 最小测试：
-
-```bash
-./build/MSS macros/run.mac
-```
-
-预期输出：
-
-```text
-results/hits_profile_P001_mono_160keV_defect_off_thick_20mm_seed123_debug.csv
-```
-
-多线程 compact 测试：
+第二轮默认入口是 YAML 配置：
 
 ```bash
-./build/MSS macros/run_mt.mac
+./build/MSS --config data/simulation_config_v2.yaml
 ```
 
-预期输出：
-
-```text
-results/hits_profile_P001_mono_160keV_defect_on_thick_{当前 PMMA 厚度}mm_seed111.csv
-```
-
-当前 `macros/run_mt.mac` 启用空气缺陷。如果代码中的 PMMA 厚度不足以容纳固定空气缺陷，程序会在 `/run/initialize` 阶段报错停止，不会生成误导性的 CSV。
-
-几何与轨迹可视化：
+也兼容位置参数形式：
 
 ```bash
-./build/MSS macros/vis.mac
+./build/MSS data/simulation_config_v2.yaml
 ```
 
-`vis.mac` 用于检查 PMMA、空气缺陷、3 块原始钨准直器 jaw、3 块镜像钨准直器 jaw、两个探测面辅助体和少量 gamma 轨迹。需要可用的 Geant4 可视化驱动和图形环境。
+默认样例 `data/simulation_config_v2.yaml` 是单 pose、可端到端运行的配置。它引用：
 
-## 宏命令
+- `data/vehicle_roi_v03.yaml`：默认车辆 ROI 几何配置。
+- `data/collimator_profiles.csv`：狭缝准直器 profile 示例。
+- `data/spectrum.csv`：spectrum 能量模式示例。
 
-第一版支持以下宏命令：
+`data/vehicle_roi_v04.yaml` 保留为额外数据文件，不是默认样例入口。
 
-| 命令 | 说明 |
-|---|---|
-| `/geometry/collimatorProfileFile data/collimator_profiles.csv` | 准直器 profile CSV |
-| `/geometry/collimatorProfileId P001` | 本次运行使用的 profile ID |
-| `/geometry/enableCollimator true` | 是否读取 profile 并构建钨准直器，默认 `true` |
-| `/geometry/enableAirDefect true` | 是否构建 PMMA 内空气缺陷 |
-| `/source/energyMode mono` | 能量模式，`mono` 或 `spectrum` |
-| `/source/monoEnergy 160 keV` | 单能模式 primary gamma 能量 |
-| `/source/spectrumFile data/spectrum.csv` | spectrum 模式 CSV |
-| `/run/randomSeed 12345` | 随机种子 |
-| `/run/numberOfThreads 8` | Geant4 worker 线程数 |
-| `/output/directory results` | 输出目录 |
-| `/output/debug false` | 显式选择 debug 或 compact 输出 |
+## Pose 配置
 
-若未显式设置 `/output/debug`，单线程默认 debug，多线程默认 compact。
+`pose.mode` 支持：
 
-PMMA 厚度没有宏命令。程序运行时从几何构建代码中的实际 PMMA 厚度生成输出文件名；不要使用 `/geometry/pmmaThickness`，该命令不存在。启用空气缺陷时，固定空气缺陷必须完整落在当前 PMMA z 范围内，否则初始化失败。
+- `list`：`head_offset_x_mm` 和 `head_offset_y_mm` 按相同下标配对。
+- `grid`：`x_offsets_mm` 为外层、`y_offsets_mm` 为内层生成笛卡尔积。
 
-## 输入 CSV
-
-准直器 profile CSV 格式：
-
-```csv
-profile_id,jaw_id,vertex_id,x_mm,z_mm
-P001,jaw_0,0,21,-20
-```
-
-约束：
-
-- 每个 profile 必须包含 `jaw_0`、`jaw_1` 和 `jaw_2`。
-- 每个 jaw 是全局 x-z 平面内的凸多边形，至少 3 个顶点。
-- 每个 jaw 的 `vertex_id` 必须是 `0..N-1` 的连续整数，不能缺失或重复。
-- `x_mm` 和 `z_mm` 是全局坐标，单位 mm。
-- `/geometry/enableCollimator false` 时不会读取 profile，也不会构建原始或镜像钨准直器。
-- 启用准直器时，程序会同时构建原始准直器和关于 `x=0` 的镜像准直器。
-- 非法 profile 会 fail fast。
-
-当前 `data/collimator_profiles.csv` 中的 `P001` 是 placeholder，仅用于编译、可视化和输出链路检查，不代表真实准直器几何。
-
-spectrum CSV 格式：
-
-```csv
-energy_keV,weight
-40,0.01
-```
-
-`data/spectrum.csv` 是合法示例输入。程序会检查能量为正、权重非负且总权重大于 0，并按权重构造 CDF 采样。真实能谱应在后续替换该文件。
-
-## 输出 CSV
-
-只输出到达探测平面边界内的 primary gamma。未到达探测面的 event 不输出。
-
-探测区域固定为：
-
-- 原始探测器：`z=-73 mm`，`x=[53,161] mm`，`y=[-50,50] mm`。
-- 镜像探测器：`z=-73 mm`，`x=[-161,-53] mm`，`y=[-50,50] mm`。
-
-CSV schema 不区分 detector ID；镜像探测器命中时 `det_x` 保留负的全局 x 坐标。
-
-compact header：
-
-```csv
-initial_energy,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
-```
-
-debug header：
-
-```csv
-event_id,track_id,parent_id,det_z,det_dir_x,det_dir_y,det_dir_z,initial_energy,initial_dir_x,initial_dir_y,initial_dir_z,det_x,det_y,det_energy,scatter_count_total,compton_count,rayleigh_count,is_multiple_scatter,first_scatter_x,first_scatter_y,first_scatter_z,last_scatter_x,last_scatter_y,last_scatter_z
-```
-
-单位约定：
-
-| 类型 | CSV 单位 |
-|---|---|
-| 长度 | mm |
-| 能量 | keV |
-
-`is_multiple_scatter` 的定义是 `scatter_count_total >= 2`。无 PMMA 内散射时，first / last scatter 坐标输出为 `NaN`。
-
-输出文件名记录 run-level metadata，不写入每行 CSV。当前格式为：
+每个 pose 会生成独立 run。默认 seed 规则是：
 
 ```text
-results/hits_profile_{profile_id}_mono_{energy}keV_{defect_state}_thick_{pmma_thickness}mm_seed{seed}.csv
-results/hits_profile_{profile_id}_mono_{energy}keV_{defect_state}_thick_{pmma_thickness}mm_seed{seed}_debug.csv
-results/hits_profile_{profile_id}_spectrum_{defect_state}_thick_{pmma_thickness}mm_seed{seed}.csv
-results/hits_profile_{profile_id}_spectrum_{defect_state}_thick_{pmma_thickness}mm_seed{seed}_debug.csv
+pose_seed = run.random_seed + pose_index
 ```
 
-其中 `defect_state` 为 `defect_on` 或 `defect_off`。厚度格式去掉无意义尾随 0，并把小数点写作 `p`，例如 `65 mm -> thick_65mm`，`2.5 mm -> thick_2p5mm`。
-
-## Debug 与 Compact
-
-debug 模式包含 event、track、parent、探测面 z、探测方向和 primary 初始方向字段，适合单线程调试。
-
-compact 模式只包含后处理统计所需字段，适合多线程正式运行。
-
-多线程运行时，每个 worker 写入 `results/tmp/` 下的临时 CSV，run 结束后由 master 合并。compact 模式合并成功后删除对应临时 CSV；debug 模式合并成功后保留临时 CSV。
-
-线程临时文件使用同一个 base filename，并追加 thread ID：
+默认 `pose_id_rule` 为：
 
 ```text
-results/tmp/hits_profile_{profile_id}_mono_{energy}keV_{defect_state}_thick_{pmma_thickness}mm_seed{seed}_thread0.csv
-results/tmp/hits_profile_{profile_id}_mono_{energy}keV_{defect_state}_thick_{pmma_thickness}mm_seed{seed}_debug_thread0.csv
+pose_x{encoded_x}_y{encoded_y}
 ```
 
-## 第一版限制
+负数 offset 用 `m` 编码，例如 `x=-10, y=-4` 对应 `pose_xm10_ym4`。
 
-第一版不包含：
+## 输出
 
-- 图像重建；
-- 真实探测器材料响应；
-- 探测器能量沉积 scoring；
-- source collimator；
-- 自动遍历所有 collimator profile；
-- 全散射轨迹输出；
-- Python 后处理分析脚本；
-- 源位置、探测器边界、PMMA 尺寸或空气缺陷尺寸宏命令。
+每个 pose 输出到独立 run 目录：
 
-## 验收
+```text
+{output.output_directory}/{pose_id}_{vehicle.model_type}_seed{pose_seed}/
+```
 
-详细验收步骤见 `docs/acceptance_checklist.md`。
+默认单 pose 示例会写入：
+
+```text
+results/pose_x0_y0_normal_seed12345/events.csv
+results/pose_x0_y0_normal_seed12345/metadata.yaml
+```
+
+输出目录采用 fail-fast 策略。如果目标 run 目录已经存在且非空，程序会报错停止，不覆盖、不追加，也不会自动生成替代目录名。
+
+正式模式 `run.debug: false` 输出 `events.csv`，语义为：
+
+```text
+1 row = 1 detected gamma hit
+```
+
+Debug 模式 `run.debug: true` 输出 `events_debug.csv`，语义为：
+
+```text
+1 row = 1 gamma track summary
+```
+
+多线程时每个 worker 先写入 run 目录下的 `tmp/` 临时 CSV，run end 后由 master 合并为最终 CSV。正式模式合并成功后删除线程临时 CSV；debug 模式合并成功后保留，便于排查。
+
+`metadata.yaml` 记录 run-level 信息，包括 pose、seed、thread、vehicle/source/collimator/detector/physics/world/output policy 等配置快照。
+
+## 输入数据说明
+
+当前 `data/collimator_profiles.csv`、`data/spectrum.csv` 和默认几何参数用于第二轮链路检查与样例运行。它们不代表最终工程准直器、真实能谱或完整车辆 CAD。
+
+第二轮准直器 profile 允许每个 profile 包含可变数量 jaw，不默认构建镜像准直器。探测器是单个理想虚拟探测平面，不模拟真实探测器材料响应。
+
+## Legacy Macros
+
+`macros/*.mac` 保留为第一版 macro 语法和可视化兼容参考，不是第二轮默认运行入口。第二轮配置应通过 `--config data/simulation_config_v2.yaml` 或等价 YAML 文件提供。
+
+这些 legacy macro 中出现的 PMMA、空气缺陷、镜像准直器、镜像探测器和旧 CSV 命名不属于第二轮默认设计约束。
+
+## 本轮非目标
+
+当前 Geant4 基础程序不实现：
+
+- pose-level summary 或 scan-level summary；
+- Python 后处理分析、统计图、差异图或论文指标计算；
+- 图像重建、连续运动扫描或运动模糊；
+- 真实探测器材料响应或能量沉积 scoring；
+- 整车 CAD 复现、镜像准直器或镜像探测器。
+
+详细规格与验收见 `docs/spec.md`、`docs/decisions.md` 和 `docs/acceptance_checklist.md`。

@@ -1,26 +1,16 @@
-#include "ActionInitialization.hh"
-#include "DetectorConstruction.hh"
-#include "PhysicsList.hh"
+#include "PoseRunController.hh"
 #include "SimulationConfig.hh"
 #include "ScanPoseManager.hh"
 #include "SimulationConfigReader.hh"
 #include "VehicleROIConfigReader.hh"
 
-#include "G4RunManagerFactory.hh"
-#include "G4RunManager.hh"
-#include "Randomize.hh"
-
 #include <algorithm>
 #include <exception>
-#include <filesystem>
 #include <iostream>
-#include <memory>
 #include <stdexcept>
 #include <string>
 
 namespace {
-
-namespace fs = std::filesystem;
 
 struct CliOptions {
     std::string configPath;
@@ -91,7 +81,6 @@ void PrintConfigSummary(const SimulationConfig& config)
               << "output.output_directory: " << config.output.output_directory << "\n";
 }
 
-
 void PrintPoseSummary(const PoseList& poses)
 {
     std::cout << "ScanPoseManager pose list generated.\n"
@@ -122,51 +111,6 @@ void PrintVehicleROISummary(const VehicleROIConfig& vehicleROI)
               << "recommended_target_count: " << vehicleROI.recommended_target_components.size() << "\n";
 }
 
-std::string BuildRunId(const SimulationConfig& config, const ScanPose& pose)
-{
-    return pose.pose_id + "_" + config.vehicle.model_type + "_seed" + std::to_string(pose.random_seed);
-}
-
-void ValidateRunOutputDirectoryAvailable(const SimulationConfig& config, const ScanPose& pose)
-{
-    const fs::path runDir = fs::path(config.output.output_directory) / BuildRunId(config, pose);
-    if (!fs::exists(runDir)) {
-        return;
-    }
-    if (!fs::is_directory(runDir)) {
-        throw std::runtime_error("run output path exists but is not a directory: " + runDir.string());
-    }
-    if (fs::directory_iterator(runDir) != fs::directory_iterator()) {
-        throw std::runtime_error("run output directory already exists and is non-empty: " + runDir.string());
-    }
-}
-
-void RunFirstPose(const SimulationConfig& config, const VehicleROIConfig& vehicleROI, const PoseList& poses)
-{
-    if (poses.empty()) {
-        throw std::runtime_error("no scan poses were generated");
-    }
-    const ScanPose& pose = poses.front();
-    ValidateRunOutputDirectoryAvailable(config, pose);
-    CLHEP::HepRandom::setTheSeed(pose.random_seed);
-
-    auto* detectorConstruction = new DetectorConstruction(config, vehicleROI);
-    std::unique_ptr<G4RunManager> runManager(
-        G4RunManagerFactory::CreateRunManager(G4RunManagerType::Default, config.run.number_of_threads));
-    runManager->SetUserInitialization(detectorConstruction);
-    runManager->SetUserInitialization(new PhysicsList());
-    runManager->SetUserInitialization(new ActionInitialization(
-        config,
-        pose,
-        vehicleROI,
-        &detectorConstruction->GetRegionResolver()));
-
-    runManager->Initialize();
-    runManager->BeamOn(static_cast<G4int>(config.run.n_primary_per_pose));
-
-    std::cout << "M15 single-pose run completed: " << pose.pose_id << "\n";
-}
-
 }  // namespace
 
 int main(int argc, char** argv)
@@ -185,7 +129,8 @@ int main(int argc, char** argv)
         const auto vehicleROI = vehicleReader.Read(config.vehicle);
         PrintVehicleROISummary(vehicleROI);
 
-        RunFirstPose(config, vehicleROI, poses);
+        PoseRunController runController;
+        runController.Execute(config, vehicleROI, poses);
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "MSS error: " << error.what() << "\n\n";

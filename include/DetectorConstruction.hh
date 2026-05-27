@@ -16,6 +16,10 @@ class DetectorConstruction : public G4VUserDetectorConstruction {
   public:
     DetectorConstruction() = default;
     DetectorConstruction(SimulationConfig simulationConfig, VehicleROIConfig vehicleROIConfig);
+    DetectorConstruction(
+        SimulationConfig simulationConfig,
+        VehicleROIConfig vehicleROIConfig,
+        ScanPose currentPose);
     ~DetectorConstruction() override = default;
 
     G4VPhysicalVolume* Construct() override;
@@ -34,6 +38,7 @@ class DetectorConstruction : public G4VUserDetectorConstruction {
     bool configured_ = false;
     SimulationConfig simulationConfig_;
     VehicleROIConfig vehicleROIConfig_;
+    ScanPose currentPose_;
     MaterialManager materialManager_;
     RegionRegistry regionRegistry_;
     RegionResolver regionResolver_{regionRegistry_};

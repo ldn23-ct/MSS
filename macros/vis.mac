@@ -1,3 +1,8 @@
+# Legacy v1 macro example only.
+# M16 second-round default entry is:
+#   ./build/MSS --config data/simulation_config_v2.yaml
+# This file is retained only as archived macro syntax and visualization reference.
+
 /run/numberOfThreads 1
 /run/randomSeed 12345
 
