@@ -12,12 +12,15 @@
 
 #include <algorithm>
 #include <exception>
+#include <filesystem>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 
 namespace {
+
+namespace fs = std::filesystem;
 
 struct CliOptions {
     std::string configPath;
@@ -119,6 +122,25 @@ void PrintVehicleROISummary(const VehicleROIConfig& vehicleROI)
               << "recommended_target_count: " << vehicleROI.recommended_target_components.size() << "\n";
 }
 
+std::string BuildRunId(const SimulationConfig& config, const ScanPose& pose)
+{
+    return pose.pose_id + "_" + config.vehicle.model_type + "_seed" + std::to_string(pose.random_seed);
+}
+
+void ValidateRunOutputDirectoryAvailable(const SimulationConfig& config, const ScanPose& pose)
+{
+    const fs::path runDir = fs::path(config.output.output_directory) / BuildRunId(config, pose);
+    if (!fs::exists(runDir)) {
+        return;
+    }
+    if (!fs::is_directory(runDir)) {
+        throw std::runtime_error("run output path exists but is not a directory: " + runDir.string());
+    }
+    if (fs::directory_iterator(runDir) != fs::directory_iterator()) {
+        throw std::runtime_error("run output directory already exists and is non-empty: " + runDir.string());
+    }
+}
+
 void RunFirstPose(const SimulationConfig& config, const VehicleROIConfig& vehicleROI, const PoseList& poses)
 {
     if (poses.empty()) {
@@ -129,6 +151,7 @@ void RunFirstPose(const SimulationConfig& config, const VehicleROIConfig& vehicl
     }
 
     const ScanPose& pose = poses.front();
+    ValidateRunOutputDirectoryAvailable(config, pose);
     CLHEP::HepRandom::setTheSeed(pose.random_seed);
 
     auto* detectorConstruction = new DetectorConstruction(config, vehicleROI);
@@ -139,12 +162,13 @@ void RunFirstPose(const SimulationConfig& config, const VehicleROIConfig& vehicl
     runManager->SetUserInitialization(new ActionInitialization(
         config,
         pose,
+        vehicleROI,
         &detectorConstruction->GetRegionResolver()));
 
     runManager->Initialize();
     runManager->BeamOn(static_cast<G4int>(config.run.n_primary_per_pose));
 
-    std::cout << "M13 single-pose run completed: " << pose.pose_id << "\n";
+    std::cout << "M14 single-pose run completed: " << pose.pose_id << "\n";
 }
 
 }  // namespace

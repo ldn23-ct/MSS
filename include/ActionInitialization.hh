@@ -3,6 +3,7 @@
 
 #include "ScanPoseManager.hh"
 #include "SimulationConfig.hh"
+#include "VehicleROIConfig.hh"
 #include "VirtualDetectorPlane.hh"
 
 #include "G4VUserActionInitialization.hh"
@@ -16,6 +17,10 @@ class ActionInitialization : public G4VUserActionInitialization {
     ActionInitialization(const SimulationConfig& config, const ScanPose& pose);
     ActionInitialization(const SimulationConfig& config,
                          const ScanPose& pose,
+                         const VehicleROIConfig& vehicleROI);
+    ActionInitialization(const SimulationConfig& config,
+                         const ScanPose& pose,
+                         const VehicleROIConfig& vehicleROI,
                          const RegionResolver* regionResolver);
     ~ActionInitialization() override = default;
 
@@ -25,6 +30,7 @@ class ActionInitialization : public G4VUserActionInitialization {
   private:
     bool hasConfig_ = false;
     SimulationConfig config_;
+    VehicleROIConfig vehicleROI_;
     ScanPose pose_;
     DetectorPlaneActual detectorPlane_;
     const RegionResolver* regionResolver_ = nullptr;

@@ -6,8 +6,11 @@
 
 namespace fs = std::filesystem;
 
-RunAction::RunAction(SimulationConfig config, ScanPose pose)
-    : configured_(true), config_(std::move(config)), pose_(std::move(pose))
+RunAction::RunAction(SimulationConfig config, VehicleROIConfig vehicleROI, ScanPose pose)
+    : configured_(true),
+      config_(std::move(config)),
+      vehicleROI_(std::move(vehicleROI)),
+      pose_(std::move(pose))
 {
 }
 
@@ -28,6 +31,10 @@ void RunAction::EndOfRunAction(const G4Run*)
 {
     if (writer_.IsOpen()) {
         writer_.Close();
+    }
+
+    if (configured_) {
+        metadataWriter_.Write(MetadataPath(), config_, vehicleROI_, pose_, BuildRunId(), OutputCsvName());
     }
 }
 
@@ -52,6 +59,11 @@ std::string RunAction::OutputCsvName() const
 std::string RunAction::OutputCsvPath() const
 {
     return (fs::path(config_.output.output_directory) / BuildRunId() / OutputCsvName()).string();
+}
+
+std::string RunAction::MetadataPath() const
+{
+    return (fs::path(config_.output.output_directory) / BuildRunId() / config_.output.metadata_yaml_name).string();
 }
 
 void RunAction::PrepareOutputDirectory() const

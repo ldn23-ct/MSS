@@ -13,15 +13,24 @@ ActionInitialization::ActionInitialization(const SimulationConfig& config)
 }
 
 ActionInitialization::ActionInitialization(const SimulationConfig& config, const ScanPose& pose)
-    : ActionInitialization(config, pose, nullptr)
+    : ActionInitialization(config, pose, VehicleROIConfig{}, nullptr)
 {
 }
 
 ActionInitialization::ActionInitialization(const SimulationConfig& config,
                                            const ScanPose& pose,
+                                           const VehicleROIConfig& vehicleROI)
+    : ActionInitialization(config, pose, vehicleROI, nullptr)
+{
+}
+
+ActionInitialization::ActionInitialization(const SimulationConfig& config,
+                                           const ScanPose& pose,
+                                           const VehicleROIConfig& vehicleROI,
                                            const RegionResolver* regionResolver)
     : hasConfig_(true),
       config_(config),
+      vehicleROI_(vehicleROI),
       pose_(pose),
       detectorPlane_(VirtualDetectorPlane::CalculateActual(config.detector, pose)),
       regionResolver_(regionResolver)
@@ -36,7 +45,7 @@ void ActionInitialization::Build() const
         throw std::runtime_error("ActionInitialization requires SimulationConfig and ScanPose for M7 primary generation");
     }
 
-    auto* runAction = new RunAction(config_, pose_);
+    auto* runAction = new RunAction(config_, vehicleROI_, pose_);
     SetUserAction(runAction);
     SetUserAction(new PrimaryGeneratorAction(config_.source, pose_));
     auto* eventAction = new EventAction(runAction->Writer());
