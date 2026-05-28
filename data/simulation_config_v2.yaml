@@ -1,13 +1,13 @@
 schema_version: 2
 
 run:
-  random_seed: 12345
+  random_seed: 123
   number_of_threads: 8
-  n_primary_per_pose: 10000
+  n_primary_per_pose: 10000000
   debug: false
 
 vehicle:
-  geometry_file: data/vehicle_roi_v03.yaml
+  geometry_file: data/vehicle_roi_v04.yaml
   model_type: normal
   selected_target_component: null
   abnormal_material: G4_POLYETHYLENE
@@ -17,7 +17,7 @@ pose:
 
   list:
     head_offset_x_mm: [0]
-    head_offset_y_mm: [0]
+    head_offset_y_mm: [480]
 
   grid:
     x_offsets_mm: []
@@ -31,7 +31,7 @@ source:
   mono_energy_keV: 160.0
   spectrum_file: data/spectrum.csv
 
-  source_pos_zero_mm: [0.0, 0.0, -185.0]
+  source_pos_zero_mm: [-678.08, 0.0, -20.0]
   incident_theta_deg: 45.0
   focal_spot_diameter_mm: 5.0
 
@@ -39,11 +39,11 @@ collimator:
   enable: true
   profile_file: data/collimator_profiles.csv
   profile_id: P001
-  jaw_extrusion_length_y_mm: 120.0
+  jaw_extrusion_length_y_mm: 1300.0
 
 detector:
   detector_z_zero_mm: -73.0
-  detector_x_range_zero_mm: [53.0, 161.0]
+  detector_x_range_zero_mm: [-646.0, -404.0]
   detector_y_range_zero_mm: [-50.0, 50.0]
   accept_direction: negative_z
 

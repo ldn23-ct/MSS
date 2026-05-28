@@ -4,12 +4,14 @@ schema:
   format: yaml
 metadata:
   model_name: vehicle_side_backscatter_roi
-  model_version: V3.1_trunk_side_materials
+  model_version: V3.3_four_independent_seats
   source_report: vehicle_roi_modeling_v031_trunk_side_report.md
   source_sha256: b902ba3cd8e38a5fbb19b4d85a1fa8c496ed8b3c3afac8b11d3342f03deeec69
-  generated_at_utc: '2026-05-24'
+  generated_at_utc: '2026-05-28'
   scope: vehicle ROI geometry and Geant4 material definitions for side-entry backscatter; source/detector/collimator/old PMMA
     phantom are out of scope
+  revision_note: 'Split two row-level seat blocks into four independent seats: front_near, front_far, rear_near, rear_far;
+    all seats face -x and seat-back thickness is along x.'
 units:
   length: mm
   density: g/cm3
@@ -110,8 +112,10 @@ model_modes:
     - near_rear_door_insert
     - far_front_door_insert
     - far_rear_door_insert
-    - front_seat_insert
-    - rear_seat_insert
+    - front_near_seat_insert
+    - front_far_seat_insert
+    - rear_near_seat_insert
+    - rear_far_seat_insert
     - cabin_air_package_insert
     - rear_trunk_package_insert
 regions:
@@ -1341,17 +1345,17 @@ components:
   - -155.0
   - 0.0
   - 0.0
-- name: front_seat_base_foam
+- name: front_near_seat_base_foam
   host: cabin_air
   shape: box
   center_mm:
   - -430.0
   - 250.0
-  - 600.0
+  - 410.0
   size_mm:
   - 450.0
   - 140.0
-  - 420.0
+  - 300.0
   material: Vehicle_PU_Foam
   region_id: seat_foam
   is_insert: false
@@ -1359,7 +1363,7 @@ components:
   half_size_mm:
   - 225.0
   - 70.0
-  - 210.0
+  - 150.0
   aabb_mm:
     x:
     - -655.0
@@ -1368,56 +1372,56 @@ components:
     - 180.0
     - 320.0
     z:
-    - 390.0
-    - 810.0
+    - 260.0
+    - 560.0
   placement_center_in_host_mm:
   - -475.0
   - -375.0
-  - -125.0
-- name: front_seat_back_foam
+  - -315.0
+- name: front_near_seat_back_foam
   host: cabin_air
   shape: box
   center_mm:
-  - -430.0
+  - -175.0
   - 625.0
-  - 820.0
+  - 410.0
   size_mm:
-  - 450.0
+  - 60.0
   - 610.0
-  - 120.0
+  - 300.0
   material: Vehicle_PU_Foam
   region_id: seat_foam
   is_insert: false
   role: seat
   half_size_mm:
-  - 225.0
+  - 30.0
   - 305.0
-  - 60.0
+  - 150.0
   aabb_mm:
     x:
-    - -655.0
     - -205.0
+    - -145.0
     y:
     - 320.0
     - 930.0
     z:
-    - 760.0
-    - 880.0
+    - 260.0
+    - 560.0
   placement_center_in_host_mm:
-  - -475.0
+  - -220.0
   - 0.0
-  - 95.0
-- name: front_seat_frame
+  - -315.0
+- name: front_near_seat_frame
   host: cabin_air
   shape: box
   center_mm:
   - -430.0
   - 160.0
-  - 600.0
+  - 410.0
   size_mm:
   - 420.0
   - 30.0
-  - 340.0
+  - 240.0
   material: G4_Fe
   region_id: seat_frame_metal
   is_insert: false
@@ -1425,7 +1429,7 @@ components:
   half_size_mm:
   - 210.0
   - 15.0
-  - 170.0
+  - 120.0
   aabb_mm:
     x:
     - -640.0
@@ -1434,60 +1438,192 @@ components:
     - 145.0
     - 175.0
     z:
-    - 430.0
-    - 770.0
+    - 290.0
+    - 530.0
   placement_center_in_host_mm:
   - -475.0
   - -465.0
-  - -125.0
-- name: front_seat_insert
-  host: front_seat_back_foam
+  - -315.0
+- name: front_near_seat_insert
+  host: front_near_seat_back_foam
   shape: box
   center_mm:
-  - -430.0
+  - -175.0
   - 520.0
-  - 820.0
+  - 410.0
   size_mm:
-  - 250.0
+  - 40.0
   - 200.0
-  - 60.0
-  material:
+  - 160.0
+  material: &id001
     normal: Vehicle_PU_Foam
     abnormal: G4_POLYETHYLENE
-  region_id:
+  region_id: &id002
     normal: seat_foam
     abnormal: target
   is_insert: true
   role: seat_insert
   half_size_mm:
-  - 125.0
+  - 20.0
   - 100.0
-  - 30.0
+  - 80.0
   aabb_mm:
     x:
-    - -555.0
-    - -305.0
+    - -195.0
+    - -155.0
     y:
     - 420.0
     - 620.0
     z:
-    - 790.0
-    - 850.0
+    - 330.0
+    - 490.0
   placement_center_in_host_mm:
   - 0.0
   - -105.0
   - 0.0
-- name: rear_seat_base_foam
+- name: front_far_seat_base_foam
+  host: cabin_air
+  shape: box
+  center_mm:
+  - -430.0
+  - 250.0
+  - 1040.0
+  size_mm:
+  - 450.0
+  - 140.0
+  - 300.0
+  material: Vehicle_PU_Foam
+  region_id: seat_foam
+  is_insert: false
+  role: seat
+  half_size_mm:
+  - 225.0
+  - 70.0
+  - 150.0
+  aabb_mm:
+    x:
+    - -655.0
+    - -205.0
+    y:
+    - 180.0
+    - 320.0
+    z:
+    - 890.0
+    - 1190.0
+  placement_center_in_host_mm:
+  - -475.0
+  - -375.0
+  - 315.0
+- name: front_far_seat_back_foam
+  host: cabin_air
+  shape: box
+  center_mm:
+  - -175.0
+  - 625.0
+  - 1040.0
+  size_mm:
+  - 60.0
+  - 610.0
+  - 300.0
+  material: Vehicle_PU_Foam
+  region_id: seat_foam
+  is_insert: false
+  role: seat
+  half_size_mm:
+  - 30.0
+  - 305.0
+  - 150.0
+  aabb_mm:
+    x:
+    - -205.0
+    - -145.0
+    y:
+    - 320.0
+    - 930.0
+    z:
+    - 890.0
+    - 1190.0
+  placement_center_in_host_mm:
+  - -220.0
+  - 0.0
+  - 315.0
+- name: front_far_seat_frame
+  host: cabin_air
+  shape: box
+  center_mm:
+  - -430.0
+  - 160.0
+  - 1040.0
+  size_mm:
+  - 420.0
+  - 30.0
+  - 240.0
+  material: G4_Fe
+  region_id: seat_frame_metal
+  is_insert: false
+  role: seat
+  half_size_mm:
+  - 210.0
+  - 15.0
+  - 120.0
+  aabb_mm:
+    x:
+    - -640.0
+    - -220.0
+    y:
+    - 145.0
+    - 175.0
+    z:
+    - 920.0
+    - 1160.0
+  placement_center_in_host_mm:
+  - -475.0
+  - -465.0
+  - 315.0
+- name: front_far_seat_insert
+  host: front_far_seat_back_foam
+  shape: box
+  center_mm:
+  - -175.0
+  - 520.0
+  - 1040.0
+  size_mm:
+  - 40.0
+  - 200.0
+  - 160.0
+  material: *id001
+  region_id: *id002
+  is_insert: true
+  role: seat_insert
+  half_size_mm:
+  - 20.0
+  - 100.0
+  - 80.0
+  aabb_mm:
+    x:
+    - -195.0
+    - -155.0
+    y:
+    - 420.0
+    - 620.0
+    z:
+    - 960.0
+    - 1120.0
+  placement_center_in_host_mm:
+  - 0.0
+  - -105.0
+  - 0.0
+- name: rear_near_seat_base_foam
   host: cabin_air
   shape: box
   center_mm:
   - 430.0
   - 250.0
-  - 600.0
+  - 410.0
   size_mm:
   - 550.0
   - 140.0
-  - 420.0
+  - 300.0
   material: Vehicle_PU_Foam
   region_id: seat_foam
   is_insert: false
@@ -1495,7 +1631,7 @@ components:
   half_size_mm:
   - 275.0
   - 70.0
-  - 210.0
+  - 150.0
   aabb_mm:
     x:
     - 155.0
@@ -1504,56 +1640,56 @@ components:
     - 180.0
     - 320.0
     z:
-    - 390.0
-    - 810.0
+    - 260.0
+    - 560.0
   placement_center_in_host_mm:
   - 385.0
   - -375.0
-  - -125.0
-- name: rear_seat_back_foam
+  - -315.0
+- name: rear_near_seat_back_foam
   host: cabin_air
   shape: box
   center_mm:
-  - 430.0
+  - 735.0
   - 625.0
-  - 850.0
+  - 410.0
   size_mm:
-  - 550.0
+  - 60.0
   - 610.0
-  - 120.0
+  - 300.0
   material: Vehicle_PU_Foam
   region_id: seat_foam
   is_insert: false
   role: seat
   half_size_mm:
-  - 275.0
+  - 30.0
   - 305.0
-  - 60.0
+  - 150.0
   aabb_mm:
     x:
-    - 155.0
     - 705.0
+    - 765.0
     y:
     - 320.0
     - 930.0
     z:
-    - 790.0
-    - 910.0
+    - 260.0
+    - 560.0
   placement_center_in_host_mm:
-  - 385.0
+  - 690.0
   - 0.0
-  - 125.0
-- name: rear_seat_frame
+  - -315.0
+- name: rear_near_seat_frame
   host: cabin_air
   shape: box
   center_mm:
   - 430.0
   - 160.0
-  - 600.0
+  - 410.0
   size_mm:
   - 500.0
   - 30.0
-  - 340.0
+  - 240.0
   material: G4_Fe
   region_id: seat_frame_metal
   is_insert: false
@@ -1561,7 +1697,7 @@ components:
   half_size_mm:
   - 250.0
   - 15.0
-  - 170.0
+  - 120.0
   aabb_mm:
     x:
     - 180.0
@@ -1570,45 +1706,173 @@ components:
     - 145.0
     - 175.0
     z:
-    - 430.0
-    - 770.0
+    - 290.0
+    - 530.0
   placement_center_in_host_mm:
   - 385.0
   - -465.0
-  - -125.0
-- name: rear_seat_insert
-  host: rear_seat_back_foam
+  - -315.0
+- name: rear_near_seat_insert
+  host: rear_near_seat_back_foam
   shape: box
   center_mm:
-  - 430.0
+  - 735.0
   - 520.0
-  - 850.0
+  - 410.0
   size_mm:
-  - 300.0
+  - 40.0
   - 200.0
-  - 60.0
-  material:
-    normal: Vehicle_PU_Foam
-    abnormal: G4_POLYETHYLENE
-  region_id:
-    normal: seat_foam
-    abnormal: target
+  - 160.0
+  material: *id001
+  region_id: *id002
   is_insert: true
   role: seat_insert
   half_size_mm:
-  - 150.0
+  - 20.0
   - 100.0
-  - 30.0
+  - 80.0
   aabb_mm:
     x:
-    - 280.0
-    - 580.0
+    - 715.0
+    - 755.0
     y:
     - 420.0
     - 620.0
     z:
-    - 820.0
-    - 880.0
+    - 330.0
+    - 490.0
+  placement_center_in_host_mm:
+  - 0.0
+  - -105.0
+  - 0.0
+- name: rear_far_seat_base_foam
+  host: cabin_air
+  shape: box
+  center_mm:
+  - 430.0
+  - 250.0
+  - 1040.0
+  size_mm:
+  - 550.0
+  - 140.0
+  - 300.0
+  material: Vehicle_PU_Foam
+  region_id: seat_foam
+  is_insert: false
+  role: seat
+  half_size_mm:
+  - 275.0
+  - 70.0
+  - 150.0
+  aabb_mm:
+    x:
+    - 155.0
+    - 705.0
+    y:
+    - 180.0
+    - 320.0
+    z:
+    - 890.0
+    - 1190.0
+  placement_center_in_host_mm:
+  - 385.0
+  - -375.0
+  - 315.0
+- name: rear_far_seat_back_foam
+  host: cabin_air
+  shape: box
+  center_mm:
+  - 735.0
+  - 625.0
+  - 1040.0
+  size_mm:
+  - 60.0
+  - 610.0
+  - 300.0
+  material: Vehicle_PU_Foam
+  region_id: seat_foam
+  is_insert: false
+  role: seat
+  half_size_mm:
+  - 30.0
+  - 305.0
+  - 150.0
+  aabb_mm:
+    x:
+    - 705.0
+    - 765.0
+    y:
+    - 320.0
+    - 930.0
+    z:
+    - 890.0
+    - 1190.0
+  placement_center_in_host_mm:
+  - 690.0
+  - 0.0
+  - 315.0
+- name: rear_far_seat_frame
+  host: cabin_air
+  shape: box
+  center_mm:
+  - 430.0
+  - 160.0
+  - 1040.0
+  size_mm:
+  - 500.0
+  - 30.0
+  - 240.0
+  material: G4_Fe
+  region_id: seat_frame_metal
+  is_insert: false
+  role: seat
+  half_size_mm:
+  - 250.0
+  - 15.0
+  - 120.0
+  aabb_mm:
+    x:
+    - 180.0
+    - 680.0
+    y:
+    - 145.0
+    - 175.0
+    z:
+    - 920.0
+    - 1160.0
+  placement_center_in_host_mm:
+  - 385.0
+  - -465.0
+  - 315.0
+- name: rear_far_seat_insert
+  host: rear_far_seat_back_foam
+  shape: box
+  center_mm:
+  - 735.0
+  - 520.0
+  - 1040.0
+  size_mm:
+  - 40.0
+  - 200.0
+  - 160.0
+  material: *id001
+  region_id: *id002
+  is_insert: true
+  role: seat_insert
+  half_size_mm:
+  - 20.0
+  - 100.0
+  - 80.0
+  aabb_mm:
+    x:
+    - 715.0
+    - 755.0
+    y:
+    - 420.0
+    - 620.0
+    z:
+    - 960.0
+    - 1120.0
   placement_center_in_host_mm:
   - 0.0
   - -105.0
@@ -2055,9 +2319,47 @@ validation:
     method: positive-volume overlap among sibling components; touching surfaces are allowed
     status: passed
     positive_overlap_count: 0
-    touching_pair_count: 30
+    touching_pair_count: 32
     containment_failure_count: 0
     containment_failures: []
+    four_seat_fix_check:
+      status: passed
+      seat_count: 4
+      seat_units:
+      - front_near_seat
+      - front_far_seat
+      - rear_near_seat
+      - rear_far_seat
+      seat_facing_direction: -x
+      seat_back_thickness_axis: x
+      seat_back_height_axis: y
+      seat_back_width_axis: z
+      replaced_components:
+      - front_seat_back_foam
+      - front_seat_base_foam
+      - front_seat_frame
+      - front_seat_insert
+      - rear_seat_back_foam
+      - rear_seat_base_foam
+      - rear_seat_frame
+      - rear_seat_insert
+      added_components:
+      - front_near_seat_base_foam
+      - front_near_seat_back_foam
+      - front_near_seat_frame
+      - front_near_seat_insert
+      - front_far_seat_base_foam
+      - front_far_seat_back_foam
+      - front_far_seat_frame
+      - front_far_seat_insert
+      - rear_near_seat_base_foam
+      - rear_near_seat_back_foam
+      - rear_near_seat_frame
+      - rear_near_seat_insert
+      - rear_far_seat_base_foam
+      - rear_far_seat_back_foam
+      - rear_far_seat_frame
+      - rear_far_seat_insert
   required_host_containment_checks:
   - door_beam inside corresponding door_cavity_air
   - door_insert inside corresponding door_cavity_air
