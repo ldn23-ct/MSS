@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Geant4 REQUIRED)
+find_package(Geant4 REQUIRED ui_all vis_all)
 include(${Geant4_USE_FILE})
 
 find_package(yaml-cpp REQUIRED)
@@ -48,6 +48,7 @@ add_executable(MSS
     src/VehicleROIConfigReader.cc
     src/VehicleROIConstruction.cc
     src/VirtualDetectorPlane.cc
+    src/VisualizationController.cc
 )
 
 target_include_directories(MSS PRIVATE include)

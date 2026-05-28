@@ -27,13 +27,15 @@ ActionInitialization::ActionInitialization(const SimulationConfig& config,
 ActionInitialization::ActionInitialization(const SimulationConfig& config,
                                            const ScanPose& pose,
                                            const VehicleROIConfig& vehicleROI,
-                                           const RegionResolver* regionResolver)
+                                           const RegionResolver* regionResolver,
+                                           Mode mode)
     : hasConfig_(true),
       config_(config),
       vehicleROI_(vehicleROI),
       pose_(pose),
       detectorPlane_(VirtualDetectorPlane::CalculateActual(config.detector, pose)),
-      regionResolver_(regionResolver)
+      regionResolver_(regionResolver),
+      mode_(mode)
 {
 }
 
@@ -41,6 +43,10 @@ void ActionInitialization::BuildForMaster() const
 {
     if (!hasConfig_) {
         throw std::runtime_error("ActionInitialization requires SimulationConfig and ScanPose for master RunAction");
+    }
+
+    if (mode_ == Mode::Visualization) {
+        return;
     }
 
     if (config_.run.number_of_threads > 1) {
@@ -54,12 +60,16 @@ void ActionInitialization::Build() const
         throw std::runtime_error("ActionInitialization requires SimulationConfig and ScanPose for M7 primary generation");
     }
 
+    SetUserAction(new PrimaryGeneratorAction(config_.source, pose_));
+    if (mode_ == Mode::Visualization) {
+        return;
+    }
+
     const auto role = (config_.run.number_of_threads > 1)
                           ? RunAction::OutputRole::Worker
                           : RunAction::OutputRole::Serial;
     auto* runAction = new RunAction(config_, vehicleROI_, pose_, role);
     SetUserAction(runAction);
-    SetUserAction(new PrimaryGeneratorAction(config_.source, pose_));
     auto* eventAction = new EventAction(runAction->Writer());
     SetUserAction(eventAction);
     SetUserAction(new SteppingAction(eventAction, regionResolver_, detectorPlane_));

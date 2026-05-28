@@ -3,6 +3,7 @@
 #include "ScanPoseManager.hh"
 #include "SimulationConfigReader.hh"
 #include "VehicleROIConfigReader.hh"
+#include "VisualizationController.hh"
 
 #include <algorithm>
 #include <exception>
@@ -14,13 +15,14 @@ namespace {
 
 struct CliOptions {
     std::string configPath;
+    bool enableUi = false;
 };
 
 void PrintUsage(std::ostream& os)
 {
     os << "Usage:\n"
-       << "  MSS --config <simulation_config_v2.yaml>\n"
-       << "  MSS <simulation_config_v2.yaml>\n";
+       << "  MSS --config <simulation_config_v2.yaml> [--ui]\n"
+       << "  MSS [--ui] <simulation_config_v2.yaml>\n";
 }
 
 bool StartsWithDash(const std::string& value)
@@ -32,9 +34,14 @@ CliOptions ParseArgs(int argc, char** argv)
 {
     std::string configFromFlag;
     std::string configFromPosition;
+    bool enableUi = false;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
+        if (arg == "--ui") {
+            enableUi = true;
+            continue;
+        }
         if (arg == "--config") {
             if (i + 1 >= argc || StartsWithDash(argv[i + 1])) {
                 throw std::runtime_error("missing value after --config");
@@ -52,6 +59,7 @@ CliOptions ParseArgs(int argc, char** argv)
     }
 
     CliOptions options;
+    options.enableUi = enableUi;
     options.configPath = configFromFlag.empty() ? configFromPosition : configFromFlag;
     if (options.configPath.empty()) {
         throw std::runtime_error("no YAML config path specified");
@@ -129,8 +137,13 @@ int main(int argc, char** argv)
         const auto vehicleROI = vehicleReader.Read(config.vehicle);
         PrintVehicleROISummary(vehicleROI);
 
-        PoseRunController runController;
-        runController.Execute(config, vehicleROI, poses);
+        if (options.enableUi) {
+            VisualizationController visualizationController;
+            visualizationController.Execute(config, vehicleROI, poses);
+        } else {
+            PoseRunController runController;
+            runController.Execute(config, vehicleROI, poses);
+        }
         return 0;
     } catch (const std::exception& error) {
         std::cerr << "MSS error: " << error.what() << "\n\n";

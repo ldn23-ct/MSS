@@ -1,34 +1,28 @@
-# Legacy v1 macro example only.
-# M16 second-round default entry is:
-#   ./build/MSS --config data/simulation_config_v2.yaml
-# This file is retained only as archived macro syntax and visualization reference.
+# MSS second-round visualization macro.
+# Runtime configuration comes from YAML, for example:
+#   ./build/MSS --config data/simulation_config_v2.yaml --ui
+# This macro must not set source, geometry, output, pose, seed, or thread parameters.
 
-/run/numberOfThreads 1
-/run/randomSeed 12345
+/control/verbose 1
+/run/verbose 1
+/tracking/verbose 0
 
-/geometry/collimatorProfileFile data/collimator_profiles.csv
-/geometry/collimatorProfileId P002
-/geometry/enableCollimator true
-/geometry/enableAirDefect true
-
-/source/energyMode mono
-/source/monoEnergy 160 keV
-
-/output/directory results
-/output/debug true
-
-/run/initialize
-
-/vis/open OGL 600x600-0+0
+/vis/open OGL 1000x800-0+0
 /vis/viewer/set/autoRefresh false
+/vis/verbose warnings
+
 /vis/drawVolume
-/vis/viewer/set/viewpointThetaPhi 70 20
+/vis/viewer/set/viewpointThetaPhi 70 25
 /vis/viewer/set/style surface
-/vis/viewer/zoom 1.5
-/vis/scene/add/axes 0 0 0 100 mm
+/vis/viewer/set/hiddenMarker true
+/vis/viewer/zoom 1.3
+/vis/scene/add/axes 0 0 0 250 mm
+
+/tracking/storeTrajectory 1
 /vis/scene/add/trajectories smooth
 /vis/scene/endOfEventAction accumulate
-/tracking/storeTrajectory 1
 
 /run/beamOn 20
+
+/vis/viewer/set/autoRefresh true
 /vis/viewer/flush

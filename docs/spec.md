@@ -187,7 +187,7 @@ yaml-cpp
 
 ### 4.4 CLI 入口
 
-第二版正式 CLI 入口固定为：
+第二版正式 batch CLI 入口固定为：
 
 ```bash
 ./build/MSS --config data/simulation_config_v2.yaml
@@ -199,7 +199,15 @@ yaml-cpp
 ./build/MSS data/simulation_config_v2.yaml
 ```
 
-若两种形式同时出现，应以 `--config` 指定的路径为准；若未指定配置文件，应报错并打印用法说明。
+可视化入口通过 `--ui` 开启：
+
+```bash
+./build/MSS --config data/simulation_config_v2.yaml --ui
+```
+
+`--ui` 使用同一个 YAML 配置构建 VehicleROI、当前 pose 成像头、准直器和虚拟探测器。UI 模式仅用于几何与轨迹检查，默认只显示 pose list 的第一个 pose，执行 `macros/vis.mac` 中的少量事件显示命令，不写 `events.csv`、`events_debug.csv` 或 `metadata.yaml`。
+
+若位置参数与 `--config` 同时出现，应以 `--config` 指定的路径为准；若未指定配置文件，应报错并打印用法说明。
 
 
 ---

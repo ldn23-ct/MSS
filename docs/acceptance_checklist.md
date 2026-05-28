@@ -29,7 +29,13 @@ primary gamma 源、准直器、虚拟探测器链路可运行
 ```bash
 cmake -S . -B build
 cmake --build build -j
-./build/MSS data/simulation_config_v2.yaml
+./build/MSS --config data/simulation_config_v2.yaml
+```
+
+可视化检查入口为：
+
+```bash
+./build/MSS --config data/simulation_config_v2.yaml --ui
 ```
 
 推荐主入口使用 `--config`。若实现同时支持位置参数形式，应以 `--config` 指定路径为准。README、样例命令和本文档应同步更新，不能保留互相矛盾的入口。
@@ -345,6 +351,19 @@ component_center - host_center
 - 组件的 global AABB 与 YAML 中定义一致。
 
 ### 6.4 主要组件可视化
+
+使用第二版可视化入口检查：
+
+```bash
+./build/MSS --config data/simulation_config_v2.yaml --ui
+```
+
+验收点：
+
+- 程序通过 YAML 构建几何，而不是通过 legacy `/geometry/*` 或 `/source/*` macro 命令配置。
+- UI 模式只显示第一个 pose，并在终端打印该 pose。
+- `macros/vis.mac` 自动执行少量事件用于轨迹显示。
+- UI 模式不写 `events.csv`、`events_debug.csv` 或 `metadata.yaml`。
 
 可视化中应能识别：
 

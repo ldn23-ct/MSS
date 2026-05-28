@@ -12,6 +12,11 @@ class RegionResolver;
 
 class ActionInitialization : public G4VUserActionInitialization {
   public:
+    enum class Mode {
+        Production,
+        Visualization
+    };
+
     ActionInitialization() = default;
     explicit ActionInitialization(const SimulationConfig& config);
     ActionInitialization(const SimulationConfig& config, const ScanPose& pose);
@@ -21,7 +26,8 @@ class ActionInitialization : public G4VUserActionInitialization {
     ActionInitialization(const SimulationConfig& config,
                          const ScanPose& pose,
                          const VehicleROIConfig& vehicleROI,
-                         const RegionResolver* regionResolver);
+                         const RegionResolver* regionResolver,
+                         Mode mode = Mode::Production);
     ~ActionInitialization() override = default;
 
     void BuildForMaster() const override;
@@ -34,6 +40,7 @@ class ActionInitialization : public G4VUserActionInitialization {
     ScanPose pose_;
     DetectorPlaneActual detectorPlane_;
     const RegionResolver* regionResolver_ = nullptr;
+    Mode mode_ = Mode::Production;
 };
 
 #endif
