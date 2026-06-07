@@ -9,16 +9,6 @@
 
 namespace {
 
-bool IsSupportedNistMaterial(const std::string& name)
-{
-    return name == "G4_AIR"
-        || name == "G4_Fe"
-        || name == "G4_GLASS_PLATE"
-        || name == "G4_POLYPROPYLENE"
-        || name == "G4_POLYETHYLENE"
-        || name == "G4_W";
-}
-
 G4Material* FindExistingMaterial(const std::string& name)
 {
     return G4Material::GetMaterial(name, false);
@@ -49,10 +39,6 @@ G4Material* MaterialManager::GetMaterial(const std::string& name) const
 
     if (name == "Vehicle_PU_Foam") {
         return BuildVehiclePUFoam();
-    }
-
-    if (!IsSupportedNistMaterial(name)) {
-        throw std::runtime_error("unsupported material: " + name);
     }
 
     if (auto* existing = FindExistingMaterial(name)) {

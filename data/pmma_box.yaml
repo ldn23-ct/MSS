@@ -1,0 +1,149 @@
+schema:
+  name: vehicle_roi_model
+  version: pmma_box_control_yaml_1
+  format: yaml
+metadata:
+  model_name: vehicle_side_backscatter_roi_pmma_box_control
+  model_version: PMMA_box_control_v1
+  source_basis: vehicle_roi_v03 coordinate system and ROI bounds; all vehicle structures
+    replaced by one PMMA box
+  generated_at_utc: '2026-05-29'
+  scope: control geometry only; entire VehicleROI is modeled as a single PMMA box;
+    no internal vehicle structures, no inserts
+  control_group: true
+units:
+  length: mm
+  density: g/cm3
+  mass_fraction: fraction
+  size_semantics: full_length_not_half_length
+coordinate_system:
+  x: vehicle length direction / lateral scan direction; +x points to vehicle rear,
+    -x points to vehicle front
+  y: vehicle height direction; +y upward
+  z: side-entry depth direction; z=0 is near-side outer surface, +z points into vehicle
+    and toward far-side body
+  origin:
+    definition: projection of B-pillar centerline on near-side outer body surface
+    position_mm:
+    - 0.0
+    - 0.0
+    - 0.0
+roi:
+  name: VehicleROI
+  bounds_mm:
+    x:
+    - -900.0
+    - 1300.0
+    y:
+    - 0.0
+    - 1250.0
+    z:
+    - 0.0
+    - 1450.0
+  center_mm:
+  - 200.0
+  - 625.0
+  - 725.0
+  size_mm:
+  - 2200.0
+  - 1250.0
+  - 1450.0
+  material: G4_PLEXIGLASS
+  region_id: vehicle_pmma
+geant4_placement_rules:
+  solid: G4Box for each listed component
+  box_half_length_mm: size_mm * 0.5
+  global_center_semantics: component center is expressed in VehicleROI coordinate
+    system
+  placement_center_in_host_mm: component_center_mm - host_center_mm
+  touching_surfaces: allowed in conceptual model
+  optional_engineering_gap_mm: 0.01
+materials:
+  G4_AIR:
+    type: NIST
+    built_in: true
+    semantic: world air outside the PMMA control box
+  G4_PLEXIGLASS:
+    type: NIST
+    built_in: true
+    density_g_cm3: 1.19
+    semantic: PMMA / plexiglass control material for the full VehicleROI box
+    composition_hint: C5H8O2, NIST material name G4_PLEXIGLASS
+model_modes:
+  normal:
+    rule: single PMMA VehicleROI box; no insert replacement is defined
+  abnormal:
+    selected_target_component: null
+    rule: not applicable for this PMMA-box control geometry because no insert components
+      exist
+    default_abnormal_material: null
+    alternative_abnormal_materials: []
+    target_region_id: null
+    recommended_single_target_components: []
+regions:
+  detailed_region_ids:
+  - vehicle_pmma
+  - other
+  - none
+  merge_groups:
+    vehicle_pmma:
+    - vehicle_pmma
+    other:
+    - other
+    none:
+    - none
+components:
+- name: VehicleROI
+  host: World
+  shape: box
+  center_mm:
+  - 200.0
+  - 625.0
+  - 725.0
+  size_mm:
+  - 2200.0
+  - 1250.0
+  - 1450.0
+  material: G4_PLEXIGLASS
+  region_id: vehicle_pmma
+  is_insert: false
+  role: pmma_control_box
+  half_size_mm:
+  - 1100.0
+  - 625.0
+  - 725.0
+  aabb_mm:
+    x:
+    - -900.0
+    - 1300.0
+    y:
+    - 0.0
+    - 1250.0
+    z:
+    - 0.0
+    - 1450.0
+  placement_center_in_host_mm:
+  - 200.0
+  - 625.0
+  - 725.0
+validation:
+  aabb_overlap_check:
+    method: positive-volume overlap among sibling components; touching surfaces are
+      allowed
+    status: passed
+    positive_overlap_count: 0
+    touching_pair_count: 0
+    containment_failure_count: 0
+    containment_failures: []
+  required_host_containment_checks:
+  - VehicleROI inside World; World is constructed by the Geant4 application, not by
+    this YAML
+  component_count: 1
+  insert_component_count: 0
+  notes:
+  - This control geometry intentionally replaces the entire vehicle ROI with one PMMA
+    box.
+  - No vehicle internal structures, air cavities, doors, windows, pillars, seats,
+    trunk, or target inserts are present.
+  - 'Use vehicle.model_type: normal and selected_target_component: null in the main
+    simulation config.'

@@ -321,14 +321,14 @@ void ValidateTargets(const VehicleROIConfig& config, const std::optional<std::st
         }
     }
 
-    if (selectedTarget) {
+    if (selectedTarget && !selectedTarget->empty()) {
         if (componentNames.find(*selectedTarget) == componentNames.end()) {
             throw std::runtime_error("vehicle.selected_target_component does not exist: " + *selectedTarget);
         }
         if (insertNames.find(*selectedTarget) == insertNames.end()) {
             throw std::runtime_error("vehicle.selected_target_component is not insert: " + *selectedTarget);
         }
-        if (recommended.find(*selectedTarget) == recommended.end()) {
+        if (!recommended.empty() && recommended.find(*selectedTarget) == recommended.end()) {
             throw std::runtime_error(
                 "vehicle.selected_target_component is not in recommended target list: " + *selectedTarget);
         }

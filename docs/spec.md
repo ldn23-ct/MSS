@@ -142,7 +142,7 @@ data/simulation_config_v2.yaml
 
 ### 4.1 车辆 ROI YAML
 
-车辆 ROI YAML 文件由主入口中的 `vehicle.geometry_file` 指定，样例为 `data/vehicle_roi_v03.yaml`。该文件负责描述车辆 ROI：
+车辆 ROI YAML 文件由主入口中的 `vehicle.geometry_file` 指定。正式车辆 ROI 样例可使用 `data/vehicle_roi_v04.yaml`；同一 `components[]` schema 下的对照模型也可作为输入，例如 `data/pmma_box.yaml`。该文件负责描述 VehicleROI-compatible geometry：
 
 - VehicleROI 总范围；
 - 几何组件；
@@ -299,9 +299,9 @@ detector_y_range_zero_mm: [-50.0, 50.0]
 | `run.number_of_threads` | 整数，且 `>= 1`。 |
 | `run.n_primary_per_pose` | 整数，且 `> 0`。 |
 | `run.debug` | bool。 |
-| `vehicle.geometry_file` | 可读 YAML 文件路径。 |
+| `vehicle.geometry_file` | 可读 VehicleROI-compatible YAML 文件路径；可指向车辆 ROI 或同 schema 对照模型。 |
 | `vehicle.model_type` | `normal` 或 `abnormal`。 |
-| `vehicle.selected_target_component` | `normal` 时可为 `null`；`abnormal` 时必须是 `vehicle_roi_v03.yaml` 中 `is_insert=true` 的 component name。 |
+| `vehicle.selected_target_component` | `normal` 时可为 `null`；`abnormal` 时必须是当前 geometry YAML 中 `is_insert=true` 的 component name。若该 YAML 声明非空 recommended target list，还必须属于该 list。 |
 | `vehicle.abnormal_material` | 已知 NIST 材料或项目自定义材料。 |
 | `pose.mode` | `list` 或 `grid`。 |
 | `pose.list.head_offset_x_mm/y_mm` | list mode 下必须长度相同；元素必须为整数 mm。 |
@@ -341,7 +341,7 @@ detector_y_range_zero_mm: [-50.0, 50.0]
 
 ### 6.1 总体范围
 
-第二版车辆 ROI 模型使用 `vehicle_roi_v03.yaml` 描述。默认 ROI 范围为：
+第二版车辆 ROI 模型由 `vehicle.geometry_file` 指定的 VehicleROI-compatible YAML 描述。车辆 ROI 样例保持以下默认 ROI 范围；PMMA box 等 control geometry 可复用同一范围作为对照：
 
 ```text
 x ∈ [-900, 1300] mm
@@ -627,7 +627,7 @@ insert component:
 - `cabin_air_package_insert`
 - `rear_trunk_package_insert`
 
-若 `selected_target_component` 不在上述列表中，配置读取阶段应报错。
+对车辆 ROI 样例，若 `selected_target_component` 不在上述列表中，配置读取阶段应报错。对 `recommended_single_target_components: []` 的 control geometry，不支持 abnormal target 选择；例如 `pmma_box.yaml` 应使用 `model_type: normal` 与 `selected_target_component: null`。
 
 ### 6.11 AABB / placement / overlap 规则
 

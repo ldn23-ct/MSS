@@ -305,7 +305,7 @@ z     = detector_z_zero
 
 ### 6.1 `VehicleROIConfig`
 
-`VehicleROIConfig` 由 `vehicle_roi_v03.yaml` 读取生成。
+`VehicleROIConfig` 由 `vehicle.geometry_file` 指定的 VehicleROI-compatible YAML 读取生成，例如车辆 ROI YAML 或同 schema 的 PMMA control geometry。
 
 建议包含：
 
@@ -343,7 +343,7 @@ struct VehicleROIConfig {
 };
 ```
 
-实现必须按 `vehicle_roi_v03.yaml` 的实际顶层结构读取：
+实现必须按 VehicleROI-compatible YAML 的实际顶层结构读取：
 
 ```text
 schema / metadata / units / coordinate_system / roi / geant4_placement_rules / materials / model_modes / regions / components / validation

@@ -52,13 +52,12 @@ cmake --build build -j
 ./build/MSS --ui --config data/simulation_config_v2.yaml
 ```
 
-默认样例 `data/simulation_config_v2.yaml` 是单 pose、可端到端运行的配置。它引用：
+默认样例 `data/simulation_config_v2.yaml` 是单 pose、可端到端运行的配置。它通过 `vehicle.geometry_file` 指定 VehicleROI-compatible YAML；当前工作区可使用：
 
-- `data/vehicle_roi_v03.yaml`：默认车辆 ROI 几何配置。
+- `data/pmma_box.yaml`：PMMA box control geometry，只用于 normal baseline 对照，要求 `model_type: normal` 且 `selected_target_component: null`。
+- `data/vehicle_roi_v04.yaml`：车辆 ROI 几何配置，可用于 normal / abnormal 车辆模型运行。
 - `data/collimator_profiles.csv`：狭缝准直器 profile 示例。
 - `data/spectrum.csv`：spectrum 能量模式示例。
-
-`data/vehicle_roi_v04.yaml` 保留为额外数据文件，不是默认样例入口。
 
 ## 可视化模式
 
@@ -84,7 +83,7 @@ cmake --build build -j
 | `run` | `number_of_threads` | batch 模式线程数；`--ui` 模式固定单线程显示。 |
 | `run` | `n_primary_per_pose` | batch 模式每个 pose 的 primary gamma 数。 |
 | `run` | `debug` | `false` 输出 `events.csv`；`true` 输出 `events_debug.csv`。 |
-| `vehicle` | `geometry_file` | VehicleROI YAML 路径。 |
+| `vehicle` | `geometry_file` | VehicleROI-compatible YAML 路径，可指向车辆 ROI 或 PMMA control geometry。 |
 | `vehicle` | `model_type` | `normal` 或 `abnormal`。 |
 | `vehicle` | `selected_target_component` | abnormal 模型中被替换为 target 的 insert。 |
 | `vehicle` | `abnormal_material` | abnormal target 使用的 Geant4 材料名。 |
