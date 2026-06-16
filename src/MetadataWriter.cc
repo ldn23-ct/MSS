@@ -21,6 +21,14 @@ std::string NullableText(const std::optional<std::string>& value)
     return *value;
 }
 
+std::string NullableScalarText(const std::string& value)
+{
+    if (value.empty()) {
+        return "null";
+    }
+    return value;
+}
+
 template <typename T, std::size_t N>
 std::string ArrayText(const std::array<T, N>& values)
 {
@@ -87,11 +95,13 @@ void MetadataWriter::Write(const std::string& filePath,
 
     output << "run_id: " << runId << '\n';
     output << "output_csv: " << outputCsvName << '\n';
+    output << "config_file: " << config.configFilePath << '\n';
     output << '\n';
     output << "model_type: " << config.vehicle.model_type << '\n';
     output << "vehicle_model_id: " << vehicleROI.vehicle_model_id << '\n';
     output << "vehicle_geometry_file: " << config.vehicle.geometry_file << '\n';
     output << "selected_target_component: " << NullableText(config.vehicle.selected_target_component) << '\n';
+    output << "abnormal_material: " << NullableScalarText(config.vehicle.abnormal_material) << '\n';
     output << "abnormal_target_type: " << AbnormalTargetType(config, vehicleROI) << '\n';
     output << "abnormal_target_region: " << AbnormalTargetRegion(config) << '\n';
     output << '\n';
@@ -126,6 +136,25 @@ void MetadataWriter::Write(const std::string& filePath,
     output << "  detector_x_range_zero_mm: " << ArrayText(config.detector.detector_x_range_zero_mm) << '\n';
     output << "  detector_y_range_zero_mm: " << ArrayText(config.detector.detector_y_range_zero_mm) << '\n';
     output << "  accept_direction: " << config.detector.accept_direction << '\n';
+    output << "  actual_x_range_mm: ["
+           << config.detector.detector_x_range_zero_mm[0] + pose.head_offset_x_mm << ", "
+           << config.detector.detector_x_range_zero_mm[1] + pose.head_offset_x_mm << "]\n";
+    output << "  actual_y_range_mm: ["
+           << config.detector.detector_y_range_zero_mm[0] + pose.head_offset_y_mm << ", "
+           << config.detector.detector_y_range_zero_mm[1] + pose.head_offset_y_mm << "]\n";
+    output << "  actual_z_mm: " << config.detector.detector_z_zero_mm << '\n';
+    output << '\n';
+    output << "diagnostics:\n";
+    output << "  configured: " << BoolText(config.diagnostics.configured) << '\n';
+    output << "  case_id: "
+           << (config.diagnostics.case_id.empty() ? "null" : config.diagnostics.case_id) << '\n';
+    output << "  phase_space:\n";
+    output << "    enable: " << BoolText(config.diagnostics.phase_space.enable) << '\n';
+    output << "    csv_name: "
+           << (config.diagnostics.phase_space.enable
+                   ? config.diagnostics.phase_space.csv_name
+                   : "null")
+           << '\n';
     output << '\n';
     output << "physics:\n";
     output << "  physics_list: " << config.physics.physics_list << '\n';

@@ -80,7 +80,7 @@
 | `SpectrumSampler` | 可复用 spectrum CSV 读取、验证和 CDF sampling 机制。 |
 | `CsvWriter` / `RunAction` | 可复用 worker 临时 CSV 与 master merge 机制；formal/debug header、run_id、目录结构和 metadata 必须按第二轮 schema 重写。 |
 | `EventAction` / `SteppingAction` | 可复用 event reset、gamma track 过滤、detector crossing 插值和 first/last scatter 更新思路；散射统计范围、region 归因和 CSV 字段必须按第二轮规则重写。 |
-| `README.md` / `macros/*.mac` | 当前属于第一轮 legacy 运行说明；第二轮实现时不得作为主入口依据，最终应改为 `--config data/simulation_config_v2.yaml` 样例。 |
+| `README.md` / `macros/*.mac` | 当前属于第一轮 legacy 运行说明；第二轮实现时不得作为主入口依据，最终应改为 `--config config/base/simulation_config_v2.yaml` 样例。 |
 
 不得从现有代码继承：PMMA 主模型、air defect、`PMMALogical` 散射过滤、mirror collimator、mirror detector、macro 主配置入口、`hits_profile_*` 文件名、compact/debug 旧 CSV header。
 
@@ -152,11 +152,19 @@ MSS/
 │   ├── PoseRunController.cc
 │   ├── CsvWriter.cc
 │   └── MetadataWriter.cc
-├── data/
-│   ├── simulation_config_v2.yaml
-│   ├── vehicle_roi_v03.yaml
-│   ├── collimator_profiles.csv
-│   └── spectrum.csv
+├── config/
+│   ├── base/
+│   │   ├── simulation_config_v2.yaml
+│   │   └── diagnostics_base.yaml
+│   ├── geometry/
+│   │   ├── vehicle_roi_v04.yaml
+│   │   └── pmma_box.yaml
+│   ├── collimator/
+│   │   ├── collimator_profiles.csv
+│   │   └── collimator_profiles1.csv
+│   ├── source/
+│   │   └── spectrum.csv
+│   └── generated/
 └── results/
     └── .gitkeep
 ```
@@ -220,7 +228,7 @@ struct PhysicsConfig {
 };
 
 struct OutputConfig {
-    std::string output_directory = "results";
+    std::string output_directory = "results/simulations";
     std::string events_csv_name = "events.csv";
     std::string metadata_yaml_name = "metadata.yaml";
     std::string thread_tmp_directory = "tmp";
@@ -1012,7 +1020,7 @@ vehicle_shift_y
 
 ```text
 main()
-  ├── 读取 data/simulation_config_v2.yaml 或 --config 指定的入口 YAML
+  ├── 读取 config/base/simulation_config_v2.yaml 或 --config 指定的入口 YAML
   ├── 读取 vehicle_roi_v03.yaml
   ├── 验证所有配置
   ├── 生成 PoseList

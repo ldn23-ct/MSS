@@ -8,6 +8,7 @@
 #include <string>
 
 class CsvWriter;
+class PhaseSpaceCsvWriter;
 class G4Event;
 class G4Track;
 class G4VPhysicalVolume;
@@ -15,7 +16,7 @@ class RegionResolver;
 
 class EventAction : public G4UserEventAction {
   public:
-    explicit EventAction(CsvWriter* writer = nullptr);
+    explicit EventAction(CsvWriter* writer = nullptr, PhaseSpaceCsvWriter* phaseSpaceWriter = nullptr);
     ~EventAction() override = default;
 
     void BeginOfEventAction(const G4Event* event) override;
@@ -37,6 +38,7 @@ class EventAction : public G4UserEventAction {
     std::string ResolveSourceRegion(const G4VPhysicalVolume* sourceVolume, const RegionResolver* resolver) const;
 
     CsvWriter* writer_ = nullptr;
+    PhaseSpaceCsvWriter* phaseSpaceWriter_ = nullptr;
     EventRecord record_;
 };
 

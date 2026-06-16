@@ -70,7 +70,12 @@ compile_commands.json
 *.npy
 *.png
 *.csv
-!data/collimator_profiles.csv
-!data/spectrum.csv
+!config/collimator/collimator_profiles.csv
+!config/collimator/collimator_profiles1.csv
+!config/collimator/collimator_profiles1_copy.csv
+!config/source/spectrum.csv
 results/*
+!results/.gitkeep
+analysis/
 *.root
+config/generated

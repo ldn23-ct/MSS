@@ -7,7 +7,7 @@ run:
   debug: false
 
 vehicle:
-  geometry_file: data/pmma_box.yaml
+  geometry_file: config/geometry/vehicle_roi_v04.yaml
   model_type: normal
   selected_target_component: null
   abnormal_material: G4_POLYETHYLENE
@@ -16,8 +16,8 @@ pose:
   mode: list
 
   list:
-    head_offset_x_mm: [0]
-    head_offset_y_mm: [480]
+    head_offset_x_mm: [0, 0]
+    head_offset_y_mm: [480, 320]
 
   grid:
     x_offsets_mm: []
@@ -29,22 +29,22 @@ source:
   particle: gamma
   energy_mode: mono
   mono_energy_keV: 160.0
-  spectrum_file: data/spectrum.csv
+  spectrum_file: config/source/spectrum.csv
 
-  source_pos_zero_mm: [-678.08, 0.0, -20.0]
+  source_pos_zero_mm: [318.94, 0.0, -20.0]
   incident_theta_deg: 45.0
   focal_spot_diameter_mm: 5.0
 
 collimator:
   enable: true
-  profile_file: data/collimator_profiles.csv
+  profile_file: config/collimator/collimator_profiles1.csv
   profile_id: P001
   jaw_extrusion_length_y_mm: 1300.0
 
 detector:
   detector_z_zero_mm: -73.0
-  detector_x_range_zero_mm: [-646.0, -404.0]
-  detector_y_range_zero_mm: [-50.0, 50.0]
+  detector_x_range_zero_mm: [354.0, 571.0]
+  detector_y_range_zero_mm: [-100.0, 100.0]
   accept_direction: negative_z
 
 physics:
@@ -52,7 +52,7 @@ physics:
   production_cut_mm: 0.1
 
 output:
-  output_directory: results
+  output_directory: results/simulations
   events_csv_name: events.csv
   metadata_yaml_name: metadata.yaml
   thread_tmp_directory: tmp

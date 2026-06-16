@@ -50,9 +50,9 @@ After implementation, summarize:
 
 ### 3.1 必须遵守
 
-- 以 `data/simulation_config_v2.yaml` 或 `--config` 指定的等价 YAML 作为第二版主配置入口。
+- 以 `config/base/simulation_config_v2.yaml` 或 `--config` 指定的等价 YAML 作为第二版主配置入口。
 - `--ui` 是第二版可视化入口；它仍使用 YAML 配置，不得通过 legacy macro 设置 source、detector、collimator、pose、output、seed、thread 或 target。
-- 主入口 YAML 位于 `data/`，车辆 ROI、collimator profile 和 spectrum 文件也位于 `data/`，具体文件名由主入口 YAML 指定。
+- 主入口 YAML 位于 `config/`，车辆 ROI、collimator profile 和 spectrum 文件也位于 `config/`，具体文件名由主入口 YAML 指定。
 - 车辆 ROI 固定，成像头移动。
 - 使用 `head_offset_x_mm` / `head_offset_y_mm`，不得使用 `vehicle_shift_x/y`。
 - `pose_id` 由 offset 自动生成，不由用户手写。
@@ -184,7 +184,7 @@ After implementation, summarize:
 - `include/CsvWriter.hh`
 - `include/MetadataWriter.hh`
 - 对应 `src/*.cc`
-- `data/.gitkeep`
+- `config/.gitkeep`
 - `results/.gitkeep`
 
 ## 任务
@@ -204,13 +204,13 @@ After implementation, summarize:
 `main.cc` 应接受一个 YAML 配置路径，例如：
 
 ```bash
-./build/MSS data/simulation_config_v2.yaml
+./build/MSS config/base/simulation_config_v2.yaml
 ```
 
 或实现明确的等价方式：
 
 ```bash
-./build/MSS --config data/simulation_config_v2.yaml
+./build/MSS --config config/base/simulation_config_v2.yaml
 ```
 
 `--config` 为推荐主入口；若同时支持位置参数形式，应以 `--config` 指定路径为准。README 和验收文档必须与实际入口一致。
@@ -320,13 +320,13 @@ M1 阶段可以先读取 pose 原始数组，但 pose 生成可留到 M5。
 
 ## 完成标准
 
-- 有效 `data/simulation_config_v2.yaml` 可读取。
+- 有效 `config/base/simulation_config_v2.yaml` 可读取。
 - 已批准的 `yaml-cpp` 已实际用于读取配置。
 - 配置对象可打印或日志输出关键字段。
 - 非法字段能 fail fast。
 - 未读取或构建 `vehicle_roi_v03.yaml`。
 - 不再通过旧 macro 字段驱动 source、detector、collimator、pose、output、seed 或 thread。
-- 提供 `data/simulation_config_v2.yaml` 最小可读样例。
+- 提供 `config/base/simulation_config_v2.yaml` 最小可读样例。
 
 ## 不做
 
@@ -418,7 +418,7 @@ M1 阶段可以先读取 pose 原始数组，但 pose 生成可留到 M5。
 - 能列出组件数量、host 关系和 region_id。
 - AABB 检查通过。
 - 构造一个临时 overlap YAML 时能报错。
-- 提供 `data/vehicle_roi_v03.yaml` 当前完整 VehicleROI 样例。
+- 提供 `config/geometry/vehicle_roi_v04.yaml` 当前完整 VehicleROI 样例。
 
 ## 不做
 
@@ -786,7 +786,7 @@ energy_keV,weight
 - `theta = 90°` 时方向约为 `(0, 0, 1)`。
 - gamma 起点落在有限焦点圆盘内。
 - 不使用第一版目标平面锥束采样。
-- 提供 `data/spectrum.csv` 最小合法样例。
+- 提供 `config/source/spectrum.csv` 最小合法样例。
 
 ## 不做
 
@@ -870,7 +870,7 @@ y_mm
 - 不复用旧 `std::array<..., 3>` profile 结构。
 - 不构建镜像。
 - 各类非法 profile 可报错停止。
-- 提供 `data/collimator_profiles.csv` 或主入口 YAML 指定的等价样例 profile 文件。
+- 提供 `config/collimator/collimator_profiles.csv` 或主入口 YAML 指定的等价样例 profile 文件。
 
 ## 不做
 
@@ -1388,10 +1388,10 @@ debug 模式：
 
 - `include/PoseRunController.hh`
 - `src/PoseRunController.cc`
-- `data/simulation_config_v2.yaml`
-- `data/vehicle_roi_v03.yaml`
-- `data/collimator_profiles.csv`
-- `data/spectrum.csv`
+- `config/base/simulation_config_v2.yaml`
+- `config/geometry/vehicle_roi_v04.yaml`
+- `config/collimator/collimator_profiles.csv`
+- `config/source/spectrum.csv`
 - `README.md`
 - `macros/*.mac`，如保留兼容示例
 - `docs/acceptance_checklist.md`，如需要同步
@@ -1421,10 +1421,10 @@ For each pose:
 
 ### M16.2 样例配置
 
-检查并整理可运行样例。样例文件应位于 `data/`，其中入口 YAML 为：
+检查并整理可运行样例。样例文件应位于 `config/`，其中入口 YAML 为：
 
 ```text
-data/simulation_config_v2.yaml
+config/base/simulation_config_v2.yaml
 ```
 
 车辆 ROI、collimator profile 和 spectrum 文件的实际文件名由入口 YAML 指定。

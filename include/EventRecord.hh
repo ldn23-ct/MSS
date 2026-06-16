@@ -30,6 +30,11 @@ struct DetectorHitRecord {
     double det_y_mm = std::numeric_limits<double>::quiet_NaN();
     double det_z_mm = std::numeric_limits<double>::quiet_NaN();
     double det_energy_keV = std::numeric_limits<double>::quiet_NaN();
+    G4ThreeVector direction = G4ThreeVector(
+        std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::quiet_NaN(),
+        std::numeric_limits<double>::quiet_NaN());
+    double weight = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct GammaTrackSummary {

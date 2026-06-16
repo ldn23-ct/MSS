@@ -29,13 +29,13 @@ primary gamma 源、准直器、虚拟探测器链路可运行
 ```bash
 cmake -S . -B build
 cmake --build build -j
-./build/MSS --config data/simulation_config_v2.yaml
+./build/MSS --config config/base/simulation_config_v2.yaml
 ```
 
 可视化检查入口为：
 
 ```bash
-./build/MSS --config data/simulation_config_v2.yaml --ui
+./build/MSS --config config/base/simulation_config_v2.yaml --ui
 ```
 
 推荐主入口使用 `--config`。若实现同时支持位置参数形式，应以 `--config` 指定路径为准。README、样例命令和本文档应同步更新，不能保留互相矛盾的入口。
@@ -52,7 +52,7 @@ run:
   debug: false
 
 vehicle:
-  geometry_file: data/vehicle_roi_v03.yaml
+  geometry_file: config/geometry/vehicle_roi_v04.yaml
   model_type: normal
   selected_target_component: null
   abnormal_material: G4_POLYETHYLENE
@@ -67,14 +67,14 @@ source:
   particle: gamma
   energy_mode: mono
   mono_energy_keV: 160.0
-  spectrum_file: data/spectrum.csv
+  spectrum_file: config/source/spectrum.csv
   source_pos_zero_mm: [0.0, 0.0, -185.0]
   incident_theta_deg: 45.0
   focal_spot_diameter_mm: 5.0
 
 collimator:
   enable: true
-  profile_file: data/collimator_profiles.csv
+  profile_file: config/collimator/collimator_profiles.csv
   profile_id: P001
   jaw_extrusion_length_y_mm: 120.0
 
@@ -89,7 +89,7 @@ physics:
   production_cut_mm: 0.1
 
 output:
-  output_directory: results
+  output_directory: results/simulations
   events_csv_name: events.csv
   metadata_yaml_name: metadata.yaml
   thread_tmp_directory: tmp
@@ -150,7 +150,7 @@ cmake --build build -j
 当前仓库曾包含第一轮 PMMA 实现。第二轮基础实现必须满足：
 
 - 构建和默认运行路径不依赖 PMMA、air defect、mirror detector、mirror collimator、`hits_profile_*` 文件名或旧 compact/debug header。
-- `./build/MSS --config data/simulation_config_v2.yaml` 是主入口；位置参数形式若存在，也必须表示 YAML 配置路径，而不是 macro 文件。
+- `./build/MSS --config config/base/simulation_config_v2.yaml` 是主入口；位置参数形式若存在，也必须表示 YAML 配置路径，而不是 macro 文件。
 - 旧 macro 不能设置 source、detector、collimator、pose、output、seed、thread、target 等 YAML 已覆盖参数。
 - 源码中不存在固定三 jaw 假设作为第二轮 profile 结构。
 - 不构建 `Mirror` jaw 或 mirror detector。
@@ -163,12 +163,12 @@ cmake --build build -j
 
 ### 4.1 有效配置
 
-使用默认 `data/simulation_config_v2.yaml` 运行。
+使用默认 `config/base/simulation_config_v2.yaml` 运行。
 
 验收点：
 
-- 程序能读取 `data/simulation_config_v2.yaml`。
-- 程序能读取其中指定的 `data/vehicle_roi_v03.yaml`。
+- 程序能读取 `config/base/simulation_config_v2.yaml`。
+- 程序能读取其中指定的 `config/geometry/vehicle_roi_v04.yaml`。
 - `schema_version = 2` 被识别。
 - `run`、`vehicle`、`pose`、`source`、`collimator`、`detector`、`physics`、`output` 顶层字段均被解析。
 - 不依赖 Geant4 macro 作为主配置入口。
@@ -355,7 +355,7 @@ component_center - host_center
 使用第二版可视化入口检查：
 
 ```bash
-./build/MSS --config data/simulation_config_v2.yaml --ui
+./build/MSS --config config/base/simulation_config_v2.yaml --ui
 ```
 
 验收点：
@@ -629,7 +629,7 @@ spectrum 模式：
 
 ```yaml
 energy_mode: spectrum
-spectrum_file: data/spectrum.csv
+spectrum_file: config/source/spectrum.csv
 ```
 
 验收点：
@@ -651,7 +651,7 @@ spectrum_file: data/spectrum.csv
 ```yaml
 collimator:
   enable: true
-  profile_file: data/collimator_profiles.csv
+  profile_file: config/collimator/collimator_profiles.csv
   profile_id: P001
 ```
 
@@ -695,7 +695,7 @@ collimator:
 ```yaml
 collimator:
   enable: false
-  profile_file: data/not_exist.csv
+  profile_file: config/collimator/not_exist.csv
 ```
 
 验收点：
@@ -1095,7 +1095,7 @@ results/pose_xm10_ym4_normal_seed12347/
 使用默认样例配置运行：
 
 ```bash
-./build/MSS --config data/simulation_config_v2.yaml
+./build/MSS --config config/base/simulation_config_v2.yaml
 ```
 
 或 README 中定义的等价命令。
@@ -1103,7 +1103,7 @@ results/pose_xm10_ym4_normal_seed12347/
 验收点：
 
 - 程序正常结束。
-- 读取 `data/simulation_config_v2.yaml`。
+- 读取 `config/base/simulation_config_v2.yaml`。
 - 读取 `vehicle_roi_v03.yaml`。
 - 构建 VehicleROI。
 - 构建 source、slit collimator、virtual detector plane。

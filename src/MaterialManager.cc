@@ -29,6 +29,21 @@ G4Material* BuildVehiclePUFoam()
     return foam;
 }
 
+G4Material* BuildVehicleFlour()
+{
+    if (auto* existing = FindExistingMaterial("Vehicle_Flour")) {
+        return existing;
+    }
+
+    auto* nist = G4NistManager::Instance();
+    auto* flour = new G4Material("Vehicle_Flour", 0.60 * g / cm3, 4);
+    flour->AddElement(nist->FindOrBuildElement("C"), 0.44);
+    flour->AddElement(nist->FindOrBuildElement("H"), 0.062);
+    flour->AddElement(nist->FindOrBuildElement("O"), 0.493);
+    flour->AddElement(nist->FindOrBuildElement("N"), 0.005);
+    return flour;
+}
+
 }  // namespace
 
 G4Material* MaterialManager::GetMaterial(const std::string& name) const
@@ -39,6 +54,9 @@ G4Material* MaterialManager::GetMaterial(const std::string& name) const
 
     if (name == "Vehicle_PU_Foam") {
         return BuildVehiclePUFoam();
+    }
+    if (name == "Vehicle_Flour") {
+        return BuildVehicleFlour();
     }
 
     if (auto* existing = FindExistingMaterial(name)) {

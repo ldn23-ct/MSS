@@ -1,12 +1,12 @@
 # Legacy v1 macro example only.
 # M16 second-round default entry is:
-#   ./build/MSS --config data/simulation_config_v2.yaml
+#   ./build/MSS --config config/base/simulation_config_v2.yaml
 # This file is retained only as archived macro syntax and visualization reference.
 
 /run/numberOfThreads 8
 /run/randomSeed 111
 
-/geometry/collimatorProfileFile data/collimator_profiles.csv
+/geometry/collimatorProfileFile config/collimator/collimator_profiles.csv
 /geometry/collimatorProfileId P002
 /geometry/enableCollimator true
 /geometry/enableAirDefect false
@@ -14,8 +14,8 @@
 /source/energyMode mono
 /source/monoEnergy 225 keV
 
-/output/directory results
+/output/directory results/simulations
 /output/debug false
 
 /run/initialize
-/run/beamOn 10000000
+/run/beamOn 10000

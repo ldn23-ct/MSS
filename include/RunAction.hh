@@ -3,6 +3,7 @@
 
 #include "CsvWriter.hh"
 #include "MetadataWriter.hh"
+#include "PhaseSpaceCsvWriter.hh"
 #include "ScanPoseManager.hh"
 #include "SimulationConfig.hh"
 #include "VehicleROIConfig.hh"
@@ -33,6 +34,7 @@ class RunAction : public G4UserRunAction {
     void EndOfRunAction(const G4Run* run) override;
 
     CsvWriter* Writer();
+    PhaseSpaceCsvWriter* PhaseSpaceWriter();
 
   private:
     std::string BuildRunId() const;
@@ -44,10 +46,14 @@ class RunAction : public G4UserRunAction {
     std::string TempCsvName(int threadId) const;
     std::string TempCsvPath(int threadId) const;
     std::vector<std::string> ExpectedTempCsvPaths() const;
+    std::string PhaseSpaceFinalPath() const;
+    std::string PhaseSpaceTempPath(int threadId) const;
+    std::vector<std::string> ExpectedPhaseSpaceTempPaths() const;
     int CurrentThreadId() const;
     void PrepareRunOutputDirectory() const;
     void EnsureTmpDirectory() const;
     void MergeThreadCsvFiles();
+    void MergePhaseSpaceThreadCsvFiles();
 
     bool configured_ = false;
     OutputRole role_ = OutputRole::Serial;
@@ -55,6 +61,7 @@ class RunAction : public G4UserRunAction {
     VehicleROIConfig vehicleROI_;
     ScanPose pose_;
     CsvWriter writer_;
+    PhaseSpaceCsvWriter phaseSpaceWriter_;
     MetadataWriter metadataWriter_;
 };
 

@@ -3,6 +3,7 @@
 #include "ActionInitialization.hh"
 #include "DetectorConstruction.hh"
 #include "PhysicsList.hh"
+#include "RunIdBuilder.hh"
 
 #include "G4RunManager.hh"
 #include "G4RunManagerFactory.hh"
@@ -20,15 +21,6 @@
 #include <unistd.h>
 
 namespace fs = std::filesystem;
-
-namespace {
-
-bool DirectoryIsNonEmpty(const fs::path& directory)
-{
-    return fs::directory_iterator(directory) != fs::directory_iterator();
-}
-
-}  // namespace
 
 void PoseRunController::Execute(const SimulationConfig& config,
                                 const VehicleROIConfig& vehicleROI,
@@ -53,7 +45,7 @@ void PoseRunController::Execute(const SimulationConfig& config,
 
 std::string PoseRunController::BuildRunId(const SimulationConfig& config, const ScanPose& pose) const
 {
-    return pose.pose_id + "_" + config.vehicle.model_type + "_seed" + std::to_string(pose.random_seed);
+    return mss::BuildRunId(config, pose);
 }
 
 void PoseRunController::ValidateRunOutputDirectoriesAvailable(const SimulationConfig& config,
@@ -73,7 +65,8 @@ void PoseRunController::ValidateRunOutputDirectoriesAvailable(const SimulationCo
         if (!fs::is_directory(runDir)) {
             throw std::runtime_error("run output path exists but is not a directory: " + runDir.string());
         }
-        if (DirectoryIsNonEmpty(runDir)) {
+        if (config.output.existing_run_policy == "fail"
+            && fs::directory_iterator(runDir) != fs::directory_iterator()) {
             throw std::runtime_error("run output directory already exists and is non-empty: " + runDir.string());
         }
     }

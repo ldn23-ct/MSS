@@ -36,12 +36,8 @@ void SteppingAction::UserSteppingAction(const G4Step* step)
 
     eventAction_->EnsureGammaTrackSummary(*track, preStepVolume, regionResolver_);
 
-    if (eventAction_->HasDetectorHit(track->GetTrackID())) {
-        return;
-    }
-
-    if (TryRecordDetectorCrossing(*step, *track)) {
-        return;
+    if (!eventAction_->HasDetectorHit(track->GetTrackID())) {
+        TryRecordDetectorCrossing(*step, *track);
     }
 
     if (postStep == nullptr || postStep->GetProcessDefinedStep() == nullptr) {
@@ -100,6 +96,8 @@ bool SteppingAction::TryRecordDetectorCrossing(const G4Step& step, const G4Track
     hit.det_y_mm = detY;
     hit.det_z_mm = detectorPlane_.z_mm;
     hit.det_energy_keV = preStep->GetKineticEnergy() / keV;
+    hit.direction = preStep->GetMomentumDirection();
+    hit.weight = track.GetWeight();
     eventAction_->RecordDetectorHit(track.GetTrackID(), hit);
     return eventAction_->HasDetectorHit(track.GetTrackID());
 }

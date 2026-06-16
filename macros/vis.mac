@@ -1,6 +1,6 @@
 # MSS second-round visualization macro.
 # Runtime configuration comes from YAML, for example:
-#   ./build/MSS --config data/simulation_config_v2.yaml --ui
+#   ./build/MSS --config config/base/simulation_config_v2.yaml --ui
 # This macro must not set source, geometry, output, pose, seed, or thread parameters.
 
 /control/verbose 1

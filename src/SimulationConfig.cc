@@ -62,7 +62,7 @@ void SimulationConfig::Validate() const
         && (!vehicle.selected_target_component || vehicle.selected_target_component->empty())) {
         throw std::runtime_error("vehicle.selected_target_component is required for abnormal model_type");
     }
-    if (vehicle.abnormal_material.empty()) {
+    if (vehicle.model_type == "abnormal" && vehicle.abnormal_material.empty()) {
         throw std::runtime_error("vehicle.abnormal_material must be non-empty");
     }
 
@@ -146,5 +146,21 @@ void SimulationConfig::Validate() const
     }
     if (output.thread_tmp_directory.empty()) {
         throw std::runtime_error("output.thread_tmp_directory must be non-empty");
+    }
+    if (output.existing_run_policy != "fail" && output.existing_run_policy != "overwrite") {
+        throw std::runtime_error("output.existing_run_policy must be fail or overwrite");
+    }
+
+    if (diagnostics.configured && diagnostics.case_id.empty()) {
+        throw std::runtime_error("diagnostics.case_id must be non-empty");
+    }
+    if (diagnostics.phase_space.enable && diagnostics.phase_space.csv_name.empty()) {
+        throw std::runtime_error("diagnostics.phase_space.csv_name must be non-empty when enabled");
+    }
+    if (diagnostics.phase_space.enable
+        && (diagnostics.phase_space.csv_name == output.events_csv_name
+            || diagnostics.phase_space.csv_name == "events_debug.csv"
+            || diagnostics.phase_space.csv_name == output.metadata_yaml_name)) {
+        throw std::runtime_error("diagnostics.phase_space.csv_name conflicts with an existing run output file");
     }
 }

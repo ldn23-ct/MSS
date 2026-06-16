@@ -1,6 +1,7 @@
 #include "EventAction.hh"
 
 #include "CsvWriter.hh"
+#include "PhaseSpaceCsvWriter.hh"
 #include "G4Event.hh"
 #include "G4SystemOfUnits.hh"
 #include "G4ThreeVector.hh"
@@ -8,8 +9,8 @@
 #include "G4VProcess.hh"
 #include "RegionResolver.hh"
 
-EventAction::EventAction(CsvWriter* writer)
-    : writer_(writer)
+EventAction::EventAction(CsvWriter* writer, PhaseSpaceCsvWriter* phaseSpaceWriter)
+    : writer_(writer), phaseSpaceWriter_(phaseSpaceWriter)
 {
 }
 
@@ -25,6 +26,9 @@ void EventAction::EndOfEventAction(const G4Event*)
 {
     if (writer_ != nullptr && writer_->IsOpen()) {
         writer_->WriteRow(record_);
+    }
+    if (phaseSpaceWriter_ != nullptr && phaseSpaceWriter_->IsOpen()) {
+        phaseSpaceWriter_->WriteRows(record_);
     }
 }
 

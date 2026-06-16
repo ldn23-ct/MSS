@@ -204,7 +204,8 @@ SimulationConfig SimulationConfigReader::Read(const std::string& configFilePath)
     config.vehicle.geometry_file = ReadScalar<std::string>(vehicle, "geometry_file", "vehicle");
     config.vehicle.model_type = ReadScalar<std::string>(vehicle, "model_type", "vehicle");
     config.vehicle.selected_target_component = ReadNullableString(vehicle, "selected_target_component", "vehicle");
-    config.vehicle.abnormal_material = ReadScalar<std::string>(vehicle, "abnormal_material", "vehicle");
+    config.vehicle.abnormal_material =
+        ReadNullableString(vehicle, "abnormal_material", "vehicle").value_or("");
 
     const YAML::Node pose = RequireMap(root, "pose", "");
     config.pose.mode = ReadScalar<std::string>(pose, "mode", "pose");
@@ -260,6 +261,20 @@ SimulationConfig SimulationConfigReader::Read(const std::string& configFilePath)
             throw std::runtime_error(
                 "output.existing_run_policy has invalid type or value: " + std::string(error.what()));
         }
+    }
+
+    if (const YAML::Node diagnostics = root["diagnostics"]) {
+        if (!diagnostics.IsMap()) {
+            throw std::runtime_error("diagnostics must be a YAML map");
+        }
+        config.diagnostics.configured = true;
+        config.diagnostics.case_id = ReadScalar<std::string>(diagnostics, "case_id", "diagnostics");
+
+        const YAML::Node phaseSpace = RequireMap(diagnostics, "phase_space", "diagnostics");
+        config.diagnostics.phase_space.enable =
+            ReadScalar<bool>(phaseSpace, "enable", "diagnostics.phase_space");
+        config.diagnostics.phase_space.csv_name =
+            ReadScalar<std::string>(phaseSpace, "csv_name", "diagnostics.phase_space");
     }
 
     config.Validate();

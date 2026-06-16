@@ -1,0 +1,54 @@
+schema_version: 2
+
+run:
+  random_seed: 1234
+  number_of_threads: 8
+  n_primary_per_pose: 10000
+  debug: false
+
+vehicle:
+  geometry_file: config/geometry/vehicle_roi_v04.yaml
+  model_type: normal
+  selected_target_component: null
+  abnormal_material: G4_POLYETHYLENE
+
+pose:
+  mode: list
+  list:
+    head_offset_x_mm: [0]
+    head_offset_y_mm: [480]
+  grid:
+    x_offsets_mm: []
+    y_offsets_mm: []
+  pose_id_rule: pose_x{encoded_x}_y{encoded_y}
+
+source:
+  particle: gamma
+  energy_mode: mono
+  mono_energy_keV: 160.0
+  spectrum_file: config/source/spectrum.csv
+  source_pos_zero_mm: [-678.08, 0.0, -20.0]
+  incident_theta_deg: 45.0
+  focal_spot_diameter_mm: 5.0
+
+collimator:
+  enable: true
+  profile_file: config/collimator/collimator_profiles.csv
+  profile_id: P003
+  jaw_extrusion_length_y_mm: 1300.0
+
+detector:
+  detector_z_zero_mm: -73.0
+  detector_x_range_zero_mm: [-646.0, -404.0]
+  detector_y_range_zero_mm: [-50.0, 50.0]
+  accept_direction: negative_z
+
+physics:
+  physics_list: G4EmLivermorePhysics
+  production_cut_mm: 0.1
+
+output:
+  output_directory: results/diagnostics/base
+  events_csv_name: events.csv
+  metadata_yaml_name: metadata.yaml
+  thread_tmp_directory: tmp

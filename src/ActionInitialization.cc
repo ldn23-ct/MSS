@@ -70,7 +70,7 @@ void ActionInitialization::Build() const
                           : RunAction::OutputRole::Serial;
     auto* runAction = new RunAction(config_, vehicleROI_, pose_, role);
     SetUserAction(runAction);
-    auto* eventAction = new EventAction(runAction->Writer());
+    auto* eventAction = new EventAction(runAction->Writer(), runAction->PhaseSpaceWriter());
     SetUserAction(eventAction);
     SetUserAction(new SteppingAction(eventAction, regionResolver_, detectorPlane_));
 }

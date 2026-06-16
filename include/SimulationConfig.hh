@@ -65,6 +65,17 @@ struct OutputConfig {
     std::string existing_run_policy = "fail";
 };
 
+struct PhaseSpaceConfig {
+    bool enable = false;
+    std::string csv_name = "phase_space.csv";
+};
+
+struct DiagnosticsConfig {
+    bool configured = false;
+    std::string case_id;
+    PhaseSpaceConfig phase_space;
+};
+
 struct WorldConfig {
     std::array<double, 3> center_mm = {0.0, 0.0, 0.0};
     std::array<double, 3> size_mm = {4000.0, 4000.0, 4000.0};
@@ -82,6 +93,7 @@ struct SimulationConfig {
     DetectorConfig detector;
     PhysicsConfig physics;
     OutputConfig output;
+    DiagnosticsConfig diagnostics;
     WorldConfig world;
 
     void ValidateConfigPathOnly() const;

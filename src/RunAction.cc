@@ -1,6 +1,7 @@
 #include "RunAction.hh"
 
 #include "G4Threading.hh"
+#include "RunIdBuilder.hh"
 
 #include <filesystem>
 #include <stdexcept>
@@ -40,9 +41,15 @@ void RunAction::BeginOfRunAction(const G4Run*)
         PrepareRunOutputDirectory();
         return;
     }
+    if (role_ == OutputRole::Serial) {
+        PrepareRunOutputDirectory();
+    }
 
     EnsureTmpDirectory();
     writer_.Open(TempCsvPath(CurrentThreadId()), config_.run.debug);
+    if (config_.diagnostics.phase_space.enable) {
+        phaseSpaceWriter_.Open(PhaseSpaceTempPath(CurrentThreadId()));
+    }
 }
 
 void RunAction::EndOfRunAction(const G4Run*)
@@ -50,12 +57,18 @@ void RunAction::EndOfRunAction(const G4Run*)
     if (writer_.IsOpen()) {
         writer_.Close();
     }
+    if (phaseSpaceWriter_.IsOpen()) {
+        phaseSpaceWriter_.Close();
+    }
 
     if (!configured_ || role_ == OutputRole::Worker) {
         return;
     }
 
     MergeThreadCsvFiles();
+    if (config_.diagnostics.phase_space.enable) {
+        MergePhaseSpaceThreadCsvFiles();
+    }
     metadataWriter_.Write(MetadataPath(), config_, vehicleROI_, pose_, BuildRunId(), OutputCsvName());
 }
 
@@ -64,9 +77,14 @@ CsvWriter* RunAction::Writer()
     return &writer_;
 }
 
+PhaseSpaceCsvWriter* RunAction::PhaseSpaceWriter()
+{
+    return config_.diagnostics.phase_space.enable ? &phaseSpaceWriter_ : nullptr;
+}
+
 std::string RunAction::BuildRunId() const
 {
-    return pose_.pose_id + "_" + config_.vehicle.model_type + "_seed" + std::to_string(pose_.random_seed);
+    return mss::BuildRunId(config_, pose_);
 }
 
 std::string RunAction::OutputCsvName() const
@@ -119,6 +137,27 @@ std::vector<std::string> RunAction::ExpectedTempCsvPaths() const
     return paths;
 }
 
+std::string RunAction::PhaseSpaceFinalPath() const
+{
+    return (fs::path(RunDirectory()) / config_.diagnostics.phase_space.csv_name).string();
+}
+
+std::string RunAction::PhaseSpaceTempPath(int threadId) const
+{
+    return (fs::path(TmpDirectory()) / ("phase_space_thread" + std::to_string(threadId) + ".csv")).string();
+}
+
+std::vector<std::string> RunAction::ExpectedPhaseSpaceTempPaths() const
+{
+    const int threadCount = (config_.run.number_of_threads > 1) ? config_.run.number_of_threads : 1;
+    std::vector<std::string> paths;
+    paths.reserve(static_cast<std::size_t>(threadCount));
+    for (int threadId = 0; threadId < threadCount; ++threadId) {
+        paths.push_back(PhaseSpaceTempPath(threadId));
+    }
+    return paths;
+}
+
 int RunAction::CurrentThreadId() const
 {
     if (role_ == OutputRole::Serial) {
@@ -147,7 +186,18 @@ void RunAction::PrepareRunOutputDirectory() const
         if (!fs::is_directory(runDir)) {
             throw std::runtime_error("run output path exists but is not a directory: " + runDir.string());
         }
-        if (DirectoryIsNonEmpty(runDir)) {
+        if (config_.output.existing_run_policy == "overwrite") {
+            fs::remove_all(runDir, ec);
+            if (ec) {
+                throw std::runtime_error(
+                    "failed to overwrite run output directory: " + runDir.string() + ": " + ec.message());
+            }
+            fs::create_directories(runDir, ec);
+            if (ec) {
+                throw std::runtime_error(
+                    "failed to recreate run output directory: " + runDir.string() + ": " + ec.message());
+            }
+        } else if (DirectoryIsNonEmpty(runDir)) {
             throw std::runtime_error("run output directory already exists and is non-empty: " + runDir.string());
         }
     } else {
@@ -178,4 +228,12 @@ void RunAction::MergeThreadCsvFiles()
 {
     const bool deleteInputFiles = !config_.run.debug;
     CsvWriter::MergeFiles(ExpectedTempCsvPaths(), FinalCsvPath(), config_.run.debug, deleteInputFiles);
+}
+
+void RunAction::MergePhaseSpaceThreadCsvFiles()
+{
+    PhaseSpaceCsvWriter::MergeFiles(
+        ExpectedPhaseSpaceTempPaths(),
+        PhaseSpaceFinalPath(),
+        true);
 }

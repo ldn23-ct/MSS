@@ -43,8 +43,8 @@
 | 事件定义 | 1 event = 1 primary gamma |
 | 输出格式 | `events.csv` + `metadata.yaml` |
 | 主配置入口 | YAML |
-| 车辆几何配置 | 由 `data/simulation_config_v2.yaml` 中的 `vehicle.geometry_file` 指定，样例为 `data/vehicle_roi_v03.yaml` |
-| 运行配置 | 主入口 YAML，样例为 `data/simulation_config_v2.yaml` |
+| 车辆几何配置 | 由 `config/base/simulation_config_v2.yaml` 中的 `vehicle.geometry_file` 指定，样例为 `config/geometry/vehicle_roi_v04.yaml` |
+| 运行配置 | 主入口 YAML，样例为 `config/base/simulation_config_v2.yaml` |
 | C++ 标准 | C++17 |
 | 构建系统 | CMake |
 
@@ -135,14 +135,14 @@ vehicle interior / far side: z > 0
 主入口样例路径为：
 
 ```text
-data/simulation_config_v2.yaml
+config/base/simulation_config_v2.yaml
 ```
 
-车辆 ROI、准直器 profile 和能谱文件也放在 `data/` 目录下，但具体文件名不作为代码硬编码约束，应由 `data/simulation_config_v2.yaml` 中的字段明确指定。
+车辆 ROI、准直器 profile 和能谱文件也放在 `config/` 目录下，但具体文件名不作为代码硬编码约束，应由 `config/base/simulation_config_v2.yaml` 中的字段明确指定。
 
 ### 4.1 车辆 ROI YAML
 
-车辆 ROI YAML 文件由主入口中的 `vehicle.geometry_file` 指定。正式车辆 ROI 样例可使用 `data/vehicle_roi_v04.yaml`；同一 `components[]` schema 下的对照模型也可作为输入，例如 `data/pmma_box.yaml`。该文件负责描述 VehicleROI-compatible geometry：
+车辆 ROI YAML 文件由主入口中的 `vehicle.geometry_file` 指定。正式车辆 ROI 样例可使用 `config/geometry/vehicle_roi_v04.yaml`；同一 `components[]` schema 下的对照模型也可作为输入，例如 `config/geometry/pmma_box.yaml`。该文件负责描述 VehicleROI-compatible geometry：
 
 - VehicleROI 总范围；
 - 几何组件；
@@ -154,7 +154,7 @@ data/simulation_config_v2.yaml
 - placement 信息；
 - overlap 检查需要的元数据。
 
-### 4.2 `data/simulation_config_v2.yaml`
+### 4.2 `config/base/simulation_config_v2.yaml`
 
 该文件是第二版正式主入口，负责描述仿真运行条件，并引用车辆 ROI YAML、准直器 profile CSV 和能谱 CSV：
 
@@ -167,7 +167,7 @@ data/simulation_config_v2.yaml
 - output 参数；
 - normal / abnormal 模型选择。
 
-宏命令仅保留必要入口能力，例如指定或切换入口 YAML 文件路径。凡是 `data/simulation_config_v2.yaml` 可以表达的配置项，不应再新增对应宏命令。
+宏命令仅保留必要入口能力，例如指定或切换入口 YAML 文件路径。凡是 `config/base/simulation_config_v2.yaml` 可以表达的配置项，不应再新增对应宏命令。
 
 ### 4.3 YAML 解析依赖
 
@@ -190,19 +190,19 @@ yaml-cpp
 第二版正式 batch CLI 入口固定为：
 
 ```bash
-./build/MSS --config data/simulation_config_v2.yaml
+./build/MSS --config config/base/simulation_config_v2.yaml
 ```
 
 可选兼容形式：
 
 ```bash
-./build/MSS data/simulation_config_v2.yaml
+./build/MSS config/base/simulation_config_v2.yaml
 ```
 
 可视化入口通过 `--ui` 开启：
 
 ```bash
-./build/MSS --config data/simulation_config_v2.yaml --ui
+./build/MSS --config config/base/simulation_config_v2.yaml --ui
 ```
 
 `--ui` 使用同一个 YAML 配置构建 VehicleROI、当前 pose 成像头、准直器和虚拟探测器。UI 模式仅用于几何与轨迹检查，默认只显示 pose list 的第一个 pose，执行 `macros/vis.mac` 中的少量事件显示命令，不写 `events.csv`、`events_debug.csv` 或 `metadata.yaml`。
@@ -212,7 +212,7 @@ yaml-cpp
 
 ---
 
-## 5. `data/simulation_config_v2.yaml` 规格
+## 5. `config/base/simulation_config_v2.yaml` 规格
 
 ### 5.1 顶层结构
 
@@ -226,7 +226,7 @@ run:
   debug: false
 
 vehicle:
-  geometry_file: data/vehicle_roi_v03.yaml
+  geometry_file: config/geometry/vehicle_roi_v04.yaml
   model_type: normal
   selected_target_component: null
   abnormal_material: G4_POLYETHYLENE
@@ -246,7 +246,7 @@ source:
   particle: gamma
   energy_mode: mono
   mono_energy_keV: 160.0
-  spectrum_file: data/spectrum.csv
+  spectrum_file: config/source/spectrum.csv
 
   source_pos_zero_mm: [0.0, 0.0, -185.0]
   incident_theta_deg: 45.0
@@ -254,7 +254,7 @@ source:
 
 collimator:
   enable: true
-  profile_file: data/collimator_profiles.csv
+  profile_file: config/collimator/collimator_profiles.csv
   profile_id: P001
   jaw_extrusion_length_y_mm: 120.0
 
@@ -269,7 +269,7 @@ physics:
   production_cut_mm: 0.1
 
 output:
-  output_directory: results
+  output_directory: results/simulations
   events_csv_name: events.csv
   metadata_yaml_name: metadata.yaml
   thread_tmp_directory: tmp
@@ -290,7 +290,7 @@ detector_y_range_zero_mm: [-50.0, 50.0]
 
 ### 5.3 字段约束
 
-`data/simulation_config_v2.yaml` 的字段约束如下：
+`config/base/simulation_config_v2.yaml` 的字段约束如下：
 
 | 路径 | 约束 |
 |---|---|
@@ -326,7 +326,7 @@ detector_y_range_zero_mm: [-50.0, 50.0]
 
 ### 5.4 样例配置文件的作用
 
-仓库中的 `data/simulation_config_v2.yaml` 是最小可运行样例。它的职责是：
+仓库中的 `config/base/simulation_config_v2.yaml` 是最小可运行样例。它的职责是：
 
 - 支持 M1/M2 读取配置；
 - 支持零位姿端到端测试；
@@ -927,7 +927,7 @@ spectrum 模式：
 ```yaml
 source:
   energy_mode: spectrum
-  spectrum_file: data/spectrum.csv
+  spectrum_file: config/source/spectrum.csv
 ```
 
 spectrum CSV 格式：
@@ -1616,7 +1616,7 @@ output_csv: events.csv
 
 model_type: normal
 vehicle_model_id: vehicle_roi_v03
-vehicle_geometry_file: data/vehicle_roi_v03.yaml
+vehicle_geometry_file: config/geometry/vehicle_roi_v04.yaml
 selected_target_component: null
 abnormal_target_type: none
 abnormal_target_region: none
@@ -1637,14 +1637,14 @@ source:
   particle: gamma
   energy_mode: mono
   mono_energy_keV: 160.0
-  spectrum_file: data/spectrum.csv
+  spectrum_file: config/source/spectrum.csv
   incident_theta_deg: 45.0
   focal_spot_diameter_mm: 5.0
   source_pos_zero_mm: [0.0, 0.0, -185.0]
 
 collimator:
   enable: true
-  profile_file: data/collimator_profiles.csv
+  profile_file: config/collimator/collimator_profiles.csv
   profile_id: P001
   jaw_extrusion_length_y_mm: 120.0
 

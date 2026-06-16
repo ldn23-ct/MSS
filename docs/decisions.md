@@ -114,14 +114,14 @@
 第二版主配置入口为：
 
 ```text
-data/simulation_config_v2.yaml
+config/base/simulation_config_v2.yaml
 ```
 
-该入口 YAML 负责指定运行条件，并通过字段引用车辆 ROI YAML、collimator profile CSV 和 spectrum CSV。车辆 ROI、collimator profile 和能谱样例文件均放在 `data/` 目录下，但具体文件名不作为代码硬编码约束，应由入口 YAML 明确指定。
+该入口 YAML 负责指定运行条件，并通过字段引用车辆 ROI YAML、collimator profile CSV 和 spectrum CSV。车辆 ROI、collimator profile 和能谱样例文件均放在 `config/` 目录下，但具体文件名不作为代码硬编码约束，应由入口 YAML 明确指定。
 
 | 配置项 | 来源 |
 |---|---|
-| 运行条件、pose、source、collimator、detector、physics、output、model_type | `data/simulation_config_v2.yaml` |
+| 运行条件、pose、source、collimator、detector、physics、output、model_type | `config/base/simulation_config_v2.yaml` |
 | 车辆 ROI 几何、材料、host / daughter、insert、region_id | `vehicle.geometry_file` 指定的 YAML |
 | collimator profile | `collimator.profile_file` 指定的 CSV |
 | spectrum | `source.spectrum_file` 指定的 CSV |

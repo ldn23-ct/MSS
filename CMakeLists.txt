@@ -29,12 +29,14 @@ add_executable(MSS
     src/ImagingHeadConstruction.cc
     src/MaterialManager.cc
     src/MetadataWriter.cc
+    src/PhaseSpaceCsvWriter.cc
     src/PhysicsList.cc
     src/PoseRunController.cc
     src/PrimaryGeneratorAction.cc
     src/RegionRegistry.cc
     src/RegionResolver.cc
     src/RunAction.cc
+    src/RunIdBuilder.cc
     src/ScanPoseManager.cc
     src/SimulationConfig.cc
     src/SimulationConfigReader.cc
@@ -53,3 +55,40 @@ add_executable(MSS
 
 target_include_directories(MSS PRIVATE include)
 target_link_libraries(MSS PRIVATE ${Geant4_LIBRARIES} ${MSS_YAML_CPP_TARGET})
+
+include(CTest)
+if(BUILD_TESTING)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(
+        NAME diagnostics_unit
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_diagnostics.py
+    )
+    set_tests_properties(diagnostics_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+    add_test(
+        NAME near_door_unit
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_near_door_experiments.py
+    )
+    set_tests_properties(near_door_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+    add_test(
+        NAME experiment_queue_unit
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_experiment_queue.py
+    )
+    set_tests_properties(experiment_queue_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+    add_test(
+        NAME detector_response_unit
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_detector_response.py
+    )
+    set_tests_properties(detector_response_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+
+    add_test(
+        NAME diagnostics_smoke
+        COMMAND ${Python3_EXECUTABLE}
+                ${CMAKE_SOURCE_DIR}/tests/smoke_diagnostics.py
+                --binary $<TARGET_FILE:MSS>
+                --repo-root ${CMAKE_SOURCE_DIR}
+    )
+    set_tests_properties(diagnostics_smoke PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endif()
