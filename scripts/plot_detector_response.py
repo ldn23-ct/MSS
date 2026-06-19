@@ -15,7 +15,8 @@ from typing import Any
 import yaml
 
 
-VALID_CHANNELS = ("all", "k0", "k1", "k2", "k3", "k_ge4", "ms", "single_or_zero")
+VALID_CHANNELS = ("all", "k0", "k1", "k2", "k3", "kn", "km", "single_or_zero")
+CHANNEL_ALIASES = {"k_ge4": "kn", "ms": "km"}
 SYSTEM_ORDER = ("open", "collimated")
 PREFERRED_STATE_ORDER = (
     ("poseR", "normal", ""),
@@ -87,7 +88,7 @@ def discover_run_dirs(paths: Iterable[Path]) -> list[Path]:
 
 
 def parse_channels(text: str) -> list[str]:
-    channels = [item.strip() for item in text.split(",") if item.strip()]
+    channels = [CHANNEL_ALIASES.get(item.strip(), item.strip()) for item in text.split(",") if item.strip()]
     if not channels:
         raise argparse.ArgumentTypeError("at least one channel is required")
     unknown = [channel for channel in channels if channel not in VALID_CHANNELS]
@@ -95,7 +96,11 @@ def parse_channels(text: str) -> list[str]:
         raise argparse.ArgumentTypeError(
             "unknown channel(s): " + ", ".join(unknown) + "; valid channels: " + ", ".join(VALID_CHANNELS)
         )
-    return channels
+    unique: list[str] = []
+    for channel in channels:
+        if channel not in unique:
+            unique.append(channel)
+    return unique
 
 
 def parse_int_list(text: str) -> list[int]:
@@ -119,9 +124,9 @@ def channel_accepts(channel: str, scatter_count: int) -> bool:
         return scatter_count == 2
     if channel == "k3":
         return scatter_count == 3
-    if channel == "k_ge4":
+    if channel == "kn":
         return scatter_count >= 4
-    if channel == "ms":
+    if channel == "km":
         return scatter_count >= 2
     if channel == "single_or_zero":
         return scatter_count <= 1
@@ -166,19 +171,27 @@ def bin_index_for_x(x: float, x_min: float, x_max: float, bin_width: float, bin_
 
 def case_info(metadata: dict[str, Any], run_dir: Path) -> dict[str, Any]:
     case_id = nested(metadata, "diagnostics", "case_id", default="")
-    match = CASE_RE.match(case_id or "")
-    if match:
-        system = match.group("system")
-        pose = match.group("pose")
-        model_state = match.group("model_state")
-        energy = int(match.group("energy"))
-        seed = int(match.group("seed"))
+    merge_condition = metadata.get("merge_condition")
+    if isinstance(merge_condition, dict):
+        system = str(merge_condition.get("system", "unknown"))
+        pose = str(merge_condition.get("pose", metadata.get("pose_id", "unknown_pose")))
+        model_state = str(merge_condition.get("model_state", model_state_from_metadata(metadata)))
+        energy = as_int(merge_condition.get("energy_keV"), 0)
+        seed: Any = "merged"
     else:
-        system = "collimated" if bool(nested(metadata, "collimator", "enable", default=True)) else "open"
-        pose = str(metadata.get("pose_id", "unknown_pose"))
-        model_state = model_state_from_metadata(metadata)
-        energy = as_int(nested(metadata, "source", "mono_energy_keV", default=0))
-        seed = as_int(metadata.get("random_seed"), 0)
+        match = CASE_RE.match(case_id or "")
+        if match:
+            system = match.group("system")
+            pose = match.group("pose")
+            model_state = match.group("model_state")
+            energy = int(match.group("energy"))
+            seed = int(match.group("seed"))
+        else:
+            system = "collimated" if bool(nested(metadata, "collimator", "enable", default=True)) else "open"
+            pose = str(metadata.get("pose_id", "unknown_pose"))
+            model_state = model_state_from_metadata(metadata)
+            energy = as_int(nested(metadata, "source", "mono_energy_keV", default=0))
+            seed = as_int(metadata.get("random_seed"), 0) if metadata.get("random_seed") is not None else "merged"
     return {
         "run_dir": str(run_dir),
         "run_id": metadata.get("run_id", run_dir.name),
@@ -265,8 +278,27 @@ def aggregate_run(
 
 
 def png_name(run_id: str, channel: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", f"{run_id}_{channel}")
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", channel)
     return safe + ".png"
+
+
+def safe_name(text: str) -> str:
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", text).strip("_") or "unknown"
+
+
+def energy_dir_name(value: Any) -> str:
+    numeric = as_int(value, 0)
+    return f"E{numeric}" if numeric else "Eunknown"
+
+
+def condition_dir(row: dict[str, Any]) -> Path:
+    return Path(
+        "by_condition",
+        safe_name(str(row.get("system", "unknown"))),
+        safe_name(str(row.get("pose", "unknown_pose"))),
+        safe_name(str(row.get("model_state", "unknown"))),
+        energy_dir_name(row.get("energy_keV")),
+    )
 
 
 def comparison_png_name(energy_keV: int, channel: str) -> str:
@@ -291,7 +323,10 @@ def write_png(output_dir: Path, run_id: str, channel: str, rows: list[dict[str, 
 
     x_centers = [float(row["x_center_mm"]) for row in rows]
     counts = [int(row["count"]) for row in rows]
-    title = f"{rows[0]['case_id']} | {channel} | E{rows[0]['energy_keV']} keV | seed {rows[0]['seed']}"
+    title = (
+        f"{rows[0]['system']} / {rows[0]['pose']} / {rows[0]['model_state']} | "
+        f"{channel} | E{rows[0]['energy_keV']} keV"
+    )
 
     path = output_dir / png_name(run_id, channel)
     fig, ax = plt.subplots(figsize=(10, 4.5), constrained_layout=True)
@@ -336,9 +371,51 @@ def ordered_state_keys(rows: list[dict[str, Any]]) -> list[tuple[str, str, str]]
 def row_matches_filters(row: dict[str, Any], energies: list[int] | None, seed: int | None) -> bool:
     if energies is not None and int(row["energy_keV"]) not in set(energies):
         return False
-    if seed is not None and int(row["seed"]) != seed:
-        return False
+    if seed is not None:
+        try:
+            if int(row["seed"]) != seed:
+                return False
+        except (TypeError, ValueError):
+            return False
     return True
+
+
+def aggregate_condition_rows(rows: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    grouped: dict[tuple[str, str, int], dict[str, Any]] = {}
+    totals_by_group: dict[tuple[str, str], dict[str, int]] = {}
+    seeds_by_group: dict[tuple[str, str], set[Any]] = {}
+    runs_by_group: dict[tuple[str, str], set[str]] = {}
+    for row in rows:
+        rel_dir = condition_dir(row).as_posix()
+        channel = str(row["channel"])
+        bin_index = int(row["bin_index"])
+        row_key = (rel_dir, channel, bin_index)
+        group_key = (rel_dir, channel)
+        if row_key not in grouped:
+            grouped[row_key] = dict(row)
+            grouped[row_key]["run_dir"] = ""
+            grouped[row_key]["run_id"] = ""
+            grouped[row_key]["case_id"] = (
+                f"{row['system']}_{row['pose']}_{row['model_state']}_E{row['energy_keV']}"
+            )
+            grouped[row_key]["count"] = 0
+        grouped[row_key]["count"] = int(grouped[row_key]["count"]) + int(row["count"])
+        totals_by_group.setdefault(group_key, {})[str(row["run_id"])] = int(row["channel_total_count"])
+        seeds_by_group.setdefault(group_key, set()).add(row["seed"])
+        runs_by_group.setdefault(group_key, set()).add(str(row["run_id"]))
+
+    by_dir: dict[str, list[dict[str, Any]]] = {}
+    for (rel_dir, channel, _bin_index), row in grouped.items():
+        group_key = (rel_dir, channel)
+        channel_total = sum(totals_by_group[group_key].values())
+        row["channel_total_count"] = channel_total
+        row["yield"] = int(row["count"]) / channel_total if channel_total > 0 else 0.0
+        row["seed_count"] = len(seeds_by_group[group_key])
+        row["input_run_count"] = len(runs_by_group[group_key])
+        by_dir.setdefault(rel_dir, []).append(row)
+    for rel_dir in by_dir:
+        by_dir[rel_dir].sort(key=lambda item: (str(item["channel"]), int(item["bin_index"])))
+    return by_dir
 
 
 def comparison_panel_data(rows: list[dict[str, Any]]) -> dict[tuple[int, str], dict[tuple[tuple[str, str, str], str], list[dict[str, Any]]]]:
@@ -357,7 +434,7 @@ def comparison_panel_data(rows: list[dict[str, Any]]) -> dict[tuple[int, str], d
             bins[index]["count"] = 0
         bins[index]["count"] = int(bins[index]["count"]) + int(row["count"])
         panel["channel_total_by_run"][str(row["run_id"])] = int(row["channel_total_count"])
-        panel["seed_values"].add(int(row["seed"]))
+        panel["seed_values"].add(row["seed"])
 
     finalized: dict[tuple[int, str], dict[tuple[tuple[str, str, str], str], list[dict[str, Any]]]] = {}
     for figure_key, panels in grouped.items():
@@ -457,15 +534,16 @@ def write_comparison_outputs(
             for system in SYSTEM_ORDER
             if (state, system) in panels
         )
-        png_path = output_dir / comparison_png_name(energy_keV, channel)
+        figure_dir = output_dir / energy_dir_name(energy_keV)
+        png_path = figure_dir / comparison_png_name(energy_keV, channel)
         if write_plots:
-            png_path = write_comparison_png(output_dir, energy_keV, channel, state_keys_for_figure, panels)
+            png_path = write_comparison_png(figure_dir, energy_keV, channel, state_keys_for_figure, panels)
             png_paths.append(png_path)
         seed_values = {
             seed
             for panel_rows in panels.values()
             for row in panel_rows
-            for seed in row.get("seed_values", {int(row["seed"])})
+            for seed in row.get("seed_values", {row["seed"]})
         }
         index_rows.append(
             {
@@ -524,6 +602,12 @@ def plot_detector_response(
     seed: int | None = None,
     write_csv_files: bool = False,
 ) -> dict[str, Any]:
+    normalized_channels: list[str] = []
+    for channel in channels:
+        normalized = CHANNEL_ALIASES.get(channel, channel)
+        if normalized not in normalized_channels:
+            normalized_channels.append(normalized)
+    channels = normalized_channels
     if write_plots:
         ensure_matplotlib_available()
 
@@ -531,39 +615,35 @@ def plot_detector_response(
     if not run_dirs:
         raise ValueError("no run directories containing metadata.yaml and events.csv were found")
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     all_rows: list[dict[str, Any]] = []
-    png_paths: list[Path] = []
     for run_dir in run_dirs:
         rows, _counts = aggregate_run(run_dir, channels, bin_width_mm)
         rows = [row for row in rows if row_matches_filters(row, energies, seed)]
         if not rows:
             continue
         all_rows.extend(rows)
-        if write_plots:
-            by_channel: dict[str, list[dict[str, Any]]] = {channel: [] for channel in channels}
-            for row in rows:
-                by_channel[str(row["channel"])].append(row)
-            run_id = str(rows[0]["run_id"])
-            for channel in channels:
-                png_paths.append(write_png(output_dir, run_id, channel, by_channel[channel]))
 
-    csv_path = output_dir / "detector_response_bins.csv"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    condition_rows = aggregate_condition_rows(all_rows)
+    png_paths: list[Path] = []
+    csv_paths: list[Path] = []
+    index_rows: list[dict[str, Any]] = []
     fieldnames = [
         "run_dir",
         "run_id",
-            "case_id",
-            "system",
-            "pose",
-            "pose_id",
-            "model_type",
-            "model_state",
-            "abnormal_material",
-            "energy_keV",
-            "seed",
-            "seed_count",
-            "channel",
-            "bin_index",
+        "case_id",
+        "system",
+        "pose",
+        "pose_id",
+        "model_type",
+        "model_state",
+        "abnormal_material",
+        "energy_keV",
+        "seed",
+        "seed_count",
+        "input_run_count",
+        "channel",
+        "bin_index",
         "x_min_mm",
         "x_max_mm",
         "x_center_mm",
@@ -571,12 +651,53 @@ def plot_detector_response(
         "channel_total_count",
         "yield",
     ]
+    for rel_dir_text, rows in sorted(condition_rows.items()):
+        condition_output_dir = output_dir / rel_dir_text
+        csv_path = condition_output_dir / "detector_response_bins.csv"
+        csv_paths.append(csv_path)
+        if write_csv_files:
+            write_csv(csv_path, rows, fieldnames)
+        if write_plots:
+            by_channel: dict[str, list[dict[str, Any]]] = {channel: [] for channel in channels}
+            for row in rows:
+                by_channel[str(row["channel"])].append(row)
+            for channel in channels:
+                if by_channel[channel]:
+                    png_paths.append(write_png(condition_output_dir, "", channel, by_channel[channel]))
+        first = rows[0]
+        index_rows.append(
+            {
+                "system": first["system"],
+                "pose": first["pose"],
+                "model_state": first["model_state"],
+                "energy_keV": first["energy_keV"],
+                "condition_dir": rel_dir_text,
+                "detector_response_bins": csv_path.as_posix(),
+                "input_run_count": first.get("input_run_count", ""),
+                "seed_count": first.get("seed_count", ""),
+            }
+        )
+
+    index_path = output_dir / "detector_response_index.csv"
     if write_csv_files:
-        write_csv(csv_path, all_rows, fieldnames)
+        write_csv(
+            index_path,
+            index_rows,
+            [
+                "system",
+                "pose",
+                "model_state",
+                "energy_keV",
+                "condition_dir",
+                "detector_response_bins",
+                "input_run_count",
+                "seed_count",
+            ],
+        )
     comparison: dict[str, Any] | None = None
     if comparison_grid:
         comparison = write_comparison_outputs(
-            comparison_output_dir or Path("results/analysis/detector_response_comparison"),
+            comparison_output_dir or output_dir / "comparisons",
             all_rows,
             channels,
             energies,
@@ -585,7 +706,8 @@ def plot_detector_response(
             write_csv_files,
         )
     return {
-        "csv": csv_path,
+        "csv": index_path,
+        "condition_csvs": csv_paths,
         "pngs": png_paths,
         "run_count": len(run_dirs),
         "row_count": len(all_rows),
@@ -600,7 +722,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--comparison-output-dir",
         type=Path,
-        default=Path("results/analysis/detector_response_comparison"),
+        default=Path("results/analysis/detector_response/comparisons"),
     )
     parser.add_argument("--bin-width-mm", type=float, default=1.0)
     parser.add_argument("--channels", type=parse_channels, default=parse_channels("all"))

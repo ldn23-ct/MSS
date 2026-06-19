@@ -89,7 +89,8 @@ class DetectorResponseTests(unittest.TestCase):
 
             self.assertEqual(1, result["run_count"])
             self.assertEqual([], result["pngs"])
-            rows = read_csv(output_dir / "detector_response_bins.csv")
+            bins_path = output_dir / "by_condition" / "open" / "poseC" / "normal" / "E160" / "detector_response_bins.csv"
+            rows = read_csv(bins_path)
             self.assertEqual(15, len(rows))
             self.assertFalse(any("|" in field for field in rows[0].keys()))
 
@@ -100,8 +101,8 @@ class DetectorResponseTests(unittest.TestCase):
             self.assertEqual([2, 1, 2], [counts[("all", index)] for index in range(3)])
             self.assertEqual([1, 0, 0], [counts[("k0", index)] for index in range(3)])
             self.assertEqual([1, 0, 0], [counts[("k1", index)] for index in range(3)])
-            self.assertEqual([0, 1, 2], [counts[("ms", index)] for index in range(3)])
-            self.assertEqual([0, 0, 2], [counts[("k_ge4", index)] for index in range(3)])
+            self.assertEqual([0, 1, 2], [counts[("km", index)] for index in range(3)])
+            self.assertEqual([0, 0, 2], [counts[("kn", index)] for index in range(3)])
             all_rows = [row for row in rows if row["channel"] == "all"]
             self.assertTrue(all(row["channel_total_count"] == "5" for row in all_rows))
             self.assertEqual([0.4, 0.2, 0.4], [float(row["yield"]) for row in all_rows])
@@ -136,7 +137,7 @@ class DetectorResponseTests(unittest.TestCase):
 
         self.assertEqual(Path("results/analysis/detector_response"), args.output_dir)
         self.assertEqual(
-            Path("results/analysis/detector_response_comparison"),
+            Path("results/analysis/detector_response/comparisons"),
             args.comparison_output_dir,
         )
         self.assertFalse(args.write_csv)
@@ -158,8 +159,8 @@ class DetectorResponseTests(unittest.TestCase):
                 write_plots=False,
             )
 
-            self.assertEqual(output_dir / "detector_response_bins.csv", result["csv"])
-            self.assertFalse((output_dir / "detector_response_bins.csv").exists())
+            self.assertEqual(output_dir / "detector_response_index.csv", result["csv"])
+            self.assertFalse((output_dir / "detector_response_index.csv").exists())
 
     def test_comparison_index_and_missing_panel_without_plots(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -186,14 +187,14 @@ class DetectorResponseTests(unittest.TestCase):
                 write_csv_files=True,
             )
 
-            self.assertEqual(output_dir / "detector_response_bins.csv", result["csv"])
+            self.assertEqual(output_dir / "detector_response_index.csv", result["csv"])
             index_path = comparison_dir / "detector_response_comparison_index.csv"
             self.assertEqual(index_path, result["comparison"]["index"])
             rows = read_csv(index_path)
             self.assertEqual(1, len(rows))
             self.assertEqual("160", rows[0]["energy_keV"])
             self.assertEqual("all", rows[0]["channel"])
-            self.assertEqual((comparison_dir / "comparison_E160_all.png").as_posix(), rows[0]["png_file"])
+            self.assertEqual((comparison_dir / "E160" / "comparison_E160_all.png").as_posix(), rows[0]["png_file"])
             self.assertEqual("yield_by_channel_total", rows[0]["response_scale"])
             self.assertGreaterEqual(int(rows[0]["missing_panel_count"]), 0)
             self.assertFalse(any("|" in field for field in rows[0].keys()))

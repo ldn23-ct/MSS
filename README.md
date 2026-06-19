@@ -191,6 +191,43 @@ Debug 模式 `run.debug: true` 输出 `events_debug.csv`，语义为：
 
 `metadata.yaml` 记录 run-level 信息，包括 pose、seed、thread、vehicle/source/collimator/detector/physics/world/output policy 等配置快照。
 
+## 后处理：像素 bin 来源深度分析
+
+像素 bin 来源深度分析用于研究不同 detector bin 接收到的 detected gamma hit 的 `last_scatter_z` 经验分布，以及这种分布随散射阶次的变化。运行前启用数据分析环境：
+
+```bash
+conda activate data
+python scripts/analyze_pixel_depth_by_bin.py \
+  results/near_door \
+  --output-dir results/analysis/pixel_depth
+```
+
+默认按 `det_x` 做 1 mm 一维 bin，递归发现包含 `events.csv` 与 `metadata.yaml` 的 run 目录，不依赖固定 run_id 或旧结果目录结构。核心输出包括：
+
+```text
+results/analysis/pixel_depth/
+├── analysis_manifest.yaml
+├── pixel_depth_summary_by_scatter_class/E*/<scatter_class>.csv
+├── bin_lag_distribution_metrics/E*/<scatter_class>.csv
+├── scatter_order_spatial_summary/E*/<scatter_class>.csv
+└── pixel_scatter_class_fraction/E*/fractions.csv
+```
+
+普通分析 CSV 每行只保留 `pose, seed, energy_keV, collimator, abnormal_present, insert_name, insert_material` 等实际实验条件；完整 `run_id`、`case_id`、pose offset、model、collimator 和 `n_primary` 等 provenance 保存在 `analysis_manifest.yaml`。
+
+可选绘图：
+
+```bash
+python scripts/analyze_pixel_depth_by_bin.py \
+  results/near_door \
+  --output-dir results/analysis/pixel_depth \
+  --write-plots
+```
+
+该后处理只读取事件级 CSV 与 metadata，不修改 Geant4 仿真输出 schema，也不自动给出物理结论。
+
+完整能力、输入输出和指标含义见 `docs/pixel_depth_energy_analysis.md`。
+
 ## 诊断实验扩展
 
 生成车辆、金属替换 PMMA、全部非空气实体替换 PMMA、均匀 PMMA box 与有/无物理狭缝组合的八组配置：
@@ -238,6 +275,18 @@ python3 scripts/generate_near_door_experiment_configs.py \
 
 输出位于 `config/generated/near_door/`，文件名和 `output.output_directory` 会包含 system、pose、model_state、energy 和 seed；生成配置默认使用 `output.existing_run_policy: overwrite`。`--include-high-z` 可额外生成 `V-C-W` 对照；`--open-detector-range XMIN,XMAX,YMIN,YMAX` 可覆盖 open-panel detector 范围。
 
+当前推荐的高统计量生成方式是 open 每 case `200k`，collimated 每个物理 case 拆成 `20 x 25M = 500M`：
+
+```bash
+python3 scripts/generate_near_door_experiment_configs.py \
+  --pose-r-offset 0,480 \
+  --pose-c-offset 0,320 \
+  --seeds 1234 \
+  --open-n-primary 200000 \
+  --collimated-batches 20 \
+  --collimated-batch-n-primary 25000000
+```
+
 推荐使用串行队列运行生成的 manifest，队列会保证一个 Geant4 子进程完全结束后才启动下一个。默认不保存队列状态和日志，进度直接打印到终端；再次运行时，脚本会根据已生成的 `metadata.yaml` 和 `events.csv` / `events_debug.csv` 跳过完整 case：
 
 ```bash
@@ -254,6 +303,22 @@ python3 scripts/run_experiment_queue.py \
   --binary ./build/MSS \
   --save-queue
 ```
+
+高统计量 collimated 推荐开两个终端并行跑两个 shard，并为每个 shard 使用独立 state/log 路径：
+
+```bash
+python3 scripts/run_experiment_queue.py \
+  --manifest config/generated/near_door/manifest.yaml \
+  --binary ./build/MSS \
+  --system collimated \
+  --shard-count 2 \
+  --shard-index 0 \
+  --save-queue \
+  --state-file results/queues/near_door/collimated_shard0_state.json \
+  --log-dir results/queues/near_door/collimated_shard0_logs
+```
+
+第二个终端把 `--shard-index` 和路径中的 `shard0` 改为 `shard1`。open case 可用 `--system open` 单独顺序跑完。队列会检查 `metadata.yaml` 中的 `n_primary`，旧的低统计量输出不会被误判为当前批次已完成。
 
 运行完成后，可对一个或多个 run 目录生成实验 summary：
 

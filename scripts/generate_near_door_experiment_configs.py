@@ -64,6 +64,16 @@ def parse_int_list(text: str) -> list[int]:
     return values
 
 
+def parse_positive_int(text: str) -> int:
+    try:
+        value = int(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("value must be an integer") from error
+    if value <= 0:
+        raise argparse.ArgumentTypeError("value must be a positive integer")
+    return value
+
+
 def parse_detector_range(text: str) -> dict[str, list[float]]:
     parts = [part.strip() for part in text.split(",")]
     if len(parts) != 4:
@@ -162,11 +172,13 @@ def build_config(
     output_directory: str,
     target_component: str,
     open_detector_range: dict[str, list[float]] | None,
+    n_primary_per_pose: int,
 ) -> dict[str, Any]:
     config = copy.deepcopy(base_config)
     config["schema_version"] = 2
     config["run"] = copy.deepcopy(config["run"])
     config["run"]["random_seed"] = seed
+    config["run"]["n_primary_per_pose"] = n_primary_per_pose
     set_single_pose(config, pose_offset)
     set_model_state(config, model_state, target_component, material)
 
@@ -194,6 +206,10 @@ def build_config(
         f"near_door_{system_id}_{pose_label}_{model_state}_E{energy_keV}_seed{seed}",
     )
     return config
+
+
+def generated_seeds(base_seed: int, batch_count: int) -> list[tuple[int, int]]:
+    return [(batch_index, base_seed + batch_index) for batch_index in range(batch_count)]
 
 
 def core_cases(include_high_z: bool) -> list[tuple[str, str, str, str | None]]:
@@ -227,9 +243,29 @@ def generate(
     target_component: str,
     include_high_z: bool,
     open_detector_range: dict[str, list[float]] | None,
+    open_n_primary: int | None = None,
+    collimated_n_primary: int | None = None,
+    collimated_batches: int = 1,
+    collimated_batch_n_primary: int | None = None,
 ) -> dict[str, Any]:
+    if collimated_batches <= 0:
+        raise ValueError("collimated_batches must be positive")
     base_config = load_yaml(base_config_path)
     validate_target_component(repo_root, base_config_path, base_config, target_component)
+    base_n_primary = int(base_config["run"]["n_primary_per_pose"])
+    n_primary_by_system = {
+        "open": open_n_primary if open_n_primary is not None else base_n_primary,
+        "collimated": (
+            collimated_batch_n_primary
+            if collimated_batch_n_primary is not None
+            else collimated_n_primary
+            if collimated_n_primary is not None
+            else base_n_primary
+        ),
+    }
+    collimated_total_primary_per_base_seed = (
+        n_primary_by_system["collimated"] * collimated_batches
+    )
 
     manifest: dict[str, Any] = {
         "schema_version": 2,
@@ -249,49 +285,80 @@ def generate(
             },
         },
         "open_detector_range_override": open_detector_range,
+        "n_primary_per_pose": n_primary_by_system,
+        "batching": {
+            "open": {
+                "batches_per_base_seed": 1,
+                "n_primary_per_batch": n_primary_by_system["open"],
+                "n_primary_total_per_base_seed": n_primary_by_system["open"],
+            },
+            "collimated": {
+                "batches_per_base_seed": collimated_batches,
+                "n_primary_per_batch": n_primary_by_system["collimated"],
+                "n_primary_total_per_base_seed": collimated_total_primary_per_base_seed,
+            },
+        },
         "cases": [],
     }
 
     pose_offsets = {"poseR": pose_r_offset, "poseC": pose_c_offset}
     config_dir = output_dir / "configs"
+    config_paths_seen: set[Path] = set()
     for system_id, pose_label, model_state, material in core_cases(include_high_z):
         for energy_keV in ENERGIES_KEV:
-            for seed in seeds:
-                file_name = (
-                    f"near_door_{system_id}_{pose_label}_{model_state}_"
-                    f"E{energy_keV}_seed{seed}.yaml"
-                )
-                run_output_dir = (
-                    f"results/near_door/{system_id}/{pose_label}/"
-                    f"{model_state}/E{energy_keV}/seed{seed}"
-                )
-                config = build_config(
-                    base_config,
-                    system_id,
-                    pose_label,
-                    pose_offsets[pose_label],
-                    model_state,
-                    material,
-                    energy_keV,
-                    seed,
-                    run_output_dir,
-                    target_component,
-                    open_detector_range,
-                )
-                config_path = config_dir / file_name
-                write_yaml(config_path, config)
-                manifest["cases"].append(
-                    {
-                        "config_file": repo_relative(repo_root, config_path),
-                        "system": system_id,
-                        "pose": pose_label,
-                        "model_state": model_state,
-                        "energy_keV": energy_keV,
-                        "seed": seed,
-                        "collimator_enable": config["collimator"]["enable"],
-                        "output_directory": run_output_dir,
-                    }
-                )
+            batch_count = collimated_batches if system_id == "collimated" else 1
+            for base_seed in seeds:
+                for batch_index, seed in generated_seeds(base_seed, batch_count):
+                    file_name = (
+                        f"near_door_{system_id}_{pose_label}_{model_state}_"
+                        f"E{energy_keV}_seed{seed}.yaml"
+                    )
+                    run_output_dir = (
+                        f"results/near_door/{system_id}/{pose_label}/"
+                        f"{model_state}/E{energy_keV}/seed{seed}"
+                    )
+                    config = build_config(
+                        base_config,
+                        system_id,
+                        pose_label,
+                        pose_offsets[pose_label],
+                        model_state,
+                        material,
+                        energy_keV,
+                        seed,
+                        run_output_dir,
+                        target_component,
+                        open_detector_range,
+                        n_primary_by_system[system_id],
+                    )
+                    config_path = config_dir / file_name
+                    if config_path in config_paths_seen:
+                        raise ValueError(
+                            f"duplicate generated config path; choose non-overlapping seeds: {config_path}"
+                        )
+                    config_paths_seen.add(config_path)
+                    write_yaml(config_path, config)
+                    manifest["cases"].append(
+                        {
+                            "config_file": repo_relative(repo_root, config_path),
+                            "system": system_id,
+                            "pose": pose_label,
+                            "model_state": model_state,
+                            "energy_keV": energy_keV,
+                            "base_seed": base_seed,
+                            "seed": seed,
+                            "batch_index": batch_index,
+                            "batch_count": batch_count,
+                            "collimator_enable": config["collimator"]["enable"],
+                            "n_primary_per_pose": config["run"]["n_primary_per_pose"],
+                            "n_primary_total_for_base_seed": (
+                                collimated_total_primary_per_base_seed
+                                if system_id == "collimated"
+                                else n_primary_by_system["open"]
+                            ),
+                            "output_directory": run_output_dir,
+                        }
+                    )
 
     write_yaml(output_dir / "manifest.yaml", manifest)
     return manifest
@@ -317,6 +384,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-component", default=DEFAULT_TARGET_COMPONENT)
     parser.add_argument("--include-high-z", action="store_true")
     parser.add_argument("--open-detector-range", type=parse_detector_range)
+    parser.add_argument("--open-n-primary", type=parse_positive_int)
+    parser.add_argument("--collimated-n-primary", type=parse_positive_int)
+    parser.add_argument("--collimated-batches", type=parse_positive_int, default=1)
+    parser.add_argument("--collimated-batch-n-primary", type=parse_positive_int)
     return parser.parse_args()
 
 
@@ -332,6 +403,10 @@ def main() -> int:
         args.target_component,
         args.include_high_z,
         args.open_detector_range,
+        args.open_n_primary,
+        args.collimated_n_primary,
+        args.collimated_batches,
+        args.collimated_batch_n_primary,
     )
     print(f"Generated {len(manifest['cases'])} near-door configs in {args.output_dir}")
     return 0

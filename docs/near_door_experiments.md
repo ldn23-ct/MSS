@@ -101,6 +101,7 @@ config/generated/near_door/
 - `source.energy_mode: mono`
 - `source.mono_energy_keV: <energy>`
 - `run.random_seed: <seed>`
+- `run.n_primary_per_pose: <n>`，默认继承 base config；可按 open / collimated 分别覆盖
 - `output.existing_run_policy: overwrite`
 - `diagnostics.case_id: near_door_<system>_<pose>_<model_state>_E<energy>_seed<seed>`
 
@@ -141,6 +142,45 @@ python3 scripts/generate_near_door_experiment_configs.py \
   --pose-c-offset 0,320 \
   --seeds 1234,2234,3234
 ```
+
+为无准直和有准直分别设置模拟粒子数：
+
+```bash
+python3 scripts/generate_near_door_experiment_configs.py \
+  --pose-r-offset 0,480 \
+  --pose-c-offset 0,320 \
+  --open-n-primary 1000000 \
+  --collimated-n-primary 10000000
+```
+
+如果不传 `--open-n-primary` 或 `--collimated-n-primary`，对应系统会继承 base config 中的 `run.n_primary_per_pose`。
+
+为 collimated 条件按 batch 拆分统计量：
+
+```bash
+python3 scripts/generate_near_door_experiment_configs.py \
+  --pose-r-offset 0,480 \
+  --pose-c-offset 0,320 \
+  --seeds 1234 \
+  --open-n-primary 200000 \
+  --collimated-batches 20 \
+  --collimated-batch-n-primary 25000000
+```
+
+该命令会生成：
+
+```text
+open:        24 configs x 200,000 primaries
+collimated: 24 physical cases x 20 batches x 25,000,000 primaries
+```
+
+其中每个 collimated 物理 case 的总统计量为：
+
+```text
+20 x 25,000,000 = 500,000,000 primaries
+```
+
+collimated batch 使用连续 seed，例如 base seed `1234` 会展开为 `1234 ... 1253`。正式 `diagnostics.case_id` 和 run_id 仍保持 `..._seed<seed>` 形式，后处理按 `system + pose + model_state + energy` 聚合这些 seed 即可。
 
 切换近层前门 insert：
 
@@ -245,8 +285,143 @@ results/queues/near_door/queue_logs/<queue_id>/<index>_<case_id>.log
 | `--state-file <path>` | 指定状态文件，并隐式启用保存模式 |
 | `--log-dir <path>` | 指定日志根目录，并隐式启用保存模式 |
 | `--force-unlock` | 保存模式下，人工确认旧队列已停止后清理遗留 lock |
+| `--system open|collimated` | 只运行指定系统，默认 `all` |
+| `--shard-count N` | 将过滤后的队列按顺序分为 N 片 |
+| `--shard-index I` | 只运行第 I 片，范围为 `0 <= I < N` |
 
 保存模式下，队列启动时会创建 lock file，阻止两个队列同时操作同一份状态文件。如果上一次队列被强制杀死，可先确认没有 `MSS` 进程仍在运行，再使用 `--force-unlock`。
+
+## 6.1 推荐 500M collimated 快速执行流程
+
+本机推荐使用：
+
+```text
+2 parallel queues x 8 threads x 25M primaries per collimated batch
+```
+
+先生成批次化配置：
+
+```bash
+python3 scripts/generate_near_door_experiment_configs.py \
+  --pose-r-offset 0,480 \
+  --pose-c-offset 0,320 \
+  --seeds 1234 \
+  --open-n-primary 200000 \
+  --collimated-batches 20 \
+  --collimated-batch-n-primary 25000000
+```
+
+先单独跑完 open case：
+
+```bash
+python3 scripts/run_experiment_queue.py \
+  --manifest config/generated/near_door/manifest.yaml \
+  --binary ./build/MSS \
+  --system open \
+  --save-queue \
+  --state-file results/queues/near_door/open_state.json \
+  --log-dir results/queues/near_door/open_logs
+```
+
+再开两个终端并行运行 collimated 两个 shard。
+
+终端 A：
+
+```bash
+python3 scripts/run_experiment_queue.py \
+  --manifest config/generated/near_door/manifest.yaml \
+  --binary ./build/MSS \
+  --system collimated \
+  --shard-count 2 \
+  --shard-index 0 \
+  --save-queue \
+  --state-file results/queues/near_door/collimated_shard0_state.json \
+  --log-dir results/queues/near_door/collimated_shard0_logs
+```
+
+终端 B：
+
+```bash
+python3 scripts/run_experiment_queue.py \
+  --manifest config/generated/near_door/manifest.yaml \
+  --binary ./build/MSS \
+  --system collimated \
+  --shard-count 2 \
+  --shard-index 1 \
+  --save-queue \
+  --state-file results/queues/near_door/collimated_shard1_state.json \
+  --log-dir results/queues/near_door/collimated_shard1_logs
+```
+
+每个 shard 使用独立 state file 和 log dir，避免 lock 冲突。队列完成性检查会同时检查 `run_id` 和 `metadata.yaml` 中的 `n_primary`；因此旧的 10M collimated 结果不会被误判为新的 25M batch。
+
+运行期间监控：
+
+```bash
+uptime
+free -h
+ps -eo pid,etime,%cpu,%mem,args | rg 'MSS|run_experiment_queue'
+```
+
+如果系统明显卡顿，可先停止其中一个 shard，或重新生成/运行 `number_of_threads` 更低的配置。
+
+## 6.2 按物理条件合并 seed/batch
+
+全部仿真完成后，可以把同一物理条件下的多个 seed/batch 合并为一个事件级 CSV：
+
+```bash
+python3 scripts/merge_near_door_seed_events.py \
+  --input-root results/near_door \
+  --output-root results/near_door_merged/by_condition
+```
+
+合并分组键为：
+
+```text
+system + pose + model_state + energy_keV
+```
+
+因此 `open` 和 `collimated` 不会混合；同一能量、pose、模型状态下的所有 seed 会合并到同一个目录：
+
+```text
+results/near_door_merged/by_condition/
+  {system}/{pose}/{model_state}/E{energy}/
+    events.csv
+    metadata.yaml
+```
+
+合并脚本会流式读取每个输入 `events.csv`，不会一次性把大文件读入内存。输出 `events.csv` 保留正式事件级 CSV 的 header 和字段顺序，但合并产物中：
+
+- `event_id` 会重新编号为合并文件内连续 ID；
+- `hit_id` 会统一写为 `0`；
+- seed 不作为 CSV 分析字段写入。
+
+原始 seed、run 路径和粒子数会写入合并后的 `metadata.yaml`。例如 collimated 的 20 个 batch 合并后，预期每个物理条件记录：
+
+```yaml
+n_primary: 500000000
+merge:
+  seed_count: 20
+  source_run_count: 20
+```
+
+默认情况下，若输出根目录已存在且非空，脚本会报错停止。需要重跑合并时显式使用：
+
+```bash
+python3 scripts/merge_near_door_seed_events.py \
+  --input-root results/near_door \
+  --output-root results/near_door_merged/by_condition \
+  --overwrite
+```
+
+合并完成后可检查输出数量：
+
+```bash
+find results/near_door_merged/by_condition -name events.csv | wc -l
+find results/near_door_merged/by_condition -name metadata.yaml | wc -l
+```
+
+当前 24 个 open 物理条件和 24 个 collimated 物理条件全部完成时，预期各输出 `48`。
 
 ## 7. Metadata 追踪信息
 

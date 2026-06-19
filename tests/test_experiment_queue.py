@@ -33,7 +33,13 @@ class ExperimentQueueTests(unittest.TestCase):
         os.environ.clear()
         os.environ.update(self._old_env)
 
-    def write_config(self, root: Path, case_id: str, energy_keV: int = 160) -> Path:
+    def write_config(
+        self,
+        root: Path,
+        case_id: str,
+        energy_keV: int = 160,
+        n_primary: int | None = None,
+    ) -> Path:
         config_dir = root / "configs"
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / f"{case_id}.yaml"
@@ -69,17 +75,25 @@ class ExperimentQueueTests(unittest.TestCase):
                 "existing_run_policy": "overwrite",
             },
         }
+        if n_primary is not None:
+            config["run"]["n_primary_per_pose"] = n_primary
         config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
         return config_path
 
-    def write_manifest(self, root: Path, configs: list[Path]) -> Path:
+    def write_manifest(
+        self,
+        root: Path,
+        configs: list[Path],
+        systems: list[str] | None = None,
+    ) -> Path:
         manifest = {
             "cases": [
                 {
                     "case_id": config.stem,
                     "config_file": config.as_posix(),
+                    **({"system": systems[index]} if systems is not None else {}),
                 }
-                for config in configs
+                for index, config in enumerate(configs)
             ]
         }
         manifest_path = root / "manifest.yaml"
@@ -298,6 +312,79 @@ class ExperimentQueueTests(unittest.TestCase):
 
             self.assertFalse((root / "queue_state.json").exists())
             self.assertFalse((root / "results" / "case_a").exists())
+
+    def test_completion_requires_matching_n_primary_when_config_provides_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = self.write_config(root, "case_a", n_primary=25000000)
+            config = queue.load_yaml(config_path)
+            expected = queue.expected_run_dirs(REPO_ROOT, config_path, config)[0]
+            run_dir = Path(expected["run_dir"])
+            run_dir.mkdir(parents=True)
+            Path(expected["metadata"]).write_text(
+                yaml.safe_dump(
+                    {
+                        "run_id": expected["run_id"],
+                        "n_primary": 10000000,
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            Path(expected["csv"]).write_text("event_id,hit_id\n", encoding="utf-8")
+
+            self.assertFalse(queue.run_output_complete(expected))
+
+            Path(expected["metadata"]).write_text(
+                yaml.safe_dump(
+                    {
+                        "run_id": expected["run_id"],
+                        "n_primary": 25000000,
+                    },
+                    sort_keys=False,
+                ),
+                encoding="utf-8",
+            )
+            self.assertTrue(queue.run_output_complete(expected))
+
+    def test_system_filter_and_shard_run_only_selected_cases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            configs = [
+                self.write_config(root, "open_a"),
+                self.write_config(root, "collimated_a"),
+                self.write_config(root, "collimated_b"),
+                self.write_config(root, "collimated_c"),
+            ]
+            manifest = self.write_manifest(
+                root,
+                configs,
+                ["open", "collimated", "collimated", "collimated"],
+            )
+            fake = self.write_fake_binary(root)
+            order_log = root / "order.log"
+            os.environ["FAKE_MSS_ORDER_LOG"] = order_log.as_posix()
+
+            self.assertEqual(
+                0,
+                self.run_queue(
+                    root,
+                    manifest,
+                    fake,
+                    "--system",
+                    "collimated",
+                    "--shard-count",
+                    "2",
+                    "--shard-index",
+                    "1",
+                    save_paths=False,
+                ),
+            )
+
+            self.assertEqual(
+                ["start:collimated_b", "end:collimated_b"],
+                order_log.read_text(encoding="utf-8").splitlines(),
+            )
 
     def test_default_manifest_path_uses_config_tree(self):
         args = queue.parse_args([])

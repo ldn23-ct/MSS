@@ -179,14 +179,16 @@ def output_csv_name(config: dict[str, Any]) -> str:
     return str(output.get("events_csv_name", "events.csv"))
 
 
-def expected_run_dirs(repo_root: Path, config_path: Path, config: dict[str, Any]) -> list[dict[str, str]]:
+def expected_run_dirs(repo_root: Path, config_path: Path, config: dict[str, Any]) -> list[dict[str, Any]]:
     output = config.get("output", {})
+    run = config.get("run", {})
     output_dir = Path(str(output.get("output_directory", "results")))
     if not output_dir.is_absolute():
         output_dir = repo_root / output_dir
     metadata_name = str(output.get("metadata_yaml_name", "metadata.yaml"))
     csv_name = output_csv_name(config)
-    dirs: list[dict[str, str]] = []
+    n_primary = int(run.get("n_primary_per_pose", 0) or 0)
+    dirs: list[dict[str, Any]] = []
     for pose in generate_poses(config):
         run_id = build_run_id(config, pose)
         run_dir = output_dir / run_id
@@ -196,6 +198,7 @@ def expected_run_dirs(repo_root: Path, config_path: Path, config: dict[str, Any]
                 "run_dir": run_dir.as_posix(),
                 "metadata": (run_dir / metadata_name).as_posix(),
                 "csv": (run_dir / csv_name).as_posix(),
+                "n_primary": n_primary,
             }
         )
     if not dirs:
@@ -203,7 +206,7 @@ def expected_run_dirs(repo_root: Path, config_path: Path, config: dict[str, Any]
     return dirs
 
 
-def run_output_complete(expected: dict[str, str]) -> bool:
+def run_output_complete(expected: dict[str, Any]) -> bool:
     run_dir = Path(expected["run_dir"])
     metadata_path = Path(expected["metadata"])
     csv_path = Path(expected["csv"])
@@ -213,7 +216,17 @@ def run_output_complete(expected: dict[str, str]) -> bool:
         metadata = load_yaml(metadata_path)
     except Exception:
         return False
-    return metadata.get("run_id") == expected["run_id"]
+    if metadata.get("run_id") != expected["run_id"]:
+        return False
+    expected_n_primary = int(expected.get("n_primary") or 0)
+    if expected_n_primary > 0:
+        try:
+            actual_n_primary = int(metadata.get("n_primary", 0))
+        except (TypeError, ValueError):
+            return False
+        if actual_n_primary != expected_n_primary:
+            return False
+    return True
 
 
 def item_complete(item: dict[str, Any]) -> bool:
@@ -226,6 +239,31 @@ def case_id_from_config(config: dict[str, Any], config_path: Path, fallback: str
     if case_id:
         return str(case_id)
     return fallback or config_path.stem
+
+
+def item_matches_system(item: dict[str, Any], system: str | None) -> bool:
+    if system is None or system == "all":
+        return True
+    if item.get("system") == system:
+        return True
+    case_id = str(item.get("case_id", ""))
+    return case_id.startswith(f"near_door_{system}_")
+
+
+def filter_items(
+    items: list[dict[str, Any]],
+    system: str | None,
+    shard_count: int,
+    shard_index: int,
+) -> list[dict[str, Any]]:
+    filtered = [item for item in items if item_matches_system(item, system)]
+    if shard_count <= 1:
+        return filtered
+    return [
+        item
+        for local_index, item in enumerate(filtered)
+        if local_index % shard_count == shard_index
+    ]
 
 
 def load_manifest_cases(repo_root: Path, manifest_path: Path) -> list[dict[str, Any]]:
@@ -247,6 +285,13 @@ def load_manifest_cases(repo_root: Path, manifest_path: Path) -> list[dict[str, 
                 "index": index,
                 "case_id": case_id,
                 "config_file": repo_relative(repo_root, config_path),
+                "system": str(case.get("system", "")),
+                "pose": case.get("pose"),
+                "model_state": case.get("model_state"),
+                "energy_keV": case.get("energy_keV"),
+                "seed": case.get("seed"),
+                "batch_index": case.get("batch_index"),
+                "batch_count": case.get("batch_count"),
                 "expected_runs": expected,
                 "expected_run_dir": expected[0]["run_dir"],
                 "status": "pending",
@@ -286,6 +331,9 @@ def initial_state(
     state_file: Path,
     items: list[dict[str, Any]],
     previous: dict[str, Any] | None,
+    system: str,
+    shard_count: int,
+    shard_index: int,
 ) -> dict[str, Any]:
     queue_id = None
     created_at = None
@@ -305,6 +353,11 @@ def initial_state(
         "manifest": repo_relative(repo_root, manifest_path),
         "binary": binary.as_posix(),
         "state_file": state_file.as_posix(),
+        "filters": {
+            "system": system,
+            "shard_count": shard_count,
+            "shard_index": shard_index,
+        },
         "items": items,
     }
 
@@ -429,11 +482,32 @@ def run_queue(args: argparse.Namespace) -> int:
     if save_queue:
         lock_path = state_file.with_suffix(state_file.suffix + ".lock")
         previous = load_json(state_file)
-        items = merge_state_items(load_manifest_cases(repo_root, manifest_path), previous)
-        state = initial_state(repo_root, manifest_path, binary, state_file, items, previous)
+        items = filter_items(
+            load_manifest_cases(repo_root, manifest_path),
+            args.system,
+            args.shard_count,
+            args.shard_index,
+        )
+        items = merge_state_items(items, previous)
+        state = initial_state(
+            repo_root,
+            manifest_path,
+            binary,
+            state_file,
+            items,
+            previous,
+            args.system,
+            args.shard_count,
+            args.shard_index,
+        )
         queue_items = state["items"]
     else:
-        queue_items = load_manifest_cases(repo_root, manifest_path)
+        queue_items = filter_items(
+            load_manifest_cases(repo_root, manifest_path),
+            args.system,
+            args.shard_count,
+            args.shard_index,
+        )
 
     normalize_resumable_items(queue_items, args.rerun_completed)
 
@@ -536,8 +610,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--continue-on-failure", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force-unlock", action="store_true")
+    parser.add_argument("--system", choices=("all", "open", "collimated"), default="all")
+    parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--shard-index", type=int, default=0)
     parser.set_defaults(stop_on_failure=True)
     args = parser.parse_args(argv)
+    if args.shard_count < 1:
+        parser.error("--shard-count must be >= 1")
+    if args.shard_index < 0 or args.shard_index >= args.shard_count:
+        parser.error("--shard-index must satisfy 0 <= index < shard-count")
     if args.state_file is not None or args.log_dir is not None:
         args.save_queue = True
     if args.force_unlock and not args.save_queue:
