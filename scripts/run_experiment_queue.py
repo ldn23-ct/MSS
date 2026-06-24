@@ -4,8 +4,10 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import os
+import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
@@ -16,6 +18,7 @@ import yaml
 
 
 STATE_SCHEMA_VERSION = 1
+EXPERIMENT_ORDER = ("E0", "E1", "E2", "E3", "E4", "E5")
 
 
 def utc_now() -> str:
@@ -250,20 +253,93 @@ def item_matches_system(item: dict[str, Any], system: str | None) -> bool:
     return case_id.startswith(f"near_door_{system}_")
 
 
+def parse_experiment_csv(text: str | None) -> set[str] | None:
+    if text is None:
+        return None
+    values = {part.strip().upper() for part in text.split(",") if part.strip()}
+    if not values:
+        raise ValueError("experiment filter must contain at least one experiment")
+    unknown = sorted(values.difference(EXPERIMENT_ORDER))
+    if unknown:
+        raise ValueError("unknown experiment(s): " + ", ".join(unknown))
+    return values
+
+
+def experiment_index(experiment: str) -> int:
+    try:
+        return EXPERIMENT_ORDER.index(experiment)
+    except ValueError:
+        return -1
+
+
+def item_matches_experiment_filters(
+    item: dict[str, Any],
+    only_experiments: set[str] | None,
+    from_experiment: str | None,
+    to_experiment: str | None,
+) -> bool:
+    experiment = str(item.get("experiment") or "")
+    if only_experiments is not None:
+        return experiment in only_experiments
+    if not from_experiment and not to_experiment:
+        return True
+    item_index = experiment_index(experiment)
+    if item_index < 0:
+        return False
+    if from_experiment and item_index < experiment_index(from_experiment):
+        return False
+    if to_experiment and item_index > experiment_index(to_experiment):
+        return False
+    return True
+
+
 def filter_items(
     items: list[dict[str, Any]],
     system: str | None,
+    only_experiments: set[str] | None,
+    from_experiment: str | None,
+    to_experiment: str | None,
+    start_index: int | None,
+    end_index: int | None,
     shard_count: int,
     shard_index: int,
+    limit: int | None,
 ) -> list[dict[str, Any]]:
-    filtered = [item for item in items if item_matches_system(item, system)]
-    if shard_count <= 1:
-        return filtered
-    return [
+    filtered = [
         item
-        for local_index, item in enumerate(filtered)
-        if local_index % shard_count == shard_index
+        for item in items
+        if item_matches_system(item, system)
+        and item_matches_experiment_filters(item, only_experiments, from_experiment, to_experiment)
+        and (start_index is None or int(item["index"]) >= start_index)
+        and (end_index is None or int(item["index"]) < end_index)
     ]
+    if shard_count > 1:
+        filtered = [
+            item
+            for local_index, item in enumerate(filtered)
+            if local_index % shard_count == shard_index
+        ]
+    if limit is not None:
+        filtered = filtered[:limit]
+    return filtered
+
+
+def manifest_large_run_threshold(manifest: dict[str, Any]) -> int | None:
+    run_safety = manifest.get("run_safety")
+    if not isinstance(run_safety, dict):
+        return None
+    if run_safety.get("allow_large_run_required") is False:
+        return None
+    threshold = run_safety.get("large_run_case_threshold")
+    if threshold is None:
+        return None
+    try:
+        value = int(threshold)
+    except (TypeError, ValueError) as error:
+        raise ValueError("manifest run_safety.large_run_case_threshold must be an integer") from error
+    if value < 0:
+        raise ValueError("manifest run_safety.large_run_case_threshold must be non-negative")
+    return value
 
 
 def load_manifest_cases(repo_root: Path, manifest_path: Path) -> list[dict[str, Any]]:
@@ -286,12 +362,24 @@ def load_manifest_cases(repo_root: Path, manifest_path: Path) -> list[dict[str, 
                 "case_id": case_id,
                 "config_file": repo_relative(repo_root, config_path),
                 "system": str(case.get("system", "")),
+                "experiment": case.get("experiment"),
                 "pose": case.get("pose"),
                 "model_state": case.get("model_state"),
                 "energy_keV": case.get("energy_keV"),
                 "seed": case.get("seed"),
                 "batch_index": case.get("batch_index"),
                 "batch_count": case.get("batch_count"),
+                "condition_id": case.get("condition_id"),
+                "condition_output_directory": case.get("condition_output_directory"),
+                "raw_output_directory": case.get("raw_output_directory"),
+                "phantom_id": case.get("phantom_id"),
+                "phantom_group": case.get("phantom_group"),
+                "defect_depth_id": case.get("defect_depth_id"),
+                "defect_depth_label": case.get("defect_depth_label"),
+                "geometry_file": case.get("geometry_file"),
+                "head_offset_x_mm": case.get("head_offset_x_mm"),
+                "head_offset_y_mm": case.get("head_offset_y_mm"),
+                "n_primary_per_pose": case.get("n_primary_per_pose"),
                 "expected_runs": expected,
                 "expected_run_dir": expected[0]["run_dir"],
                 "status": "pending",
@@ -332,6 +420,12 @@ def initial_state(
     items: list[dict[str, Any]],
     previous: dict[str, Any] | None,
     system: str,
+    only_experiments: str,
+    from_experiment: str,
+    to_experiment: str,
+    start_index: int | None,
+    end_index: int | None,
+    limit: int | None,
     shard_count: int,
     shard_index: int,
 ) -> dict[str, Any]:
@@ -355,6 +449,12 @@ def initial_state(
         "state_file": state_file.as_posix(),
         "filters": {
             "system": system,
+            "only_experiments": only_experiments,
+            "from_experiment": from_experiment,
+            "to_experiment": to_experiment,
+            "start_index": start_index,
+            "end_index": end_index,
+            "limit": limit,
             "shard_count": shard_count,
             "shard_index": shard_index,
         },
@@ -467,14 +567,181 @@ def run_item_process(binary: Path, repo_root: Path, item: dict[str, Any], log_pa
     return completed.returncode
 
 
+def is_article_manifest(manifest: dict[str, Any]) -> bool:
+    return manifest.get("experiment") == "article_simulation_campaign"
+
+
+def article_condition_key(item: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        item.get("experiment"),
+        item.get("phantom_id"),
+        item.get("energy_keV"),
+        item.get("pose"),
+        item.get("head_offset_x_mm"),
+        item.get("head_offset_y_mm"),
+        item.get("geometry_file"),
+        item.get("defect_depth_id"),
+    )
+
+
+def article_condition_output_dir(repo_root: Path, item: dict[str, Any]) -> Path:
+    value = item.get("condition_output_directory")
+    if not value:
+        raise ValueError(f"article case is missing condition_output_directory: {item.get('case_id')}")
+    path = Path(str(value))
+    if path.is_absolute():
+        return path
+    return repo_root / path
+
+
+def read_metadata_for_expected(expected: dict[str, Any]) -> dict[str, Any]:
+    return load_yaml(Path(expected["metadata"]))
+
+
+def merge_article_events(records: list[dict[str, Any]], output_csv: Path) -> int:
+    expected_fields: list[str] | None = None
+    event_rows = 0
+    event_id_offset = 0
+    output_csv.parent.mkdir(parents=True, exist_ok=True)
+    with output_csv.open("w", encoding="utf-8", newline="") as output_stream:
+        writer: csv.DictWriter[str] | None = None
+        for record in records:
+            expected = record["expected_runs"][0]
+            input_csv = Path(expected["csv"])
+            with input_csv.open("r", encoding="utf-8", newline="") as input_stream:
+                reader = csv.DictReader(input_stream)
+                if reader.fieldnames is None:
+                    raise ValueError(f"events CSV has no header: {input_csv}")
+                fieldnames = list(reader.fieldnames)
+                if "event_id" not in fieldnames:
+                    raise ValueError(f"events CSV must contain event_id: {input_csv}")
+                if expected_fields is None:
+                    expected_fields = fieldnames
+                    writer = csv.DictWriter(output_stream, fieldnames=expected_fields)
+                    writer.writeheader()
+                elif fieldnames != expected_fields:
+                    raise ValueError(
+                        f"events CSV header mismatch in {input_csv}: expected {expected_fields}, got {fieldnames}"
+                    )
+                assert writer is not None
+                for row in reader:
+                    try:
+                        row["event_id"] = str(int(row["event_id"]) + event_id_offset)
+                    except (TypeError, ValueError) as error:
+                        raise ValueError(f"event_id must be an integer in {input_csv}") from error
+                    writer.writerow(row)
+                    event_rows += 1
+            event_id_offset += int(expected.get("n_primary") or 0)
+    if expected_fields is None:
+        raise ValueError("no article events CSV files were provided for merge")
+    return event_rows
+
+
+def merged_article_metadata(item: dict[str, Any], records: list[dict[str, Any]], event_rows: int) -> dict[str, Any]:
+    representative = read_metadata_for_expected(records[0]["expected_runs"][0])
+    source_metadata = [read_metadata_for_expected(record["expected_runs"][0]) for record in records]
+    seeds = [record.get("seed") for record in records]
+    source_run_dirs = [record["expected_runs"][0]["run_dir"] for record in records]
+    total_n_primary = sum(int(record["expected_runs"][0].get("n_primary") or 0) for record in records)
+    return {
+        "schema_version": 1,
+        "merged_article_batches": True,
+        "run_id": str(item.get("condition_id")),
+        "output_csv": "events.csv",
+        "condition": {
+            "condition_id": item.get("condition_id"),
+            "experiment": item.get("experiment"),
+            "phantom_id": item.get("phantom_id"),
+            "phantom_group": item.get("phantom_group"),
+            "defect_depth_id": item.get("defect_depth_id"),
+            "defect_depth_label": item.get("defect_depth_label"),
+            "geometry_file": item.get("geometry_file"),
+            "energy_keV": item.get("energy_keV"),
+            "pose": item.get("pose"),
+            "head_offset_x_mm": item.get("head_offset_x_mm"),
+            "head_offset_y_mm": item.get("head_offset_y_mm"),
+        },
+        "n_primary": total_n_primary,
+        "source": representative.get("source"),
+        "collimator": representative.get("collimator"),
+        "detector": representative.get("detector"),
+        "physics": representative.get("physics"),
+        "world": representative.get("world"),
+        "merge": {
+            "source_run_count": len(records),
+            "batch_count": len({record.get("batch_index") for record in records}),
+            "batch_indices": [record.get("batch_index") for record in records],
+            "seeds": seeds,
+            "source_run_ids": [metadata.get("run_id") for metadata in source_metadata],
+            "source_run_dirs": source_run_dirs,
+            "source_n_primary_values": [
+                int(record["expected_runs"][0].get("n_primary") or 0) for record in records
+            ],
+            "event_rows": event_rows,
+        },
+    }
+
+
+def write_yaml(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as stream:
+        yaml.safe_dump(value, stream, sort_keys=False, allow_unicode=False, width=100)
+
+
+def merge_article_batches(repo_root: Path, manifest: dict[str, Any], manifest_path: Path) -> dict[str, Any]:
+    if not is_article_manifest(manifest):
+        return {
+            "status": "skipped",
+            "output_root": None,
+            "condition_count": 0,
+            "message": "not an article manifest",
+        }
+
+    items = load_manifest_cases(repo_root, manifest_path)
+    incomplete = [item for item in items if not item_complete(item)]
+    output_root_value = manifest.get("condition_output_root")
+    output_root = repo_root / str(output_root_value or f"results/article/{manifest.get('campaign_id', 'article')}/by_condition")
+    if incomplete:
+        return {
+            "status": "skipped",
+            "output_root": repo_relative(repo_root, output_root),
+            "condition_count": 0,
+            "message": f"{len(incomplete)} manifest cases are incomplete",
+        }
+
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for item in items:
+        groups.setdefault(article_condition_key(item), []).append(item)
+
+    if output_root.exists():
+        shutil.rmtree(output_root)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    for records in groups.values():
+        records.sort(key=lambda record: (int(record.get("batch_index") or 0), int(record.get("seed") or 0)))
+        first = records[0]
+        output_dir = article_condition_output_dir(repo_root, first)
+        event_rows = merge_article_events(records, output_dir / "events.csv")
+        write_yaml(output_dir / "metadata.yaml", merged_article_metadata(first, records, event_rows))
+
+    return {
+        "status": "completed",
+        "output_root": repo_relative(repo_root, output_root),
+        "condition_count": len(groups),
+        "message": f"merged {len(groups)} article conditions",
+    }
+
+
 def run_queue(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     manifest_path = args.manifest.resolve()
     binary = args.binary.resolve()
     save_queue = bool(args.save_queue)
+    manifest = load_yaml(manifest_path)
+    only_experiments = parse_experiment_csv(args.only_experiments)
 
     state_file = args.state_file or (repo_root / "results/queues/near_door/queue_state.json")
-    log_root = args.log_dir or (repo_root / "results/queues/near_door/queue_logs")
+    log_root = args.log_dir
     state: dict[str, Any] | None = None
     log_dir: Path | None = None
     lock_path: Path | None = None
@@ -485,8 +752,14 @@ def run_queue(args: argparse.Namespace) -> int:
         items = filter_items(
             load_manifest_cases(repo_root, manifest_path),
             args.system,
+            only_experiments,
+            args.from_experiment,
+            args.to_experiment,
+            args.start_index,
+            args.end_index,
             args.shard_count,
             args.shard_index,
+            args.limit,
         )
         items = merge_state_items(items, previous)
         state = initial_state(
@@ -497,6 +770,12 @@ def run_queue(args: argparse.Namespace) -> int:
             items,
             previous,
             args.system,
+            args.only_experiments or "",
+            args.from_experiment or "",
+            args.to_experiment or "",
+            args.start_index,
+            args.end_index,
+            args.limit,
             args.shard_count,
             args.shard_index,
         )
@@ -505,8 +784,14 @@ def run_queue(args: argparse.Namespace) -> int:
         queue_items = filter_items(
             load_manifest_cases(repo_root, manifest_path),
             args.system,
+            only_experiments,
+            args.from_experiment,
+            args.to_experiment,
+            args.start_index,
+            args.end_index,
             args.shard_count,
             args.shard_index,
+            args.limit,
         )
 
     normalize_resumable_items(queue_items, args.rerun_completed)
@@ -514,6 +799,18 @@ def run_queue(args: argparse.Namespace) -> int:
     if args.dry_run:
         print_dry_run(queue_items, args.rerun_completed)
         return 0
+
+    threshold = manifest_large_run_threshold(manifest)
+    pending_count = sum(
+        1
+        for item in queue_items
+        if args.rerun_completed or not item_complete(item)
+    )
+    if threshold is not None and pending_count > threshold and not args.allow_large_run:
+        raise RuntimeError(
+            f"queue has {pending_count} pending cases, above manifest threshold {threshold}; "
+            "run with --dry-run first or pass --allow-large-run"
+        )
 
     if not binary.exists():
         raise FileNotFoundError(f"MSS binary does not exist: {binary}")
@@ -523,8 +820,9 @@ def run_queue(args: argparse.Namespace) -> int:
         assert lock_path is not None
         create_lock(lock_path, args.force_unlock)
         atomic_write_json(state_file, state)
-        log_dir = log_root / state["queue_id"]
-        log_dir.mkdir(parents=True, exist_ok=True)
+        if log_root is not None:
+            log_dir = log_root / state["queue_id"]
+            log_dir.mkdir(parents=True, exist_ok=True)
 
     try:
         for item in queue_items:
@@ -545,9 +843,8 @@ def run_queue(args: argparse.Namespace) -> int:
             item["ended_at"] = None
             item["return_code"] = None
             log_path = None
-            if save_queue:
+            if save_queue and log_dir is not None:
                 assert state is not None
-                assert log_dir is not None
                 log_path = log_dir / safe_log_name(int(item["index"]), str(item["case_id"]))
                 item["log_path"] = repo_relative(repo_root, log_path)
             item["message"] = "running"
@@ -581,6 +878,15 @@ def run_queue(args: argparse.Namespace) -> int:
                 state["updated_at"] = utc_now()
                 atomic_write_json(state_file, state)
             print(f"done {item['index']:04d}: {item['case_id']}")
+
+        if is_article_manifest(manifest):
+            merge_result = merge_article_batches(repo_root, manifest, manifest_path)
+            print(f"merge {merge_result['status']}: {merge_result['message']}")
+            if save_queue:
+                assert state is not None
+                state["merge"] = merge_result
+                state["updated_at"] = utc_now()
+                atomic_write_json(state_file, state)
     finally:
         if save_queue:
             assert lock_path is not None
@@ -602,7 +908,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--save-queue",
         action="store_true",
-        help="save queue state, lock file, and per-case logs under results/queues",
+        help="save queue state and lock file under results/queues",
     )
     parser.add_argument("--state-file", type=Path)
     parser.add_argument("--log-dir", type=Path)
@@ -611,6 +917,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force-unlock", action="store_true")
     parser.add_argument("--system", choices=("all", "open", "collimated"), default="all")
+    parser.add_argument("--only-experiments", help="comma-separated experiment IDs, e.g. E0,E3")
+    parser.add_argument("--from-experiment", choices=EXPERIMENT_ORDER)
+    parser.add_argument("--to-experiment", choices=EXPERIMENT_ORDER)
+    parser.add_argument("--start-index", type=int)
+    parser.add_argument("--end-index", type=int)
+    parser.add_argument("--limit", type=int)
+    parser.add_argument("--allow-large-run", action="store_true")
     parser.add_argument("--shard-count", type=int, default=1)
     parser.add_argument("--shard-index", type=int, default=0)
     parser.set_defaults(stop_on_failure=True)
@@ -619,6 +932,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--shard-count must be >= 1")
     if args.shard_index < 0 or args.shard_index >= args.shard_count:
         parser.error("--shard-index must satisfy 0 <= index < shard-count")
+    if args.start_index is not None and args.start_index < 0:
+        parser.error("--start-index must be >= 0")
+    if args.end_index is not None and args.end_index < 0:
+        parser.error("--end-index must be >= 0")
+    if args.start_index is not None and args.end_index is not None and args.start_index > args.end_index:
+        parser.error("--start-index must be <= --end-index")
+    if args.limit is not None and args.limit <= 0:
+        parser.error("--limit must be > 0")
+    if args.only_experiments and (args.from_experiment or args.to_experiment):
+        parser.error("--only-experiments cannot be combined with --from-experiment or --to-experiment")
+    if args.from_experiment and args.to_experiment:
+        if experiment_index(args.from_experiment) > experiment_index(args.to_experiment):
+            parser.error("--from-experiment must be earlier than or equal to --to-experiment")
+    if args.only_experiments:
+        try:
+            parse_experiment_csv(args.only_experiments)
+        except ValueError as error:
+            parser.error(str(error))
     if args.state_file is not None or args.log_dir is not None:
         args.save_queue = True
     if args.force_unlock and not args.save_queue:

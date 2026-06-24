@@ -1,0 +1,450 @@
+schema:
+  name: layered_backscatter_phantom_model
+  version: v01_cm_scale_depth_phantom
+  format: yaml
+metadata:
+  model_name: M1
+  model_version: v01
+  generated_at_utc: '2026-06-22'
+  scope: centimeter-scale backscatter phantom geometry for PMMA and simplified metal-layer experiments
+  description: Simplified metal-layer phantom with shallow 30x30x20 mm flour target D1
+  coordinate_note: Origin is the center of the phantom front surface; phantom occupies positive z.
+  defect:
+    id: D1
+    depth_label: shallow
+    material: Vehicle_Flour
+    center_mm:
+    - 0.0
+    - 0.0
+    - 25.0
+    size_mm:
+    - 30.0
+    - 30.0
+    - 20.0
+    z_range_mm:
+    - 15.0
+    - 35.0
+  normalized_for_mss_vehicle_roi: true
+  source_root_component: MetalLayeredPhantom
+units:
+  length: mm
+  density: g/cm3
+  mass_fraction: fraction
+  size_semantics: full_length_not_half_length
+coordinate_system:
+  x: lateral scan direction on phantom front surface
+  y: vertical scan direction on phantom front surface
+  z: depth direction; z=0 is phantom front surface; +z points into phantom
+  origin:
+    definition: center of phantom front surface
+    position_mm:
+    - 0.0
+    - 0.0
+    - 0.0
+  source_detector_side: z < 0
+  phantom_side: z >= 0
+roi:
+  name: VehicleROI
+  bounds_mm:
+    x:
+    - -500.0
+    - 500.0
+    y:
+    - -500.0
+    - 500.0
+    z:
+    - 0.0
+    - 220.0
+  center_mm:
+  - 0.0
+  - 0.0
+  - 110.0
+  size_mm:
+  - 1000.0
+  - 1000.0
+  - 220.0
+  material: G4_AIR
+  region_id: metal_phantom_air
+geant4_placement_rules:
+  solid: G4Box for each listed component
+  box_half_length_mm: size_mm * 0.5
+  global_center_semantics: component center is expressed in phantom coordinate system
+  placement_center_in_host_mm: component_center_mm - host_center_mm; root component is placed directly
+    in World
+  touching_surfaces: allowed in conceptual model
+  optional_engineering_gap_mm: 0.01
+materials:
+  G4_AIR:
+    type: NIST
+    built_in: true
+    semantic: air / void
+  G4_PLEXIGLASS:
+    type: NIST
+    built_in: true
+    semantic: PMMA phantom material
+  G4_Fe:
+    type: NIST
+    built_in: true
+    semantic: steel / metal layer proxy
+  G4_POLYPROPYLENE:
+    type: NIST
+    built_in: true
+    semantic: low-Z plastic trim layer proxy
+  G4_POLYETHYLENE:
+    type: NIST
+    built_in: true
+    semantic: optional low-Z organic target proxy
+  Vehicle_Flour:
+    type: custom
+    built_in: false
+    density_g_cm3: 0.6
+    elements_by_mass_fraction:
+      C: 0.444
+      H: 0.062
+      O: 0.494
+    semantic: flour / low-Z powder target proxy; approximate composition for simulation comparison
+model_modes:
+  normal:
+    rule: M0 contains layered metal/plastic structure with no flour target
+  abnormal:
+    selected_target_component: null
+    rule: not used for normalized explicit-phantom article geometries
+    default_abnormal_material: null
+    alternative_abnormal_materials: []
+    target_region_id: null
+    recommended_single_target_components: []
+regions:
+  detailed_region_ids:
+  - metal_phantom_air
+  - front_steel_skin
+  - front_trim
+  - middle_steel_sheet
+  - middle_trim
+  - deep_steel_sheet
+  - deep_trim
+  - rear_steel_sheet
+  - flour_target
+  - target
+  - none
+  - other
+  region_groups:
+    metal_layers:
+    - front_steel_skin
+    - middle_steel_sheet
+    - deep_steel_sheet
+    - rear_steel_sheet
+    low_z_layers:
+    - front_trim
+    - middle_trim
+    - deep_trim
+    defect:
+    - flour_target
+    - target
+    air_background:
+    - metal_phantom_air
+components:
+- name: VehicleROI
+  host: World
+  shape: box
+  center_mm:
+  - 0.0
+  - 0.0
+  - 110.0
+  size_mm:
+  - 1000.0
+  - 1000.0
+  - 220.0
+  material: G4_AIR
+  region_id: metal_phantom_air
+  is_insert: false
+  role: phantom_air_mother
+  half_size_mm:
+  - 500.0
+  - 500.0
+  - 110.0
+  aabb_mm:
+    x:
+    - -500.0
+    - 500.0
+    y:
+    - -500.0
+    - 500.0
+    z:
+    - 0.0
+    - 220.0
+  placement_center_in_host_mm:
+  - 0.0
+  - 0.0
+  - 110.0
+- name: front_steel_skin
+  host: VehicleROI
+  shape: box
+  center_mm:
+  - 0.0
+  - 0.0
+  - 0.5
+  size_mm:
+  - 1000.0
+  - 1000.0
+  - 1.0
+  material: G4_Fe
+  region_id: front_steel_skin
+  is_insert: false
+  role: metal_layer
+  half_size_mm:
+  - 500.0
+  - 500.0
+  - 0.5
+  aabb_mm:
+    x:
+    - -500.0
+    - 500.0
+    y:
+    - -500.0
+    - 500.0
+    z:
+    - 0.0
+    - 1.0
+  placement_center_in_host_mm:
+  - 0.0
+  - 0.0
+  - -109.5
+- name: front_trim
+  host: VehicleROI
+  shape: box
+  center_mm:
+  - 0.0
+  - 0.0
+  - 3.5
+  size_mm:
+  - 1000.0
+  - 1000.0
+  - 5.0
+  material: G4_POLYPROPYLENE
+  region_id: front_trim
+  is_insert: false
+  role: plastic_layer
+  half_size_mm:
+  - 500.0
+  - 500.0
+  - 2.5
+  aabb_mm:
+    x:
+    - -500.0
+    - 500.0
+    y:
+    - -500.0
+    - 500.0
+    z:
+    - 1.0
+    - 6.0
+  placement_center_in_host_mm:
+  - 0.0
+  - 0.0
+  - -106.5
+- name: middle_steel_sheet
+  host: VehicleROI
+  shape: box
+  center_mm:
+  - 0.0
+  - 0.0
+  - 65.5
+  size_mm:
+  - 1000.0
+  - 1000.0
+  - 1.0
+  material: G4_Fe
+  region_id: middle_steel_sheet
+  is_insert: false
+  role: metal_layer
+  half_size_mm:
+  - 500.0
+  - 500.0
+  - 0.5
+  aabb_mm:
+    x:
+    - -500.0
+    - 500.0
+    y:
+    - -500.0
+    - 500.0
+    z:
+    - 65.0
+    - 66.0
+  placement_center_in_host_mm:
+  - 0.0
+  - 0.0
+  - -44.5
+- name: middle_trim
+  host: VehicleROI
+  shape: box
+  center_mm:
+  - 0.0
+  - 0.0
+  - 68.5
+  size_mm:
+  - 1000.0
+  - 1000.0
+  - 5.0
+  material: G4_POLYPROPYLENE
+  region_id: middle_trim
+  is_insert: false
+  role: plastic_layer
+  half_size_mm:
+  - 500.0
+  - 500.0
+  - 2.5
+  aabb_mm:
+    x:
+    - -500.0
+    - 500.0
+    y:
+    - -500.0
+    - 500.0
+    z:
+    - 66.0
+    - 71.0
+  placement_center_in_host_mm:
+  - 0.0
+  - 0.0
+  - -41.5
+- name: deep_steel_sheet
+  host: VehicleROI
+  shape: box
+  center_mm:
+  - 0.0
+  - 0.0
+  - 125.5
+  size_mm:
+  - 1000.0
+  - 1000.0
+  - 1.0
+  material: G4_Fe
+  region_id: deep_steel_sheet
+  is_insert: false
+  role: metal_layer
+  half_size_mm:
+  - 500.0
+  - 500.0
+  - 0.5
+  aabb_mm:
+    x:
+    - -500.0
+    - 500.0
+    y:
+    - -500.0
+    - 500.0
+    z:
+    - 125.0
+    - 126.0
+  placement_center_in_host_mm:
+  - 0.0
+  - 0.0
+  - 15.5
+- name: deep_trim
+  host: VehicleROI
+  shape: box
+  center_mm:
+  - 0.0
+  - 0.0
+  - 128.5
+  size_mm:
+  - 1000.0
+  - 1000.0
+  - 5.0
+  material: G4_POLYPROPYLENE
+  region_id: deep_trim
+  is_insert: false
+  role: plastic_layer
+  half_size_mm:
+  - 500.0
+  - 500.0
+  - 2.5
+  aabb_mm:
+    x:
+    - -500.0
+    - 500.0
+    y:
+    - -500.0
+    - 500.0
+    z:
+    - 126.0
+    - 131.0
+  placement_center_in_host_mm:
+  - 0.0
+  - 0.0
+  - 18.5
+- name: rear_steel_sheet
+  host: VehicleROI
+  shape: box
+  center_mm:
+  - 0.0
+  - 0.0
+  - 200.5
+  size_mm:
+  - 1000.0
+  - 1000.0
+  - 1.0
+  material: G4_Fe
+  region_id: rear_steel_sheet
+  is_insert: false
+  role: metal_layer
+  half_size_mm:
+  - 500.0
+  - 500.0
+  - 0.5
+  aabb_mm:
+    x:
+    - -500.0
+    - 500.0
+    y:
+    - -500.0
+    - 500.0
+    z:
+    - 200.0
+    - 201.0
+  placement_center_in_host_mm:
+  - 0.0
+  - 0.0
+  - 90.5
+- name: D1_flour_target
+  host: VehicleROI
+  shape: box
+  center_mm:
+  - 0.0
+  - 0.0
+  - 25.0
+  size_mm:
+  - 30.0
+  - 30.0
+  - 20.0
+  material: Vehicle_Flour
+  region_id: flour_target
+  is_insert: false
+  role: shallow_flour_target
+  half_size_mm:
+  - 15.0
+  - 15.0
+  - 10.0
+  aabb_mm:
+    x:
+    - -15.0
+    - 15.0
+    y:
+    - -15.0
+    - 15.0
+    z:
+    - 15.0
+    - 35.0
+  placement_center_in_host_mm:
+  - 0.0
+  - 0.0
+  - -85.0
+validation:
+  aabb_overlap_check:
+    method: positive-volume overlap among sibling components; touching surfaces are allowed
+    status: not_run_generated_geometry_expected_no_positive_overlap
+  required_host_containment_checks:
+  - all defect components are fully contained in their host volume
+  - all metal/plastic layers are fully contained in the metal phantom envelope
+  - all component aabb_mm values are consistent with center_mm and size_mm

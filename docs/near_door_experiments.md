@@ -253,7 +253,7 @@ output:
 
 满足这些条件的 case 会跳过。失败、中断或输出不完整的 case 会重新运行；由于生成 YAML 默认使用 `existing_run_policy: overwrite`，重新运行时会由 C++ 程序清理该 case 的旧 run 目录残留。
 
-如需保留队列状态、lock file 和每个 case 的 stdout/stderr 日志，可加 `--save-queue`：
+如需保留队列状态和 lock file，可加 `--save-queue`：
 
 ```bash
 python3 scripts/run_experiment_queue.py \
@@ -268,10 +268,14 @@ python3 scripts/run_experiment_queue.py \
 results/queues/near_door/queue_state.json
 ```
 
-日志写入：
+`queue_state.json` 足够用于检查每个 case 的完成、失败、跳过和恢复状态。逐 case stdout/stderr 日志不是必须产物；只有需要排错时才显式增加 `--log-dir`：
 
-```text
-results/queues/near_door/queue_logs/<queue_id>/<index>_<case_id>.log
+```bash
+python3 scripts/run_experiment_queue.py \
+  --manifest config/generated/near_door/manifest.yaml \
+  --binary ./build/MSS \
+  --save-queue \
+  --log-dir results/queues/near_door/queue_logs
 ```
 
 常用选项：
@@ -281,9 +285,9 @@ results/queues/near_door/queue_logs/<queue_id>/<index>_<case_id>.log
 | `--dry-run` | 只打印将运行或跳过的 case，不启动 Geant4 |
 | `--rerun-completed` | 忽略已有完整输出，重新运行全部 case |
 | `--continue-on-failure` | 某个 case 失败后继续运行后续 case |
-| `--save-queue` | 保存队列状态、lock 和每个 case 的日志 |
+| `--save-queue` | 保存队列状态和 lock |
 | `--state-file <path>` | 指定状态文件，并隐式启用保存模式 |
-| `--log-dir <path>` | 指定日志根目录，并隐式启用保存模式 |
+| `--log-dir <path>` | 指定日志根目录，保存每个 case 的 stdout/stderr，并隐式启用保存模式 |
 | `--force-unlock` | 保存模式下，人工确认旧队列已停止后清理遗留 lock |
 | `--system open|collimated` | 只运行指定系统，默认 `all` |
 | `--shard-count N` | 将过滤后的队列按顺序分为 N 片 |

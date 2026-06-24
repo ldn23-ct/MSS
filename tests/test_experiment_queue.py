@@ -85,6 +85,8 @@ class ExperimentQueueTests(unittest.TestCase):
         root: Path,
         configs: list[Path],
         systems: list[str] | None = None,
+        experiments: list[str] | None = None,
+        run_safety: dict | None = None,
     ) -> Path:
         manifest = {
             "cases": [
@@ -92,10 +94,13 @@ class ExperimentQueueTests(unittest.TestCase):
                     "case_id": config.stem,
                     "config_file": config.as_posix(),
                     **({"system": systems[index]} if systems is not None else {}),
+                    **({"experiment": experiments[index]} if experiments is not None else {}),
                 }
                 for index, config in enumerate(configs)
             ]
         }
+        if run_safety is not None:
+            manifest["run_safety"] = run_safety
         manifest_path = root / "manifest.yaml"
         manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
         return manifest_path
@@ -141,10 +146,19 @@ class ExperimentQueueTests(unittest.TestCase):
                     run_dir = Path(expected["run_dir"])
                     run_dir.mkdir(parents=True, exist_ok=True)
                     Path(expected["metadata"]).write_text(
-                        yaml.safe_dump({{"run_id": expected["run_id"]}}, sort_keys=False),
+                        yaml.safe_dump(
+                            {{
+                                "run_id": expected["run_id"],
+                                "n_primary": expected.get("n_primary", 0),
+                            }},
+                            sort_keys=False,
+                        ),
                         encoding="utf-8",
                     )
-                    Path(expected["csv"]).write_text("event_id,hit_id\\n", encoding="utf-8")
+                    if os.environ.get("FAKE_MSS_WRITE_EVENTS") == "1":
+                        Path(expected["csv"]).write_text("event_id,hit_id\\n2,7\\n", encoding="utf-8")
+                    else:
+                        Path(expected["csv"]).write_text("event_id,hit_id\\n", encoding="utf-8")
                 append_order("end:" + case_id)
                 """
             ),
@@ -160,6 +174,7 @@ class ExperimentQueueTests(unittest.TestCase):
         binary: Path,
         *extra_args: str,
         save_paths: bool = True,
+        with_logs: bool = False,
     ) -> int:
         argv = [
             "--repo-root",
@@ -174,10 +189,15 @@ class ExperimentQueueTests(unittest.TestCase):
                 [
                     "--state-file",
                     (root / "queue_state.json").as_posix(),
-                    "--log-dir",
-                    (root / "queue_logs").as_posix(),
                 ]
             )
+            if with_logs:
+                argv.extend(
+                    [
+                        "--log-dir",
+                        (root / "queue_logs").as_posix(),
+                    ]
+                )
         argv.extend(extra_args)
         args = queue.parse_args(argv)
         return queue.run_queue(args)
@@ -218,7 +238,7 @@ class ExperimentQueueTests(unittest.TestCase):
             self.assertFalse((root / "queue_state.json").exists())
             self.assertFalse((root / "queue_logs").exists())
 
-    def test_saved_queue_successful_cases_run_strictly_serially(self):
+    def test_saved_queue_successful_cases_run_strictly_serially_without_logs_by_default(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             configs = [self.write_config(root, "case_a"), self.write_config(root, "case_b")]
@@ -236,7 +256,22 @@ class ExperimentQueueTests(unittest.TestCase):
             state = load_json(root / "queue_state.json")
             self.assertEqual(["completed", "completed"], [item["status"] for item in state["items"]])
             for item in state["items"]:
-                self.assertTrue(Path(item["log_path"]).is_file() or (REPO_ROOT / item["log_path"]).is_file())
+                self.assertIsNone(item["log_path"])
+            self.assertFalse((root / "queue_logs").exists())
+
+    def test_explicit_log_dir_writes_per_case_logs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            configs = [self.write_config(root, "case_a")]
+            manifest = self.write_manifest(root, configs)
+            fake = self.write_fake_binary(root)
+
+            self.assertEqual(0, self.run_queue(root, manifest, fake, with_logs=True))
+
+            state = load_json(root / "queue_state.json")
+            log_path = state["items"][0]["log_path"]
+            self.assertIsNotNone(log_path)
+            self.assertTrue((REPO_ROOT / log_path).is_file() or Path(log_path).is_file())
 
     def test_saved_queue_resume_skips_already_complete_runs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -447,6 +482,232 @@ class ExperimentQueueTests(unittest.TestCase):
                 queue.run_queue(args)
 
             self.assertTrue(lock_path.exists())
+
+    def test_experiment_range_index_and_limit_filters(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            configs = [
+                self.write_config(root, "case_e0"),
+                self.write_config(root, "case_e1"),
+                self.write_config(root, "case_e3"),
+                self.write_config(root, "case_e4"),
+            ]
+            manifest = self.write_manifest(root, configs, experiments=["E0", "E1", "E3", "E4"])
+            fake = self.write_fake_binary(root)
+            order_log = root / "order.log"
+            os.environ["FAKE_MSS_ORDER_LOG"] = order_log.as_posix()
+
+            self.assertEqual(
+                0,
+                self.run_queue(
+                    root,
+                    manifest,
+                    fake,
+                    "--from-experiment",
+                    "E0",
+                    "--to-experiment",
+                    "E3",
+                    "--start-index",
+                    "1",
+                    "--end-index",
+                    "3",
+                    "--limit",
+                    "1",
+                    save_paths=False,
+                ),
+            )
+
+            self.assertEqual(
+                ["start:case_e1", "end:case_e1"],
+                order_log.read_text(encoding="utf-8").splitlines(),
+            )
+
+    def test_only_experiments_filter(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            configs = [
+                self.write_config(root, "case_e0"),
+                self.write_config(root, "case_e4"),
+            ]
+            manifest = self.write_manifest(root, configs, experiments=["E0", "E4"])
+            fake = self.write_fake_binary(root)
+            order_log = root / "order.log"
+            os.environ["FAKE_MSS_ORDER_LOG"] = order_log.as_posix()
+
+            self.assertEqual(
+                0,
+                self.run_queue(
+                    root,
+                    manifest,
+                    fake,
+                    "--only-experiments",
+                    "E4",
+                    save_paths=False,
+                ),
+            )
+
+            self.assertEqual(
+                ["start:case_e4", "end:case_e4"],
+                order_log.read_text(encoding="utf-8").splitlines(),
+            )
+
+    def test_large_run_guard_blocks_execution_but_not_dry_run(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            configs = [self.write_config(root, "case_a"), self.write_config(root, "case_b")]
+            manifest = self.write_manifest(
+                root,
+                configs,
+                run_safety={
+                    "large_run_case_threshold": 1,
+                    "allow_large_run_required": True,
+                },
+            )
+            missing_binary = root / "missing_mss"
+
+            self.assertEqual(
+                0,
+                self.run_queue(root, manifest, missing_binary, "--dry-run", save_paths=False),
+            )
+            args = queue.parse_args(
+                [
+                    "--repo-root",
+                    REPO_ROOT.as_posix(),
+                    "--manifest",
+                    manifest.as_posix(),
+                    "--binary",
+                    missing_binary.as_posix(),
+                ]
+            )
+            with self.assertRaisesRegex(RuntimeError, "above manifest threshold"):
+                queue.run_queue(args)
+
+    def test_article_batches_auto_merge_after_all_manifest_cases_complete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            configs = []
+            cases = []
+            for batch_index, seed in enumerate([9000, 9001, 9002]):
+                case_id = f"article_E0_P0_E80_center_b{batch_index}_seed{seed}"
+                config_path = self.write_config(root, case_id, energy_keV=80, n_primary=10)
+                config = queue.load_yaml(config_path)
+                config["run"]["random_seed"] = seed
+                config["output"]["output_directory"] = (
+                    root / "results/article/unit/runs/E0_P0_E80_center" / f"b{batch_index}"
+                ).as_posix()
+                config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+                configs.append(config_path)
+                cases.append(
+                    {
+                        "case_id": case_id,
+                        "condition_id": "E0_P0_E80_center",
+                        "config_file": config_path.as_posix(),
+                        "experiment": "E0",
+                        "phantom_id": "P0",
+                        "phantom_group": "pmma",
+                        "defect_depth_id": 0,
+                        "defect_depth_label": "control",
+                        "geometry_file": "config/geometry/phantom_yaml_files/P0.yaml",
+                        "energy_keV": 80.0,
+                        "pose": "center",
+                        "head_offset_x_mm": 0,
+                        "head_offset_y_mm": 0,
+                        "batch_index": batch_index,
+                        "batch_count": 3,
+                        "seed": seed,
+                        "n_primary_per_pose": 10,
+                        "raw_output_directory": config["output"]["output_directory"],
+                        "condition_output_directory": (
+                            root / "results/article/unit/by_condition/E0/P0/E80/center"
+                        ).as_posix(),
+                    }
+                )
+            manifest = {
+                "experiment": "article_simulation_campaign",
+                "campaign_id": "unit",
+                "condition_output_root": (root / "results/article/unit/by_condition").as_posix(),
+                "cases": cases,
+            }
+            manifest_path = root / "manifest.yaml"
+            manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+            fake = self.write_fake_binary(root)
+            os.environ["FAKE_MSS_WRITE_EVENTS"] = "1"
+
+            self.assertEqual(0, self.run_queue(root, manifest_path, fake))
+
+            merged_dir = root / "results/article/unit/by_condition/E0/P0/E80/center"
+            self.assertTrue((merged_dir / "events.csv").is_file())
+            self.assertTrue((merged_dir / "metadata.yaml").is_file())
+            self.assertEqual(
+                ["event_id,hit_id", "2,7", "12,7", "22,7"],
+                (merged_dir / "events.csv").read_text(encoding="utf-8").splitlines(),
+            )
+            metadata = yaml.safe_load((merged_dir / "metadata.yaml").read_text(encoding="utf-8"))
+            self.assertTrue(metadata["merged_article_batches"])
+            self.assertEqual(30, metadata["n_primary"])
+            self.assertEqual([9000, 9001, 9002], metadata["merge"]["seeds"])
+            state = load_json(root / "queue_state.json")
+            self.assertEqual("completed", state["merge"]["status"])
+            self.assertEqual(1, state["merge"]["condition_count"])
+
+    def test_article_merge_skips_when_full_manifest_is_incomplete(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_a = self.write_config(root, "case_a", n_primary=10)
+            config_b = self.write_config(root, "case_b", n_primary=10)
+            manifest = {
+                "experiment": "article_simulation_campaign",
+                "campaign_id": "unit",
+                "condition_output_root": (root / "results/article/unit/by_condition").as_posix(),
+                "cases": [
+                    {
+                        "case_id": "case_a",
+                        "condition_id": "E0_P0_E80_center",
+                        "config_file": config_a.as_posix(),
+                        "experiment": "E0",
+                        "phantom_id": "P0",
+                        "energy_keV": 80.0,
+                        "pose": "center",
+                        "head_offset_x_mm": 0,
+                        "head_offset_y_mm": 0,
+                        "geometry_file": "config/geometry/phantom_yaml_files/P0.yaml",
+                        "defect_depth_id": 0,
+                        "batch_index": 0,
+                        "seed": 9000,
+                        "condition_output_directory": (
+                            root / "results/article/unit/by_condition/E0/P0/E80/center"
+                        ).as_posix(),
+                    },
+                    {
+                        "case_id": "case_b",
+                        "condition_id": "E0_P0_E80_center",
+                        "config_file": config_b.as_posix(),
+                        "experiment": "E0",
+                        "phantom_id": "P0",
+                        "energy_keV": 80.0,
+                        "pose": "center",
+                        "head_offset_x_mm": 0,
+                        "head_offset_y_mm": 0,
+                        "geometry_file": "config/geometry/phantom_yaml_files/P0.yaml",
+                        "defect_depth_id": 0,
+                        "batch_index": 1,
+                        "seed": 9001,
+                        "condition_output_directory": (
+                            root / "results/article/unit/by_condition/E0/P0/E80/center"
+                        ).as_posix(),
+                    },
+                ],
+            }
+            manifest_path = root / "manifest.yaml"
+            manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+            fake = self.write_fake_binary(root)
+
+            self.assertEqual(0, self.run_queue(root, manifest_path, fake, "--limit", "1"))
+
+            state = load_json(root / "queue_state.json")
+            self.assertEqual("skipped", state["merge"]["status"])
+            self.assertIn("incomplete", state["merge"]["message"])
+            self.assertFalse((root / "results/article/unit/by_condition").exists())
 
 
 if __name__ == "__main__":
