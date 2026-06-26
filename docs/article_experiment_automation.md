@@ -507,16 +507,22 @@ conda activate data
 
 - `first_scatter_z >= 0`；
 - `last_scatter_z >= 0`；
-- `det_x` 落入脚本顶部 `DET_X_LEFT_EDGES_MM` 与 `DET_X_RIGHT_EDGES_MM` 定义的任一闭区间。
+- `det_x` 落入脚本顶部 `DET_X_LEFT_EDGES_MM` 与 `DET_X_RIGHT_EDGES_MM` 定义的任一闭区间；该区间表示 `head_offset_x_mm = 0` 时的零偏置通道窗口，脚本会按每个 run 的 `head_offset_x_mm` 整体平移后再筛选。
 
 默认 `det_x` 区间在脚本顶部直接修改，不提供命令行参数：
 
 ```python
-DET_X_LEFT_EDGES_MM = [9.0, 34.0, 100.0]
-DET_X_RIGHT_EDGES_MM = [30.0, 96.0, 146.0]
+DET_X_LEFT_EDGES_MM = [17.24, 84.21, 126.44]
+DET_X_RIGHT_EDGES_MM = [27.10, 94.54, 136.04]
 ```
 
 第 `i` 个区间映射为 `S{i+1}`。区间端点必须有限、左端点不大于右端点，且闭区间之间不得重叠；非法配置会 fail fast。
+
+偏置读取规则：
+
+- 普通 run metadata 使用顶层 `head_offset_x_mm`；
+- article 合并后的 by-condition metadata 使用 `condition.head_offset_x_mm`；
+- 若两处同时存在但数值不一致，脚本会 fail fast。
 
 输入：
 
@@ -568,15 +574,14 @@ python3 scripts/article/clean_events.py \
 功能：
 
 - 读取 grid 模式下每个 pose 的事件文件和 `metadata.yaml`；
-- 优先使用 `events_clean.csv` 中已有的 `slit_id`；
-- 若通过 `--events-name events.csv` 直接读取原始事件文件，则按与清洗脚本相同的 `det_x` 区间临时生成 `slit_id`；
+- 使用 `events_clean.csv` 中已有的 `slit_id`；
 - 对每个 `phantom_id × slit_id × grid pose` 统计响应通道；
 - 将非均匀采样 offset 按排序后的均匀矩阵索引显示，用于生成二维响应图。
 
 输入：
 
 ```text
---input-root     clean_events.py 的输出根目录，或原始 by_condition 根目录
+--input-root     clean_events.py 的输出根目录
 --events-name    输入事件文件名，默认 events_clean.csv
 --experiment     E1 或 E4 等实验编号
 --energy         能量筛选，如 E460 或 460
@@ -632,16 +637,7 @@ conda run -n data python scripts/article/plot_grid_response.py \
   --output-dir results/article/article_run01/grid_response_E1_E460
 ```
 
-示例，直接读取原始 `events.csv`：
-
-```bash
-conda run -n data python scripts/article/plot_grid_response.py \
-  --input-root results/article/article_run01/by_condition \
-  --events-name events.csv \
-  --experiment E1 \
-  --energy E460 \
-  --output-dir results/article/article_run01/grid_response_E1_E460_raw
-```
+`plot_grid_response.py` 不直接支持原始 `events.csv` 的通道分配；若输入文件缺少 `slit_id`，应先运行 `clean_events.py` 生成 `events_clean.csv`。
 
 该脚本只生成二维响应矩阵和预览图，不计算 CNR、ROI 指标、论文表格或事件级解释图。
 

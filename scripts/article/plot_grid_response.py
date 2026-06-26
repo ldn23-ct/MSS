@@ -27,7 +27,7 @@ except ModuleNotFoundError as error:  # pragma: no cover - exercised by CLI user
         "Run `conda activate data` or use `conda run -n data python ...`."
     ) from error
 
-from clean_events import SLIT_COLUMN, RangeSpec, slit_for_det_x, validate_det_x_ranges
+from clean_events import SLIT_COLUMN, RangeSpec, validate_det_x_ranges
 
 
 GRID_POSE_RE = re.compile(r"^grid_x(?P<x>-?m?\d+(?:p\d+)?)_y(?P<y>-?m?\d+(?:p\d+)?)$")
@@ -218,39 +218,18 @@ def run_info_for(event_file: Path, metadata_name: str) -> RunInfo:
     )
 
 
-def assign_slit_ids(frame: pd.DataFrame, ranges: list[RangeSpec], source: Path) -> pd.DataFrame:
-    required = {"det_x", "first_scatter_z", "last_scatter_z"}
-    missing = sorted(required.difference(frame.columns))
-    if missing:
-        raise ValueError(f"raw events CSV is missing required columns {missing}: {source}")
-
-    working = frame.copy()
-    for column in ("det_x", "first_scatter_z", "last_scatter_z"):
-        working[column] = pd.to_numeric(working[column], errors="coerce")
-    valid_rows = (
-        working["det_x"].notna()
-        & working["first_scatter_z"].notna()
-        & working["last_scatter_z"].notna()
-        & np.isfinite(working["det_x"])
-        & np.isfinite(working["first_scatter_z"])
-        & np.isfinite(working["last_scatter_z"])
-        & (working["first_scatter_z"] >= 0.0)
-        & (working["last_scatter_z"] >= 0.0)
-    )
-    working = working[valid_rows].copy()
-    working[SLIT_COLUMN] = working["det_x"].apply(lambda value: slit_for_det_x(float(value), ranges))
-    return working[working[SLIT_COLUMN].notna()].copy()
-
-
 def load_events(event_file: Path, ranges: list[RangeSpec]) -> pd.DataFrame:
     frame = pd.read_csv(event_file, low_memory=False)
     if "scatter_count_total" not in frame.columns:
         raise ValueError(f"events CSV is missing scatter_count_total: {event_file}")
     if SLIT_COLUMN not in frame.columns:
-        frame = assign_slit_ids(frame, ranges, event_file)
-    else:
-        frame = frame.copy()
-        frame[SLIT_COLUMN] = frame[SLIT_COLUMN].astype(str)
+        raise ValueError(
+            f"events CSV is missing {SLIT_COLUMN}: {event_file}; "
+            "run scripts/article/clean_events.py first and use events_clean.csv"
+        )
+
+    frame = frame.copy()
+    frame[SLIT_COLUMN] = frame[SLIT_COLUMN].astype(str)
 
     valid_slits = {item.slit_id for item in ranges}
     frame = frame[frame[SLIT_COLUMN].isin(valid_slits)].copy()

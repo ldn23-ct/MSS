@@ -114,15 +114,53 @@ def read_metadata_for_events(event_file: Path) -> dict[str, Any]:
     return metadata
 
 
-def head_offset_x_from_metadata(metadata: dict[str, Any], source: Path) -> float:
-    value = metadata.get("head_offset_x_mm")
+def parse_metadata_offset(value: Any, field_path: str, source: Path) -> float:
     try:
         offset_x = float(value)
     except (TypeError, ValueError) as error:
-        raise ValueError(f"metadata head_offset_x_mm must be numeric in {source}: {value!r}") from error
+        raise ValueError(f"metadata {field_path} must be numeric in {source}: {value!r}") from error
     if not math.isfinite(offset_x):
-        raise ValueError(f"metadata head_offset_x_mm must be finite in {source}: {value!r}")
+        raise ValueError(f"metadata {field_path} must be finite in {source}: {value!r}")
     return offset_x
+
+
+def head_offset_x_from_metadata(metadata: dict[str, Any], source: Path) -> float:
+    candidates: list[tuple[str, float]] = []
+    if "head_offset_x_mm" in metadata:
+        candidates.append(
+            (
+                "head_offset_x_mm",
+                parse_metadata_offset(metadata.get("head_offset_x_mm"), "head_offset_x_mm", source),
+            )
+        )
+
+    condition = metadata.get("condition")
+    if isinstance(condition, dict) and "head_offset_x_mm" in condition:
+        candidates.append(
+            (
+                "condition.head_offset_x_mm",
+                parse_metadata_offset(
+                    condition.get("head_offset_x_mm"),
+                    "condition.head_offset_x_mm",
+                    source,
+                ),
+            )
+        )
+
+    if not candidates:
+        raise ValueError(
+            "metadata head_offset_x_mm is required either at top level or at "
+            f"condition.head_offset_x_mm in {source}"
+        )
+
+    first_path, first_value = candidates[0]
+    for path, value in candidates[1:]:
+        if not math.isclose(first_value, value, rel_tol=0.0, abs_tol=1.0e-9):
+            raise ValueError(
+                "metadata head_offset_x_mm values disagree in "
+                f"{source}: {first_path}={first_value}, {path}={value}"
+            )
+    return first_value
 
 
 def parse_required_float(row: dict[str, str], field: str, source: Path) -> float:
