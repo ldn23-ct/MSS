@@ -23,8 +23,8 @@ except ModuleNotFoundError as error:  # pragma: no cover - exercised by CLI user
 
 # Edit these two lists directly when the detector-x slit windows change.
 # The i-th [left, right] interval is written as slit_id S{i + 1}.
-DET_X_LEFT_EDGES_MM = [9.0, 34.0, 100.0]
-DET_X_RIGHT_EDGES_MM = [30.0, 96.0, 146.0]
+DET_X_LEFT_EDGES_MM = [17.24, 84.21, 126.44]
+DET_X_RIGHT_EDGES_MM = [27.10, 94.54, 136.04]
 
 SLIT_COLUMN = "slit_id"
 SUMMARY_CSV_NAME = "clean_summary.csv"
@@ -55,6 +55,13 @@ class RangeSpec:
     slit_id: str
     left_mm: float
     right_mm: float
+
+
+def shifted_det_x_ranges(ranges: list[RangeSpec], head_offset_x_mm: float) -> list[RangeSpec]:
+    return [
+        RangeSpec(item.slit_id, item.left_mm + head_offset_x_mm, item.right_mm + head_offset_x_mm)
+        for item in ranges
+    ]
 
 
 def validate_det_x_ranges(
@@ -94,6 +101,28 @@ def slit_for_det_x(det_x: float, ranges: list[RangeSpec]) -> str | None:
     if len(matches) > 1:
         raise ValueError(f"det_x={det_x} matched multiple slit intervals: {matches}")
     return matches[0]
+
+
+def read_metadata_for_events(event_file: Path) -> dict[str, Any]:
+    metadata_path = event_file.parent / METADATA_NAME
+    if not metadata_path.is_file():
+        raise FileNotFoundError(f"metadata file not found beside events file: {metadata_path}")
+    with metadata_path.open("r", encoding="utf-8") as stream:
+        metadata = yaml.safe_load(stream)
+    if not isinstance(metadata, dict):
+        raise ValueError(f"metadata root must be a map: {metadata_path}")
+    return metadata
+
+
+def head_offset_x_from_metadata(metadata: dict[str, Any], source: Path) -> float:
+    value = metadata.get("head_offset_x_mm")
+    try:
+        offset_x = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"metadata head_offset_x_mm must be numeric in {source}: {value!r}") from error
+    if not math.isfinite(offset_x):
+        raise ValueError(f"metadata head_offset_x_mm must be finite in {source}: {value!r}")
+    return offset_x
 
 
 def parse_required_float(row: dict[str, str], field: str, source: Path) -> float:
@@ -183,11 +212,15 @@ def clean_one_file(
 ) -> dict[str, Any]:
     if output_file.exists() and not overwrite:
         raise FileExistsError(f"output already exists: {output_file}")
+    metadata = read_metadata_for_events(event_file)
+    metadata_path = event_file.parent / METADATA_NAME
+    head_offset_x_mm = head_offset_x_from_metadata(metadata, metadata_path)
+    actual_ranges = shifted_det_x_ranges(ranges, head_offset_x_mm)
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     rows_read = 0
     rows_kept = 0
-    slit_counts = {item.slit_id: 0 for item in ranges}
+    slit_counts = {item.slit_id: 0 for item in actual_ranges}
 
     with event_file.open("r", encoding="utf-8", newline="") as input_stream:
         reader = csv.DictReader(input_stream)
@@ -205,7 +238,7 @@ def clean_one_file(
                     continue
                 if first_z < 0.0 or last_z < 0.0:
                     continue
-                slit_id = slit_for_det_x(det_x, ranges)
+                slit_id = slit_for_det_x(det_x, actual_ranges)
                 if slit_id is None:
                     continue
 
@@ -224,9 +257,14 @@ def clean_one_file(
         "rows_kept": rows_kept,
         "kept_fraction": kept_fraction,
         "metadata_copied": copied_metadata,
+        "head_offset_x_mm": head_offset_x_mm,
+        "shifted_det_x_ranges_mm": actual_ranges,
     }
-    for slit_id, count in slit_counts.items():
-        summary[f"{slit_id}_rows_kept"] = count
+    for range_spec in actual_ranges:
+        slit_id = range_spec.slit_id
+        summary[f"{slit_id}_left_mm"] = range_spec.left_mm
+        summary[f"{slit_id}_right_mm"] = range_spec.right_mm
+        summary[f"{slit_id}_rows_kept"] = slit_counts[slit_id]
     return summary
 
 
@@ -240,6 +278,8 @@ def write_summary_csv(path: Path, rows: list[dict[str, Any]], ranges: list[Range
         "rows_kept",
         "kept_fraction",
         "metadata_copied",
+        "head_offset_x_mm",
+        *[field for item in ranges for field in (f"{item.slit_id}_left_mm", f"{item.slit_id}_right_mm")],
         *[f"{item.slit_id}_rows_kept" for item in ranges],
     ]
     with path.open("w", encoding="utf-8", newline="") as stream:
@@ -291,9 +331,11 @@ def main(argv: list[str] | None = None) -> int:
             "events_name": args.events_name,
             "output_name": args.output_name,
             "det_x_ranges_mm": ranges,
+            "det_x_ranges_zero_pose_mm": ranges,
             "drop_columns": sorted(DROP_COLUMNS),
             "input_file_count": len(event_files),
             "summary_csv": summary_path,
+            "files": summaries,
         },
         args.overwrite,
     )

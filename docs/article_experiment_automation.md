@@ -595,20 +595,20 @@ E4 -> M0
 统计通道：
 
 ```text
-I_total       = N_total / n_primary
-I_k1          = N(scatter_count_total == 1) / n_primary
-I_k2          = N(scatter_count_total == 2) / n_primary
-I_ms          = N(scatter_count_total >= 2) / n_primary
-I_without_ms  = N(scatter_count_total <= 1) / n_primary
+I_total       = N_total
+I_k1          = N(scatter_count_total == 1)
+I_k2          = N(scatter_count_total == 2)
+I_ms          = N(scatter_count_total >= 2)
+I_without_ms  = N(scatter_count_total <= 1)
 F_ms          = N_ms / N_total
 ```
 
 差异图通道：
 
 ```text
-Delta_I_total = I_total - I_total(control)
-Delta_I_k1    = I_k1 - I_k1(control)
-Delta_I_ms    = I_ms - I_ms(control)
+Delta_I_total = N_total - N_total(control)
+Delta_I_k1    = N_k1 - N_k1(control)
+Delta_I_ms    = N_ms - N_ms(control)
 ```
 
 输出：

@@ -30,7 +30,7 @@ except ModuleNotFoundError as error:  # pragma: no cover - exercised by CLI user
 from clean_events import SLIT_COLUMN, RangeSpec, slit_for_det_x, validate_det_x_ranges
 
 
-GRID_POSE_RE = re.compile(r"^grid_x(?P<x>m?\d+(?:p\d+)?)_y(?P<y>m?\d+(?:p\d+)?)$")
+GRID_POSE_RE = re.compile(r"^grid_x(?P<x>-?m?\d+(?:p\d+)?)_y(?P<y>-?m?\d+(?:p\d+)?)$")
 EXPERIMENT_TOKENS = {"E0", "E1", "E3", "E4"}
 MATRIX_CHANNELS = (
     "I_total",
@@ -127,8 +127,8 @@ def normalize_energy_filter(text: str) -> str:
 
 def parse_pose_number(token: str) -> float:
     normalized = token.replace("p", ".")
-    sign = -1.0 if normalized.startswith("m") else 1.0
-    if normalized.startswith("m"):
+    sign = -1.0 if normalized.startswith(("m", "-")) else 1.0
+    if normalized.startswith(("m", "-")):
         normalized = normalized[1:]
     return sign * float(normalized)
 
@@ -285,11 +285,11 @@ def aggregate_run(info: RunInfo, frame: pd.DataFrame, ranges: list[RangeSpec]) -
                 "N_k2": n_k2,
                 "N_ms": n_ms,
                 "N_without_ms": n_without_ms,
-                "I_total": n_total / info.n_primary,
-                "I_k1": n_k1 / info.n_primary,
-                "I_k2": n_k2 / info.n_primary,
-                "I_ms": n_ms / info.n_primary,
-                "I_without_ms": n_without_ms / info.n_primary,
+                "I_total": n_total,
+                "I_k1": n_k1,
+                "I_k2": n_k2,
+                "I_ms": n_ms,
+                "I_without_ms": n_without_ms,
                 "F_ms": n_ms / n_total if n_total else math.nan,
                 "run_dir": info.run_dir.as_posix(),
                 "events_file": info.events_path.as_posix(),
