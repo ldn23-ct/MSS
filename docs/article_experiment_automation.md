@@ -8,8 +8,10 @@
 
 - `scripts/generate_article_experiment_configs.py`
 - `scripts/run_experiment_queue.py`
+- `scripts/article/clean_events.py`
+- `scripts/article/plot_grid_response.py`
 
-本工具只负责仿真任务自动化：
+其中生成器和队列脚本只负责仿真任务自动化：
 
 - 生成 Geant4 主入口 YAML；
 - 生成实验 manifest；
@@ -17,7 +19,7 @@
 - 串行调用现有 `MSS` 程序执行队列；
 - 支持 dry-run、smoke-run、batch 拆分、跳过已完成任务、按实验段或序号切分任务。
 
-本工具不做：
+生成器、队列脚本和 Geant4 基础程序不做：
 
 - 后处理；
 - 绘图；
@@ -26,6 +28,8 @@
 - 论文表格；
 - slit-resolved 统计；
 - 修改正式 `events.csv`、`events_debug.csv` 或 `metadata.yaml` 基础 schema。
+
+`scripts/article/` 下的脚本是显式的派生后处理工具，只读取 `by_condition/` 下的 `events.csv` 与 `metadata.yaml`，输出清洗数据、响应矩阵和预览图，不修改 Geant4 原始输出 schema。
 
 ## 2. 与实验设计的对应关系
 
@@ -116,13 +120,13 @@ config/geometry/phantom_yaml_files/P0.yaml ... M3.yaml
 - generated config 直接引用 `config/geometry/phantom_yaml_files/<phantom>.yaml`；
 - 不再为每个 campaign 复制 `geometries/P0-M3.yaml`。
 
-每个 generated YAML 只包含一个 pose。Geant4 原始 run 作为可追溯中间产物写入：
+每个 generated YAML 只包含一个 pose。Geant4 原始 run 会先作为合并前临时产物写入：
 
 ```text
 results/article/<campaign_id>/runs/<condition_id>/b<batch_index>/<run_id>/
 ```
 
-其中 `<run_id>` 仍由 C++ 按 run-level 规则生成，并包含 seed。用户主要查看的 batch 合并结果写入：
+其中 `<run_id>` 仍由 C++ 按 run-level 规则生成，并包含 seed。默认情况下，完整 article manifest 成功合并到 `by_condition/` 后，队列会删除这些 raw run 目录以节省空间。用户主要查看和后续分析的 batch 合并结果写入：
 
 ```text
 results/article/<campaign_id>/by_condition/<experiment>/<phantom_id>/E<energy>/<pose>/
@@ -309,6 +313,16 @@ python3 scripts/run_experiment_queue.py \
 
 `queue_state.json` 记录每个 case 的 `status`、`return_code`、`started_at`、`ended_at`、`attempt_count` 和预期输出文件，足够用于检查队列完成、失败、跳过和恢复状态。
 
+若需要排查 Geant4 原始 run 输出，可显式保留 `runs/`：
+
+```bash
+python3 scripts/run_experiment_queue.py \
+  --manifest config/generated/article/article_run01/manifest.yaml \
+  --binary ./build/MSS \
+  --allow-large-run \
+  --keep-raw-runs
+```
+
 逐 case 日志不是必须产物。只有需要保存 Geant4 stdout/stderr 以便排错时，才显式增加：
 
 ```bash
@@ -336,7 +350,7 @@ python3 scripts/run_experiment_queue.py \
 - 多台机器分担：用 `--start-index/--end-index`、`--limit` 或 `--shard-count/--shard-index` 切片。
 - 不建议两台机器同时写同一 manifest 切片到同一批 output directory。
 
-`batch-count` 的语义是把同一物理条件拆成多个独立 Geant4 run。每个 batch 使用独立 seed，并保留在 `runs/<condition_id>/b<batch_index>/<run_id>/` 作为可追溯 raw 输出；队列完成完整 manifest 后会自动生成 `by_condition/` 合并结果。本阶段只做 batch CSV 拼接整理，不做统计分析。
+`batch-count` 的语义是把同一物理条件拆成多个独立 Geant4 run。每个 batch 使用独立 seed，并先写入 `runs/<condition_id>/b<batch_index>/<run_id>/` 作为合并输入；队列完成完整 manifest 后会自动生成 `by_condition/` 合并结果。默认合并成功后删除 `runs/` 下对应 raw run；需要排查时传 `--keep-raw-runs` 保留。本阶段只做 batch CSV 拼接整理，不做统计分析。
 
 按实验段运行：
 
@@ -446,6 +460,9 @@ experiment + phantom_id + energy_keV + pose + head_offset_x/y + geometry_file + 
 - `event_id` 按各 batch 的 `n_primary` 做 offset，避免不同 batch 之间重复；
 - `hit_id` 原样保留；
 - 合并 `metadata.yaml` 记录 `merged_article_batches: true`、总 `n_primary`、source run 数、batch index、seed 和 source run dirs。
+- 合并 metadata 额外记录 `merge.source_cases`，用于 raw run 删除后的可追溯性与恢复跳过判断；
+- 默认合并成功后删除参与本次合并的 raw run leaf directories，并清理空的 batch / condition / `runs` 父目录；
+- 若传 `--keep-raw-runs`，保留 raw run 目录，metadata 中记录 `raw_output_preserved: true`。
 
 合并产物是仿真自动化整理结果，不属于统计分析、绘图、CNR 或论文表格生成。
 
@@ -458,7 +475,7 @@ output:
   existing_run_policy: fail
 ```
 
-这样可以避免误覆盖已有仿真结果。若需要重跑，推荐：
+这样可以避免误覆盖已有仿真结果。article 队列默认在成功合并后删除 raw `runs/`，因此同一 manifest 再次运行时会优先根据 `by_condition/metadata.yaml` 中的 `merge.source_cases` 跳过已完成 case。若需要重跑，推荐：
 
 1. 换新的 `--campaign-id`；
 2. 或换新的 `--base-seed`；
@@ -466,7 +483,169 @@ output:
 
 不要让多台机器同时运行同一个 manifest 切片到同一批 output directory。
 
-## 12. 测试
+## 12. Article 后处理脚本
+
+`scripts/article/` 目录用于保存论文实验相关的派生数据处理脚本。这些脚本不属于 Geant4 基础事件生成链路，不会改写原始 `events.csv` 或 `metadata.yaml`；推荐把输出写到新的 `results/article/<campaign_id>/...` 派生目录。
+
+运行绘图脚本前需要启用带有 `pandas`、`numpy`、`matplotlib` 和 `PyYAML` 的数据环境，例如：
+
+```bash
+conda activate data
+```
+
+### 12.1 `scripts/article/clean_events.py`
+
+功能：
+
+- 递归发现输入目录下的 `events.csv`；
+- 按事件级条件清洗 detected gamma hit；
+- 根据 `det_x` 所在区间新增 `slit_id` 列，取值为 `S1/S2/S3...`；
+- 删除不需要进入清洗文件的事件追踪列；
+- 将同目录 `metadata.yaml` 复制到镜像输出目录，便于后续绘图脚本直接读取 `n_primary`、pose offset 和条件信息。
+
+清洗条件：
+
+- `first_scatter_z >= 0`；
+- `last_scatter_z >= 0`；
+- `det_x` 落入脚本顶部 `DET_X_LEFT_EDGES_MM` 与 `DET_X_RIGHT_EDGES_MM` 定义的任一闭区间。
+
+默认 `det_x` 区间在脚本顶部直接修改，不提供命令行参数：
+
+```python
+DET_X_LEFT_EDGES_MM = [9.0, 34.0, 100.0]
+DET_X_RIGHT_EDGES_MM = [30.0, 96.0, 146.0]
+```
+
+第 `i` 个区间映射为 `S{i+1}`。区间端点必须有限、左端点不大于右端点，且闭区间之间不得重叠；非法配置会 fail fast。
+
+输入：
+
+```text
+--input-root   原始或合并后的 article 结果目录，可为单个 run 目录或 by_condition 根目录
+--events-name  输入事件文件名，默认 events.csv
+```
+
+输出：
+
+```text
+--output-root  清洗结果根目录
+--output-name  输出事件文件名，默认 events_clean.csv
+```
+
+输出目录会保留输入目录的相对层级。核心输出包括：
+
+```text
+<output-root>/
+├── clean_manifest.yaml
+├── clean_summary.csv
+└── .../events_clean.csv
+```
+
+`events_clean.csv` 保留原始字段顺序，并追加 `slit_id`，但删除：
+
+```text
+event_id, hit_id, track_id, parent_id, is_primary_gamma,
+gamma_source_type, gamma_source_process, gamma_source_region_id,
+rayleigh_count
+```
+
+示例：
+
+```bash
+python3 scripts/article/clean_events.py \
+  --input-root results/article/article_run01/by_condition \
+  --output-root results/article/article_run01/cleaned_by_condition
+```
+
+若输出文件已存在，默认报错；确认覆盖时使用：
+
+```bash
+--overwrite
+```
+
+### 12.2 `scripts/article/plot_grid_response.py`
+
+功能：
+
+- 读取 grid 模式下每个 pose 的事件文件和 `metadata.yaml`；
+- 优先使用 `events_clean.csv` 中已有的 `slit_id`；
+- 若通过 `--events-name events.csv` 直接读取原始事件文件，则按与清洗脚本相同的 `det_x` 区间临时生成 `slit_id`；
+- 对每个 `phantom_id × slit_id × grid pose` 统计响应通道；
+- 将非均匀采样 offset 按排序后的均匀矩阵索引显示，用于生成二维响应图。
+
+输入：
+
+```text
+--input-root     clean_events.py 的输出根目录，或原始 by_condition 根目录
+--events-name    输入事件文件名，默认 events_clean.csv
+--experiment     E1 或 E4 等实验编号
+--energy         能量筛选，如 E460 或 460
+--metadata-name  metadata 文件名，默认 metadata.yaml
+```
+
+默认 control phantom：
+
+```text
+E1 -> P0
+E4 -> M0
+```
+
+必要时可用 `--control-phantom` 覆盖。
+
+统计通道：
+
+```text
+I_total       = N_total / n_primary
+I_k1          = N(scatter_count_total == 1) / n_primary
+I_k2          = N(scatter_count_total == 2) / n_primary
+I_ms          = N(scatter_count_total >= 2) / n_primary
+I_without_ms  = N(scatter_count_total <= 1) / n_primary
+F_ms          = N_ms / N_total
+```
+
+差异图通道：
+
+```text
+Delta_I_total = I_total - I_total(control)
+Delta_I_k1    = I_k1 - I_k1(control)
+Delta_I_ms    = I_ms - I_ms(control)
+```
+
+输出：
+
+```text
+<output-dir>/
+├── analysis_manifest.yaml
+├── grid_response_long.csv
+├── matrices/<phantom_id>/<slit_id>/<channel>.csv
+├── figures/<phantom_id>/<slit_id>/<channel>.png
+└── figures/panels/<phantom_id>_<slit_id>_<experiment>_panel.png
+```
+
+示例，读取清洗后的数据：
+
+```bash
+conda run -n data python scripts/article/plot_grid_response.py \
+  --input-root results/article/article_run01/cleaned_by_condition \
+  --experiment E1 \
+  --energy E460 \
+  --output-dir results/article/article_run01/grid_response_E1_E460
+```
+
+示例，直接读取原始 `events.csv`：
+
+```bash
+conda run -n data python scripts/article/plot_grid_response.py \
+  --input-root results/article/article_run01/by_condition \
+  --events-name events.csv \
+  --experiment E1 \
+  --energy E460 \
+  --output-dir results/article/article_run01/grid_response_E1_E460_raw
+```
+
+该脚本只生成二维响应矩阵和预览图，不计算 CNR、ROI 指标、论文表格或事件级解释图。
+
+## 13. 测试
 
 仅测试 article 生成器和队列扩展：
 
@@ -485,14 +664,34 @@ python3 -m unittest tests/test_near_door_experiments.py
 ```bash
 python3 -m py_compile \
   scripts/generate_article_experiment_configs.py \
-  scripts/run_experiment_queue.py
+  scripts/run_experiment_queue.py \
+  scripts/article/clean_events.py \
+  scripts/article/plot_grid_response.py
 ```
 
-## 13. 注意事项
+后处理脚本 smoke 示例：
+
+```bash
+python3 scripts/article/clean_events.py \
+  --input-root results/article/article_run01/by_condition/E1/P0/E460/grid_x0_y0 \
+  --output-root /tmp/mss_article_clean_smoke \
+  --overwrite
+```
+
+```bash
+conda run -n data python scripts/article/plot_grid_response.py \
+  --input-root /tmp/mss_article_clean_smoke \
+  --experiment E1 \
+  --energy E460 \
+  --output-dir /tmp/mss_article_grid_response_smoke \
+  --overwrite
+```
+
+## 14. 注意事项
 
 - `S1/S2/S3` 不作为仿真 run 维度。
-- `slit_id` 不写入 manifest case，也不写入 generated YAML。
+- `slit_id` 不写入 manifest case，也不写入 generated YAML；它只由后处理清洗脚本写入 `events_clean.csv`。
 - `E_star` 和 `E_star_metal` 必须由用户显式给出。
 - E2 不新增仿真，应从 E1 输出中选 pose。
 - E5 当前没有自动化，因为金属厚度变体 geometry 尚未定义。
-- 本阶段不生成任何后处理 summary、图、指标或论文表格。
+- 仿真自动化阶段不生成任何后处理 summary、图、指标或论文表格；`scripts/article/` 中的脚本属于用户显式调用的派生后处理工具。

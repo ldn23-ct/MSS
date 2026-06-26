@@ -232,7 +232,61 @@ def run_output_complete(expected: dict[str, Any]) -> bool:
     return True
 
 
+def scalar_equal(left: Any, right: Any) -> bool:
+    return str(left) == str(right)
+
+
+def article_merged_output_dir(item: dict[str, Any]) -> Path | None:
+    value = item.get("condition_output_directory_resolved") or item.get("condition_output_directory")
+    if not value:
+        return None
+    return Path(str(value))
+
+
+def merged_article_item_complete(item: dict[str, Any]) -> bool:
+    output_dir = article_merged_output_dir(item)
+    if output_dir is None:
+        return False
+
+    csv_path = output_dir / "events.csv"
+    metadata_path = output_dir / "metadata.yaml"
+    if not csv_path.is_file() or not metadata_path.is_file():
+        return False
+
+    try:
+        metadata = load_yaml(metadata_path)
+    except Exception:
+        return False
+    if metadata.get("merged_article_batches") is not True:
+        return False
+
+    merge = metadata.get("merge")
+    if not isinstance(merge, dict):
+        return False
+    source_cases = merge.get("source_cases")
+    if not isinstance(source_cases, list):
+        return False
+
+    case_id = item.get("case_id")
+    seed = item.get("seed")
+    batch_index = item.get("batch_index")
+    for source_case in source_cases:
+        if not isinstance(source_case, dict):
+            continue
+        if (
+            scalar_equal(source_case.get("case_id"), case_id)
+            and scalar_equal(source_case.get("seed"), seed)
+            and scalar_equal(source_case.get("batch_index"), batch_index)
+        ):
+            return True
+    return False
+
+
 def item_complete(item: dict[str, Any]) -> bool:
+    return all(run_output_complete(expected) for expected in item["expected_runs"]) or merged_article_item_complete(item)
+
+
+def raw_item_complete(item: dict[str, Any]) -> bool:
     return all(run_output_complete(expected) for expected in item["expected_runs"])
 
 
@@ -356,6 +410,13 @@ def load_manifest_cases(repo_root: Path, manifest_path: Path) -> list[dict[str, 
         config = load_yaml(config_path)
         expected = expected_run_dirs(repo_root, config_path, config)
         case_id = case_id_from_config(config, config_path, str(case.get("case_id", "")))
+        condition_output_directory = case.get("condition_output_directory")
+        condition_output_directory_resolved = None
+        if condition_output_directory:
+            condition_path = Path(str(condition_output_directory))
+            if not condition_path.is_absolute():
+                condition_path = repo_root / condition_path
+            condition_output_directory_resolved = condition_path.as_posix()
         items.append(
             {
                 "index": index,
@@ -370,7 +431,8 @@ def load_manifest_cases(repo_root: Path, manifest_path: Path) -> list[dict[str, 
                 "batch_index": case.get("batch_index"),
                 "batch_count": case.get("batch_count"),
                 "condition_id": case.get("condition_id"),
-                "condition_output_directory": case.get("condition_output_directory"),
+                "condition_output_directory": condition_output_directory,
+                "condition_output_directory_resolved": condition_output_directory_resolved,
                 "raw_output_directory": case.get("raw_output_directory"),
                 "phantom_id": case.get("phantom_id"),
                 "phantom_group": case.get("phantom_group"),
@@ -598,6 +660,17 @@ def read_metadata_for_expected(expected: dict[str, Any]) -> dict[str, Any]:
     return load_yaml(Path(expected["metadata"]))
 
 
+def source_case_record(record: dict[str, Any], metadata: dict[str, Any]) -> dict[str, Any]:
+    expected = record["expected_runs"][0]
+    return {
+        "case_id": record.get("case_id"),
+        "batch_index": record.get("batch_index"),
+        "seed": record.get("seed"),
+        "source_run_id": metadata.get("run_id") or expected.get("run_id"),
+        "n_primary": int(expected.get("n_primary") or 0),
+    }
+
+
 def merge_article_events(records: list[dict[str, Any]], output_csv: Path) -> int:
     expected_fields: list[str] | None = None
     event_rows = 0
@@ -637,17 +710,24 @@ def merge_article_events(records: list[dict[str, Any]], output_csv: Path) -> int
     return event_rows
 
 
-def merged_article_metadata(item: dict[str, Any], records: list[dict[str, Any]], event_rows: int) -> dict[str, Any]:
+def merged_article_metadata(
+    item: dict[str, Any],
+    records: list[dict[str, Any]],
+    event_rows: int,
+    keep_raw_runs: bool,
+) -> dict[str, Any]:
     representative = read_metadata_for_expected(records[0]["expected_runs"][0])
     source_metadata = [read_metadata_for_expected(record["expected_runs"][0]) for record in records]
     seeds = [record.get("seed") for record in records]
     source_run_dirs = [record["expected_runs"][0]["run_dir"] for record in records]
     total_n_primary = sum(int(record["expected_runs"][0].get("n_primary") or 0) for record in records)
+    raw_cleanup_status = "preserved" if keep_raw_runs else "pending"
     return {
         "schema_version": 1,
         "merged_article_batches": True,
         "run_id": str(item.get("condition_id")),
         "output_csv": "events.csv",
+        "raw_output_preserved": keep_raw_runs,
         "condition": {
             "condition_id": item.get("condition_id"),
             "experiment": item.get("experiment"),
@@ -674,10 +754,16 @@ def merged_article_metadata(item: dict[str, Any], records: list[dict[str, Any]],
             "seeds": seeds,
             "source_run_ids": [metadata.get("run_id") for metadata in source_metadata],
             "source_run_dirs": source_run_dirs,
+            "source_cases": [
+                source_case_record(record, metadata) for record, metadata in zip(records, source_metadata)
+            ],
             "source_n_primary_values": [
                 int(record["expected_runs"][0].get("n_primary") or 0) for record in records
             ],
             "event_rows": event_rows,
+            "raw_output_preserved": keep_raw_runs,
+            "raw_cleanup_status": raw_cleanup_status,
+            "raw_run_dirs_removed": 0,
         },
     }
 
@@ -688,7 +774,101 @@ def write_yaml(path: Path, value: dict[str, Any]) -> None:
         yaml.safe_dump(value, stream, sort_keys=False, allow_unicode=False, width=100)
 
 
-def merge_article_batches(repo_root: Path, manifest: dict[str, Any], manifest_path: Path) -> dict[str, Any]:
+def raw_output_root_for_item(repo_root: Path, item: dict[str, Any]) -> Path | None:
+    value = item.get("raw_output_directory")
+    if not value:
+        return None
+    path = Path(str(value))
+    if not path.is_absolute():
+        path = repo_root / path
+    if path.name.startswith("b") and path.parent.name:
+        return path.parent.parent
+    return path
+
+
+def validate_raw_run_dir_for_cleanup(expected: dict[str, Any]) -> Path:
+    run_dir = Path(expected["run_dir"])
+    metadata_path = Path(expected["metadata"])
+    csv_path = Path(expected["csv"])
+    if not run_dir.is_dir() or not metadata_path.is_file() or not csv_path.is_file():
+        raise ValueError(f"raw run output is incomplete, refusing cleanup: {run_dir}")
+    if metadata_path.parent != run_dir or csv_path.parent != run_dir:
+        raise ValueError(f"raw run expected files are outside run dir, refusing cleanup: {run_dir}")
+    return run_dir
+
+
+def path_is_relative_to(path: Path, parent: Path) -> bool:
+    try:
+        path.resolve().relative_to(parent.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def remove_empty_parents(path: Path, stop_at: Path | None) -> None:
+    current = path
+    while current.exists():
+        if stop_at is not None and not path_is_relative_to(current, stop_at):
+            break
+        try:
+            current.rmdir()
+        except OSError:
+            break
+        if stop_at is not None and current.resolve() == stop_at.resolve():
+            break
+        current = current.parent
+
+
+def cleanup_article_raw_runs(repo_root: Path, records: list[dict[str, Any]]) -> int:
+    targets: dict[Path, tuple[Path, Path | None]] = {}
+    for record in records:
+        expected = record["expected_runs"][0]
+        run_dir = validate_raw_run_dir_for_cleanup(expected)
+        raw_root = raw_output_root_for_item(repo_root, record)
+        if raw_root is not None and not path_is_relative_to(run_dir, raw_root):
+            raise ValueError(f"raw run dir is outside raw output root, refusing cleanup: {run_dir}")
+        targets[run_dir] = (run_dir, raw_root)
+
+    removed = 0
+    for run_dir, raw_root in targets.values():
+        if not run_dir.exists():
+            continue
+        shutil.rmtree(run_dir)
+        removed += 1
+        remove_empty_parents(run_dir.parent, raw_root)
+    return removed
+
+
+def update_article_raw_cleanup_metadata(
+    metadata_path: Path,
+    keep_raw_runs: bool,
+    raw_run_dirs_removed: int,
+    raw_cleanup_status: str,
+) -> None:
+    metadata = load_yaml(metadata_path)
+    metadata["raw_output_preserved"] = keep_raw_runs
+    merge = metadata.setdefault("merge", {})
+    if not isinstance(merge, dict):
+        raise ValueError(f"article metadata merge section must be a map: {metadata_path}")
+    merge["raw_output_preserved"] = keep_raw_runs
+    merge["raw_cleanup_status"] = raw_cleanup_status
+    merge["raw_run_dirs_removed"] = raw_run_dirs_removed
+    write_yaml(metadata_path, metadata)
+
+
+def article_groups(items: list[dict[str, Any]]) -> dict[tuple[Any, ...], list[dict[str, Any]]]:
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for item in items:
+        groups.setdefault(article_condition_key(item), []).append(item)
+    return groups
+
+
+def merge_article_batches(
+    repo_root: Path,
+    manifest: dict[str, Any],
+    manifest_path: Path,
+    keep_raw_runs: bool = False,
+) -> dict[str, Any]:
     if not is_article_manifest(manifest):
         return {
             "status": "skipped",
@@ -707,28 +887,78 @@ def merge_article_batches(repo_root: Path, manifest: dict[str, Any], manifest_pa
             "output_root": repo_relative(repo_root, output_root),
             "condition_count": 0,
             "message": f"{len(incomplete)} manifest cases are incomplete",
+            "raw_runs_preserved": True,
+            "raw_cleanup_status": "skipped",
+            "raw_run_dirs_removed": 0,
         }
 
-    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
-    for item in items:
-        groups.setdefault(article_condition_key(item), []).append(item)
+    groups = article_groups(items)
+
+    if any(not raw_item_complete(item) for item in items):
+        if all(merged_article_item_complete(item) for item in items):
+            return {
+                "status": "completed",
+                "output_root": repo_relative(repo_root, output_root),
+                "condition_count": len(groups),
+                "message": f"{len(groups)} article conditions already merged",
+                "raw_runs_preserved": False,
+                "raw_cleanup_status": "not_needed",
+                "raw_run_dirs_removed": 0,
+            }
+        return {
+            "status": "skipped",
+            "output_root": repo_relative(repo_root, output_root),
+            "condition_count": 0,
+            "message": "raw runs are incomplete and merged article outputs are not complete",
+            "raw_runs_preserved": True,
+            "raw_cleanup_status": "skipped",
+            "raw_run_dirs_removed": 0,
+        }
 
     if output_root.exists():
         shutil.rmtree(output_root)
     output_root.mkdir(parents=True, exist_ok=True)
 
+    merged_outputs: list[tuple[Path, list[dict[str, Any]]]] = []
     for records in groups.values():
         records.sort(key=lambda record: (int(record.get("batch_index") or 0), int(record.get("seed") or 0)))
         first = records[0]
         output_dir = article_condition_output_dir(repo_root, first)
         event_rows = merge_article_events(records, output_dir / "events.csv")
-        write_yaml(output_dir / "metadata.yaml", merged_article_metadata(first, records, event_rows))
+        metadata_path = output_dir / "metadata.yaml"
+        write_yaml(metadata_path, merged_article_metadata(first, records, event_rows, keep_raw_runs))
+        merged_outputs.append((metadata_path, records))
+
+    raw_run_dirs_removed = 0
+    raw_cleanup_status = "preserved"
+    if not keep_raw_runs:
+        raw_cleanup_status = "removed"
+        for metadata_path, records in merged_outputs:
+            removed_for_condition = cleanup_article_raw_runs(repo_root, records)
+            raw_run_dirs_removed += removed_for_condition
+            update_article_raw_cleanup_metadata(
+                metadata_path,
+                keep_raw_runs=False,
+                raw_run_dirs_removed=removed_for_condition,
+                raw_cleanup_status=raw_cleanup_status,
+            )
+    else:
+        for metadata_path, _records in merged_outputs:
+            update_article_raw_cleanup_metadata(
+                metadata_path,
+                keep_raw_runs=True,
+                raw_run_dirs_removed=0,
+                raw_cleanup_status=raw_cleanup_status,
+            )
 
     return {
         "status": "completed",
         "output_root": repo_relative(repo_root, output_root),
         "condition_count": len(groups),
         "message": f"merged {len(groups)} article conditions",
+        "raw_runs_preserved": keep_raw_runs,
+        "raw_cleanup_status": raw_cleanup_status,
+        "raw_run_dirs_removed": raw_run_dirs_removed,
     }
 
 
@@ -880,7 +1110,12 @@ def run_queue(args: argparse.Namespace) -> int:
             print(f"done {item['index']:04d}: {item['case_id']}")
 
         if is_article_manifest(manifest):
-            merge_result = merge_article_batches(repo_root, manifest, manifest_path)
+            merge_result = merge_article_batches(
+                repo_root,
+                manifest,
+                manifest_path,
+                keep_raw_runs=bool(args.keep_raw_runs),
+            )
             print(f"merge {merge_result['status']}: {merge_result['message']}")
             if save_queue:
                 assert state is not None
@@ -924,6 +1159,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--end-index", type=int)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--allow-large-run", action="store_true")
+    parser.add_argument(
+        "--keep-raw-runs",
+        action="store_true",
+        help="preserve article raw runs after by_condition merge",
+    )
     parser.add_argument("--shard-count", type=int, default=1)
     parser.add_argument("--shard-index", type=int, default=0)
     parser.set_defaults(stop_on_failure=True)
