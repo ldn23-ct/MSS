@@ -44,6 +44,22 @@ G4Material* BuildVehicleFlour()
     return flour;
 }
 
+G4Material* BuildMSSSoilDry()
+{
+    if (auto* existing = FindExistingMaterial("MSS_Soil_Dry")) {
+        return existing;
+    }
+
+    auto* nist = G4NistManager::Instance();
+    auto* soil = new G4Material("MSS_Soil_Dry", 1.60 * g / cm3, 5);
+    soil->AddElement(nist->FindOrBuildElement("O"), 0.53);
+    soil->AddElement(nist->FindOrBuildElement("Si"), 0.33);
+    soil->AddElement(nist->FindOrBuildElement("Al"), 0.07);
+    soil->AddElement(nist->FindOrBuildElement("Fe"), 0.04);
+    soil->AddElement(nist->FindOrBuildElement("Ca"), 0.03);
+    return soil;
+}
+
 }  // namespace
 
 G4Material* MaterialManager::GetMaterial(const std::string& name) const
@@ -57,6 +73,9 @@ G4Material* MaterialManager::GetMaterial(const std::string& name) const
     }
     if (name == "Vehicle_Flour") {
         return BuildVehicleFlour();
+    }
+    if (name == "MSS_Soil_Dry") {
+        return BuildMSSSoilDry();
     }
 
     if (auto* existing = FindExistingMaterial(name)) {

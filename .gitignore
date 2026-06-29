@@ -77,3 +77,4 @@ results/*
 analysis/
 *.root
 config/generated
+config/test
