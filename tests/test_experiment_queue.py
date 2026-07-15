@@ -33,6 +33,69 @@ class ExperimentQueueTests(unittest.TestCase):
         os.environ.clear()
         os.environ.update(self._old_env)
 
+    def test_fractional_pose_ids_and_seed_order_match_mss(self):
+        config = {
+            "pose": {
+                "mode": "grid",
+                "grid": {
+                    "x_offsets_mm": [-7.5, -2.5, 2.5, 7.5],
+                    "y_offsets_mm": [2.5],
+                },
+            },
+            "run": {"random_seed": 1234},
+            "vehicle": {"model_type": "normal"},
+            "collimator": {"enable": True},
+            "source": {"energy_mode": "mono", "mono_energy_keV": 560},
+            "output": {
+                "output_directory": "/tmp/source_response_queue_unit",
+                "metadata_yaml_name": "metadata.yaml",
+                "events_csv_name": "events.csv",
+            },
+        }
+
+        poses = queue.generate_poses(config)
+
+        self.assertEqual(
+            [
+                "pose_xm7p5_y2p5",
+                "pose_xm2p5_y2p5",
+                "pose_x2p5_y2p5",
+                "pose_x7p5_y2p5",
+            ],
+            [pose["pose_id"] for pose in poses],
+        )
+        self.assertEqual([1234, 1235, 1236, 1237], [pose["random_seed"] for pose in poses])
+        self.assertEqual([-7.5, -2.5, 2.5, 7.5], [pose["head_offset_x_mm"] for pose in poses])
+
+        expected = queue.expected_run_dirs(REPO_ROOT, Path("/tmp/fractional.yaml"), config)
+        self.assertEqual(
+            [
+                "/tmp/source_response_queue_unit/"
+                "pose_xm7p5_y2p5_collimated_normal_E560keV_seed1234/metadata.yaml",
+                "/tmp/source_response_queue_unit/"
+                "pose_xm2p5_y2p5_collimated_normal_E560keV_seed1235/metadata.yaml",
+                "/tmp/source_response_queue_unit/"
+                "pose_x2p5_y2p5_collimated_normal_E560keV_seed1236/metadata.yaml",
+                "/tmp/source_response_queue_unit/"
+                "pose_x7p5_y2p5_collimated_normal_E560keV_seed1237/metadata.yaml",
+            ],
+            [item["metadata"] for item in expected],
+        )
+
+    def test_fractional_pose_precision_fails_fast(self):
+        config = {
+            "pose": {
+                "mode": "list",
+                "list": {
+                    "head_offset_x_mm": [0.0000001],
+                    "head_offset_y_mm": [0],
+                },
+            },
+            "run": {"random_seed": 1234},
+        }
+        with self.assertRaisesRegex(ValueError, "six decimal places"):
+            queue.generate_poses(config)
+
     def write_config(
         self,
         root: Path,
@@ -44,7 +107,7 @@ class ExperimentQueueTests(unittest.TestCase):
         config_dir.mkdir(parents=True, exist_ok=True)
         config_path = config_dir / f"{case_id}.yaml"
         config = {
-            "diagnostics": {"case_id": case_id},
+            "case_id": case_id,
             "pose": {
                 "mode": "list",
                 "list": {
@@ -84,7 +147,6 @@ class ExperimentQueueTests(unittest.TestCase):
         self,
         root: Path,
         configs: list[Path],
-        systems: list[str] | None = None,
         experiments: list[str] | None = None,
         run_safety: dict | None = None,
     ) -> Path:
@@ -93,7 +155,6 @@ class ExperimentQueueTests(unittest.TestCase):
                 {
                     "case_id": config.stem,
                     "config_file": config.as_posix(),
-                    **({"system": systems[index]} if systems is not None else {}),
                     **({"experiment": experiments[index]} if experiments is not None else {}),
                 }
                 for index, config in enumerate(configs)
@@ -128,7 +189,7 @@ class ExperimentQueueTests(unittest.TestCase):
 
                 config_path = Path(args.config)
                 config = queue.load_yaml(config_path)
-                case_id = config.get("diagnostics", {{}}).get("case_id", config_path.stem)
+                case_id = config.get("case_id", config_path.stem)
                 order_log = os.environ.get("FAKE_MSS_ORDER_LOG")
 
                 def append_order(line):
@@ -319,9 +380,11 @@ class ExperimentQueueTests(unittest.TestCase):
                 "schema_version": 1,
                 "queue_id": "queue_previous",
                 "created_at": "2026-01-01T00:00:00+00:00",
+                "filters": {"system": "collimated"},
                 "items": [
                     {
                         "config_file": config.as_posix(),
+                        "system": "collimated",
                         "status": "running",
                         "attempt_count": 2,
                     }
@@ -334,8 +397,11 @@ class ExperimentQueueTests(unittest.TestCase):
             self.assertEqual(0, self.run_queue(root, manifest, fake))
 
             state = load_json(root / "queue_state.json")
+            self.assertEqual(2, state["schema_version"])
             self.assertEqual("completed", state["items"][0]["status"])
             self.assertEqual(3, state["items"][0]["attempt_count"])
+            self.assertNotIn("system", state["filters"])
+            self.assertNotIn("system", state["items"][0])
 
     def test_dry_run_does_not_create_state_or_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -382,20 +448,16 @@ class ExperimentQueueTests(unittest.TestCase):
             )
             self.assertTrue(queue.run_output_complete(expected))
 
-    def test_system_filter_and_shard_run_only_selected_cases(self):
+    def test_shard_runs_only_selected_cases(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             configs = [
-                self.write_config(root, "open_a"),
-                self.write_config(root, "collimated_a"),
-                self.write_config(root, "collimated_b"),
-                self.write_config(root, "collimated_c"),
+                self.write_config(root, "case_a"),
+                self.write_config(root, "case_b"),
+                self.write_config(root, "case_c"),
+                self.write_config(root, "case_d"),
             ]
-            manifest = self.write_manifest(
-                root,
-                configs,
-                ["open", "collimated", "collimated", "collimated"],
-            )
+            manifest = self.write_manifest(root, configs)
             fake = self.write_fake_binary(root)
             order_log = root / "order.log"
             os.environ["FAKE_MSS_ORDER_LOG"] = order_log.as_posix()
@@ -406,8 +468,6 @@ class ExperimentQueueTests(unittest.TestCase):
                     root,
                     manifest,
                     fake,
-                    "--system",
-                    "collimated",
                     "--shard-count",
                     "2",
                     "--shard-index",
@@ -417,30 +477,42 @@ class ExperimentQueueTests(unittest.TestCase):
             )
 
             self.assertEqual(
-                ["start:collimated_b", "end:collimated_b"],
+                ["start:case_b", "end:case_b", "start:case_d", "end:case_d"],
                 order_log.read_text(encoding="utf-8").splitlines(),
             )
 
-    def test_default_manifest_path_uses_config_tree(self):
-        args = queue.parse_args([])
+    def test_manifest_is_required(self):
+        with redirect_stderr(StringIO()):
+            with self.assertRaises(SystemExit):
+                queue.parse_args([])
 
-        self.assertEqual(REPO_ROOT / "config/generated/near_door/manifest.yaml", args.manifest)
-        self.assertFalse(args.save_queue)
-
-    def test_state_file_or_log_dir_enables_saved_queue_mode(self):
+    def test_state_file_enables_saved_queue_mode(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            manifest_args = ["--manifest", (root / "manifest.yaml").as_posix()]
 
-            state_args = queue.parse_args(["--state-file", (root / "state.json").as_posix()])
-            log_args = queue.parse_args(["--log-dir", (root / "logs").as_posix()])
+            state_args = queue.parse_args(
+                manifest_args + ["--state-file", (root / "state.json").as_posix()]
+            )
+            log_args = queue.parse_args(
+                manifest_args
+                + [
+                    "--state-file",
+                    (root / "state.json").as_posix(),
+                    "--log-dir",
+                    (root / "logs").as_posix(),
+                ]
+            )
 
             self.assertTrue(state_args.save_queue)
             self.assertTrue(log_args.save_queue)
 
-    def test_force_unlock_requires_saved_queue_mode(self):
+    def test_saved_queue_options_require_explicit_state_file(self):
+        manifest_args = ["--manifest", "/tmp/manifest.yaml"]
         with redirect_stderr(StringIO()):
-            with self.assertRaises(SystemExit):
-                queue.parse_args(["--force-unlock"])
+            for extra_args in (["--save-queue"], ["--log-dir", "/tmp/logs"], ["--force-unlock"]):
+                with self.subTest(extra_args=extra_args), self.assertRaises(SystemExit):
+                    queue.parse_args(manifest_args + extra_args)
 
     def test_stale_lock_is_removed_when_pid_is_gone(self):
         with tempfile.TemporaryDirectory() as tmp:

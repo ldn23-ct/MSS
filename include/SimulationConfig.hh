@@ -22,10 +22,10 @@ struct VehicleRunConfig {
 
 struct PoseRawConfig {
     std::string mode;
-    std::vector<int> list_head_offset_x_mm;
-    std::vector<int> list_head_offset_y_mm;
-    std::vector<int> grid_x_offsets_mm;
-    std::vector<int> grid_y_offsets_mm;
+    std::vector<double> list_head_offset_x_mm;
+    std::vector<double> list_head_offset_y_mm;
+    std::vector<double> grid_x_offsets_mm;
+    std::vector<double> grid_y_offsets_mm;
 };
 
 struct SourceConfig {
@@ -65,17 +65,6 @@ struct OutputConfig {
     std::string existing_run_policy = "fail";
 };
 
-struct PhaseSpaceConfig {
-    bool enable = false;
-    std::string csv_name = "phase_space.csv";
-};
-
-struct DiagnosticsConfig {
-    bool configured = false;
-    std::string case_id;
-    PhaseSpaceConfig phase_space;
-};
-
 struct WorldConfig {
     std::array<double, 3> center_mm = {0.0, 0.0, 0.0};
     std::array<double, 3> size_mm = {4000.0, 4000.0, 4000.0};
@@ -84,6 +73,7 @@ struct WorldConfig {
 
 struct SimulationConfig {
     std::string configFilePath;
+    std::string case_id;
     int schema_version = 2;
     RunConfig run;
     VehicleRunConfig vehicle;
@@ -93,7 +83,6 @@ struct SimulationConfig {
     DetectorConfig detector;
     PhysicsConfig physics;
     OutputConfig output;
-    DiagnosticsConfig diagnostics;
     WorldConfig world;
 
     void ValidateConfigPathOnly() const;

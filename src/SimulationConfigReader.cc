@@ -1,7 +1,5 @@
 #include "SimulationConfigReader.hh"
 
-#include <cctype>
-#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -79,48 +77,6 @@ std::optional<std::string> ReadNullableString(
 }
 
 
-bool IsStrictIntegerText(const std::string& value)
-{
-    if (value.empty()) {
-        return false;
-    }
-
-    std::size_t index = 0;
-    if (value[index] == '-') {
-        ++index;
-        if (index == value.size()) {
-            return false;
-        }
-    }
-
-    for (; index < value.size(); ++index) {
-        if (!std::isdigit(static_cast<unsigned char>(value[index]))) {
-            return false;
-        }
-    }
-    return true;
-}
-
-int ParseStrictInt(const YAML::Node& node, const std::string& path)
-{
-    const std::string text = node.Scalar();
-    if (!IsStrictIntegerText(text)) {
-        throw std::runtime_error(path + " contains a non-integer value");
-    }
-
-    try {
-        const long long value = std::stoll(text);
-        if (value < std::numeric_limits<int>::min() || value > std::numeric_limits<int>::max()) {
-            throw std::runtime_error(path + " contains an integer outside int range");
-        }
-        return static_cast<int>(value);
-    } catch (const std::invalid_argument&) {
-        throw std::runtime_error(path + " contains a non-integer value");
-    } catch (const std::out_of_range&) {
-        throw std::runtime_error(path + " contains an integer outside int range");
-    }
-}
-
 template <std::size_t N>
 std::array<double, N> ReadDoubleArray(
     const YAML::Node& parent,
@@ -149,21 +105,29 @@ std::array<double, N> ReadDoubleArray(
     return values;
 }
 
-std::vector<int> ReadIntVector(const YAML::Node& parent, const std::string& key, const std::string& parentPath)
+std::vector<double> ReadDoubleVector(
+    const YAML::Node& parent,
+    const std::string& key,
+    const std::string& parentPath)
 {
     const YAML::Node node = RequireField(parent, key, parentPath);
     const std::string path = FieldPath(parentPath, key);
     if (!node.IsSequence()) {
-        throw std::runtime_error(path + " must be an integer array");
+        throw std::runtime_error(path + " must be a numeric array");
     }
 
-    std::vector<int> values;
+    std::vector<double> values;
     values.reserve(node.size());
     for (std::size_t i = 0; i < node.size(); ++i) {
         if (!node[i].IsScalar()) {
             throw std::runtime_error(path + " contains a non-scalar value");
         }
-        values.push_back(ParseStrictInt(node[i], path));
+        try {
+            values.push_back(node[i].as<double>());
+        } catch (const YAML::Exception& error) {
+            throw std::runtime_error(
+                path + " contains an invalid numeric value: " + std::string(error.what()));
+        }
     }
     return values;
 }
@@ -192,6 +156,13 @@ SimulationConfig SimulationConfigReader::Read(const std::string& configFilePath)
         throw std::runtime_error("YAML config root must be a map: " + configFilePath);
     }
 
+    if (const YAML::Node caseId = root["case_id"]) {
+        if (!caseId.IsScalar()) {
+            throw std::runtime_error("case_id must be a scalar value");
+        }
+        config.case_id = ReadScalar<std::string>(root, "case_id", "root");
+    }
+
     config.schema_version = ReadScalar<int>(root, "schema_version", "");
 
     const YAML::Node run = RequireMap(root, "run", "");
@@ -211,12 +182,12 @@ SimulationConfig SimulationConfigReader::Read(const std::string& configFilePath)
     config.pose.mode = ReadScalar<std::string>(pose, "mode", "pose");
 
     const YAML::Node poseList = RequireMap(pose, "list", "pose");
-    config.pose.list_head_offset_x_mm = ReadIntVector(poseList, "head_offset_x_mm", "pose.list");
-    config.pose.list_head_offset_y_mm = ReadIntVector(poseList, "head_offset_y_mm", "pose.list");
+    config.pose.list_head_offset_x_mm = ReadDoubleVector(poseList, "head_offset_x_mm", "pose.list");
+    config.pose.list_head_offset_y_mm = ReadDoubleVector(poseList, "head_offset_y_mm", "pose.list");
 
     const YAML::Node poseGrid = RequireMap(pose, "grid", "pose");
-    config.pose.grid_x_offsets_mm = ReadIntVector(poseGrid, "x_offsets_mm", "pose.grid");
-    config.pose.grid_y_offsets_mm = ReadIntVector(poseGrid, "y_offsets_mm", "pose.grid");
+    config.pose.grid_x_offsets_mm = ReadDoubleVector(poseGrid, "x_offsets_mm", "pose.grid");
+    config.pose.grid_y_offsets_mm = ReadDoubleVector(poseGrid, "y_offsets_mm", "pose.grid");
 
     const YAML::Node source = RequireMap(root, "source", "");
     config.source.particle = ReadScalar<std::string>(source, "particle", "source");
@@ -261,20 +232,6 @@ SimulationConfig SimulationConfigReader::Read(const std::string& configFilePath)
             throw std::runtime_error(
                 "output.existing_run_policy has invalid type or value: " + std::string(error.what()));
         }
-    }
-
-    if (const YAML::Node diagnostics = root["diagnostics"]) {
-        if (!diagnostics.IsMap()) {
-            throw std::runtime_error("diagnostics must be a YAML map");
-        }
-        config.diagnostics.configured = true;
-        config.diagnostics.case_id = ReadScalar<std::string>(diagnostics, "case_id", "diagnostics");
-
-        const YAML::Node phaseSpace = RequireMap(diagnostics, "phase_space", "diagnostics");
-        config.diagnostics.phase_space.enable =
-            ReadScalar<bool>(phaseSpace, "enable", "diagnostics.phase_space");
-        config.diagnostics.phase_space.csv_name =
-            ReadScalar<std::string>(phaseSpace, "csv_name", "diagnostics.phase_space");
     }
 
     config.Validate();

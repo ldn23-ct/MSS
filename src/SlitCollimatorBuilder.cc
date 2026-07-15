@@ -70,7 +70,7 @@ std::vector<G4VPhysicalVolume*> SlitCollimatorBuilder::Build(
 
     auto* tungstenMaterial = materialManager.GetMaterial("G4_W");
     auto rotation = std::make_unique<G4RotationMatrix>();
-    rotation->rotateX(90.0 * deg);
+    rotation->rotateX(-90.0 * deg);
 
     std::vector<G4VPhysicalVolume*> physicalVolumes;
     physicalVolumes.reserve(profile.jaws.size());

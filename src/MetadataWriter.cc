@@ -94,6 +94,7 @@ void MetadataWriter::Write(const std::string& filePath,
     }
 
     output << "run_id: " << runId << '\n';
+    output << "case_id: " << (config.case_id.empty() ? runId : config.case_id) << '\n';
     output << "output_csv: " << outputCsvName << '\n';
     output << "config_file: " << config.configFilePath << '\n';
     output << '\n';
@@ -143,18 +144,6 @@ void MetadataWriter::Write(const std::string& filePath,
            << config.detector.detector_y_range_zero_mm[0] + pose.head_offset_y_mm << ", "
            << config.detector.detector_y_range_zero_mm[1] + pose.head_offset_y_mm << "]\n";
     output << "  actual_z_mm: " << config.detector.detector_z_zero_mm << '\n';
-    output << '\n';
-    output << "diagnostics:\n";
-    output << "  configured: " << BoolText(config.diagnostics.configured) << '\n';
-    output << "  case_id: "
-           << (config.diagnostics.case_id.empty() ? "null" : config.diagnostics.case_id) << '\n';
-    output << "  phase_space:\n";
-    output << "    enable: " << BoolText(config.diagnostics.phase_space.enable) << '\n';
-    output << "    csv_name: "
-           << (config.diagnostics.phase_space.enable
-                   ? config.diagnostics.phase_space.csv_name
-                   : "null")
-           << '\n';
     output << '\n';
     output << "physics:\n";
     output << "  physics_list: " << config.physics.physics_list << '\n';

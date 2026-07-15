@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -17,8 +18,12 @@ from typing import Any
 import yaml
 
 
-STATE_SCHEMA_VERSION = 1
+STATE_SCHEMA_VERSION = 2
 EXPERIMENT_ORDER = ("E0", "E1", "E2", "E3", "E4", "E5")
+POSE_OFFSET_SCALE = 1_000_000
+POSE_OFFSET_TOLERANCE_SCALED = 1.0e-6
+POSE_OFFSET_MIN_MICROMETRES = -(1 << 63)
+POSE_OFFSET_MAX_MICROMETRES = (1 << 63) - 1
 
 
 def utc_now() -> str:
@@ -91,15 +96,46 @@ def format_energy_value(value: Any) -> str:
     return sanitize_token(text)
 
 
-def encode_offset(value: int) -> str:
-    if value == 0:
+def pose_offset_micrometres(value: Any) -> int:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"pose offset must be numeric: {value!r}") from error
+    if not math.isfinite(numeric):
+        raise ValueError(f"pose offset must be finite: {value!r}")
+    scaled = numeric * POSE_OFFSET_SCALE
+    if not (
+        POSE_OFFSET_MIN_MICROMETRES <= scaled <= POSE_OFFSET_MAX_MICROMETRES
+    ):
+        raise ValueError(f"pose offset is outside the supported range: {value!r}")
+    rounded = round(scaled)
+    if not (
+        POSE_OFFSET_MIN_MICROMETRES <= rounded <= POSE_OFFSET_MAX_MICROMETRES
+    ):
+        raise ValueError(f"pose offset is outside the supported range: {value!r}")
+    if abs(scaled - rounded) > POSE_OFFSET_TOLERANCE_SCALED:
+        raise ValueError(f"pose offset must contain at most six decimal places: {value!r}")
+    return int(rounded)
+
+
+def normalize_pose_offset(value: Any) -> float:
+    return pose_offset_micrometres(value) / POSE_OFFSET_SCALE
+
+
+def encode_offset(value: float | int) -> str:
+    micrometres = pose_offset_micrometres(value)
+    if micrometres == 0:
         return "0"
-    if value > 0:
-        return str(value)
-    return "m" + str(abs(value))
+    prefix = "m" if micrometres < 0 else ""
+    magnitude = abs(micrometres)
+    whole, fraction = divmod(magnitude, POSE_OFFSET_SCALE)
+    if fraction == 0:
+        return prefix + str(whole)
+    fraction_text = f"{fraction:06d}".rstrip("0")
+    return f"{prefix}{whole}p{fraction_text}"
 
 
-def pose_id(x_mm: int, y_mm: int) -> str:
+def pose_id(x_mm: float | int, y_mm: float | int) -> str:
     return f"pose_x{encode_offset(x_mm)}_y{encode_offset(y_mm)}"
 
 
@@ -116,14 +152,14 @@ def generate_poses(config: dict[str, Any]) -> list[dict[str, Any]]:
         if len(xs) != len(ys):
             raise ValueError("pose list x/y offsets must have the same length")
         for index, (x_mm, y_mm) in enumerate(zip(xs, ys)):
-            x_int = int(x_mm)
-            y_int = int(y_mm)
+            x_value = normalize_pose_offset(x_mm)
+            y_value = normalize_pose_offset(y_mm)
             poses.append(
                 {
                     "pose_index": index,
-                    "pose_id": pose_id(x_int, y_int),
-                    "head_offset_x_mm": x_int,
-                    "head_offset_y_mm": y_int,
+                    "pose_id": pose_id(x_value, y_value),
+                    "head_offset_x_mm": x_value,
+                    "head_offset_y_mm": y_value,
                     "random_seed": base_seed + index,
                 }
             )
@@ -135,14 +171,14 @@ def generate_poses(config: dict[str, Any]) -> list[dict[str, Any]]:
         index = 0
         for x_mm in xs:
             for y_mm in ys:
-                x_int = int(x_mm)
-                y_int = int(y_mm)
+                x_value = normalize_pose_offset(x_mm)
+                y_value = normalize_pose_offset(y_mm)
                 poses.append(
                     {
                         "pose_index": index,
-                        "pose_id": pose_id(x_int, y_int),
-                        "head_offset_x_mm": x_int,
-                        "head_offset_y_mm": y_int,
+                        "pose_id": pose_id(x_value, y_value),
+                        "head_offset_x_mm": x_value,
+                        "head_offset_y_mm": y_value,
                         "random_seed": base_seed + index,
                     }
                 )
@@ -291,20 +327,10 @@ def raw_item_complete(item: dict[str, Any]) -> bool:
 
 
 def case_id_from_config(config: dict[str, Any], config_path: Path, fallback: str) -> str:
-    diagnostics = config.get("diagnostics", {})
-    case_id = diagnostics.get("case_id") if isinstance(diagnostics, dict) else None
+    case_id = config.get("case_id")
     if case_id:
         return str(case_id)
     return fallback or config_path.stem
-
-
-def item_matches_system(item: dict[str, Any], system: str | None) -> bool:
-    if system is None or system == "all":
-        return True
-    if item.get("system") == system:
-        return True
-    case_id = str(item.get("case_id", ""))
-    return case_id.startswith(f"near_door_{system}_")
 
 
 def parse_experiment_csv(text: str | None) -> set[str] | None:
@@ -349,7 +375,6 @@ def item_matches_experiment_filters(
 
 def filter_items(
     items: list[dict[str, Any]],
-    system: str | None,
     only_experiments: set[str] | None,
     from_experiment: str | None,
     to_experiment: str | None,
@@ -362,8 +387,7 @@ def filter_items(
     filtered = [
         item
         for item in items
-        if item_matches_system(item, system)
-        and item_matches_experiment_filters(item, only_experiments, from_experiment, to_experiment)
+        if item_matches_experiment_filters(item, only_experiments, from_experiment, to_experiment)
         and (start_index is None or int(item["index"]) >= start_index)
         and (end_index is None or int(item["index"]) < end_index)
     ]
@@ -422,7 +446,6 @@ def load_manifest_cases(repo_root: Path, manifest_path: Path) -> list[dict[str, 
                 "index": index,
                 "case_id": case_id,
                 "config_file": repo_relative(repo_root, config_path),
-                "system": str(case.get("system", "")),
                 "experiment": case.get("experiment"),
                 "pose": case.get("pose"),
                 "model_state": case.get("model_state"),
@@ -481,7 +504,6 @@ def initial_state(
     state_file: Path,
     items: list[dict[str, Any]],
     previous: dict[str, Any] | None,
-    system: str,
     only_experiments: str,
     from_experiment: str,
     to_experiment: str,
@@ -510,7 +532,6 @@ def initial_state(
         "binary": binary.as_posix(),
         "state_file": state_file.as_posix(),
         "filters": {
-            "system": system,
             "only_experiments": only_experiments,
             "from_experiment": from_experiment,
             "to_experiment": to_experiment,
@@ -970,18 +991,18 @@ def run_queue(args: argparse.Namespace) -> int:
     manifest = load_yaml(manifest_path)
     only_experiments = parse_experiment_csv(args.only_experiments)
 
-    state_file = args.state_file or (repo_root / "results/queues/near_door/queue_state.json")
+    state_file = args.state_file
     log_root = args.log_dir
     state: dict[str, Any] | None = None
     log_dir: Path | None = None
     lock_path: Path | None = None
 
     if save_queue:
+        assert state_file is not None
         lock_path = state_file.with_suffix(state_file.suffix + ".lock")
         previous = load_json(state_file)
         items = filter_items(
             load_manifest_cases(repo_root, manifest_path),
-            args.system,
             only_experiments,
             args.from_experiment,
             args.to_experiment,
@@ -999,7 +1020,6 @@ def run_queue(args: argparse.Namespace) -> int:
             state_file,
             items,
             previous,
-            args.system,
             args.only_experiments or "",
             args.from_experiment or "",
             args.to_experiment or "",
@@ -1013,7 +1033,6 @@ def run_queue(args: argparse.Namespace) -> int:
     else:
         queue_items = filter_items(
             load_manifest_cases(repo_root, manifest_path),
-            args.system,
             only_experiments,
             args.from_experiment,
             args.to_experiment,
@@ -1134,11 +1153,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     repo_root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=repo_root)
-    parser.add_argument(
-        "--manifest",
-        type=Path,
-        default=repo_root / "config/generated/near_door/manifest.yaml",
-    )
+    parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--binary", type=Path, default=repo_root / "build/MSS")
     parser.add_argument(
         "--save-queue",
@@ -1151,7 +1166,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--continue-on-failure", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--force-unlock", action="store_true")
-    parser.add_argument("--system", choices=("all", "open", "collimated"), default="all")
     parser.add_argument("--only-experiments", help="comma-separated experiment IDs, e.g. E0,E3")
     parser.add_argument("--from-experiment", choices=EXPERIMENT_ORDER)
     parser.add_argument("--to-experiment", choices=EXPERIMENT_ORDER)
@@ -1192,8 +1206,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             parser.error(str(error))
     if args.state_file is not None or args.log_dir is not None:
         args.save_queue = True
-    if args.force_unlock and not args.save_queue:
-        parser.error("--force-unlock requires --save-queue, --state-file, or --log-dir")
+    if args.save_queue and args.state_file is None:
+        parser.error("saved queue mode requires --state-file")
+    if args.force_unlock and args.state_file is None:
+        parser.error("--force-unlock requires --state-file")
     if args.continue_on_failure:
         args.stop_on_failure = False
     return args

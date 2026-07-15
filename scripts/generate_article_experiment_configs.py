@@ -266,14 +266,8 @@ def set_single_pose(config: dict[str, Any], offset: tuple[int, int]) -> None:
     config["pose"].setdefault("pose_id_rule", "pose_x{encoded_x}_y{encoded_y}")
 
 
-def set_article_diagnostics(config: dict[str, Any], case_id: str) -> None:
-    config["diagnostics"] = {
-        "case_id": case_id,
-        "phase_space": {
-            "enable": False,
-            "csv_name": "phase_space.csv",
-        },
-    }
+def set_case_id(config: dict[str, Any], case_id: str) -> None:
+    config["case_id"] = case_id
 
 
 def build_config(
@@ -320,7 +314,7 @@ def build_config(
     config["output"]["output_directory"] = output_directory
     config["output"]["existing_run_policy"] = "fail"
 
-    set_article_diagnostics(config, case_id)
+    set_case_id(config, case_id)
     return config
 
 

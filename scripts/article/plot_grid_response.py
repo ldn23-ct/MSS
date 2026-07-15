@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Generate 2D article grid response maps from cleaned events files."""
+"""Generate 2D article grid response maps from cleaned events files.
+
+An optional closed ``first_scatter_z`` interval can be applied before any
+response channel or control-phantom delta is calculated.
+"""
 
 from __future__ import annotations
 
@@ -125,6 +129,24 @@ def normalize_energy_filter(text: str) -> str:
         return "E" + value
 
 
+def validate_first_scatter_z_range(
+    values: list[float] | tuple[float, float] | None,
+) -> tuple[float, float] | None:
+    """Validate and normalize an optional closed first-scatter-z interval."""
+
+    if values is None:
+        return None
+    if len(values) != 2:
+        raise ValueError("first_scatter_z range requires exactly two bounds")
+    minimum = float(values[0])
+    maximum = float(values[1])
+    if not (math.isfinite(minimum) and math.isfinite(maximum)):
+        raise ValueError("first_scatter_z range bounds must be finite")
+    if minimum > maximum:
+        raise ValueError("first_scatter_z range requires MIN_MM <= MAX_MM")
+    return minimum, maximum
+
+
 def parse_pose_number(token: str) -> float:
     normalized = token.replace("p", ".")
     sign = -1.0 if normalized.startswith(("m", "-")) else 1.0
@@ -218,7 +240,11 @@ def run_info_for(event_file: Path, metadata_name: str) -> RunInfo:
     )
 
 
-def load_events(event_file: Path, ranges: list[RangeSpec]) -> pd.DataFrame:
+def load_events(
+    event_file: Path,
+    ranges: list[RangeSpec],
+    first_scatter_z_range_mm: tuple[float, float] | None = None,
+) -> pd.DataFrame:
     frame = pd.read_csv(event_file, low_memory=False)
     if "scatter_count_total" not in frame.columns:
         raise ValueError(f"events CSV is missing scatter_count_total: {event_file}")
@@ -233,6 +259,17 @@ def load_events(event_file: Path, ranges: list[RangeSpec]) -> pd.DataFrame:
 
     valid_slits = {item.slit_id for item in ranges}
     frame = frame[frame[SLIT_COLUMN].isin(valid_slits)].copy()
+    if first_scatter_z_range_mm is not None:
+        if "first_scatter_z" not in frame.columns:
+            raise ValueError(
+                "events CSV is missing first_scatter_z required by "
+                f"--first-scatter-z-range-mm: {event_file}"
+            )
+        minimum, maximum = first_scatter_z_range_mm
+        frame["first_scatter_z"] = pd.to_numeric(frame["first_scatter_z"], errors="coerce")
+        frame = frame[
+            frame["first_scatter_z"].between(minimum, maximum, inclusive="both")
+        ].copy()
     frame["scatter_count_total"] = pd.to_numeric(frame["scatter_count_total"], errors="coerce")
     frame = frame[frame["scatter_count_total"].notna()].copy()
     return frame
@@ -459,6 +496,25 @@ def to_builtin(value: Any) -> Any:
     return value
 
 
+def first_scatter_z_filter_manifest(
+    first_scatter_z_range_mm: tuple[float, float] | None,
+) -> dict[str, Any]:
+    if first_scatter_z_range_mm is None:
+        return {
+            "enabled": False,
+            "min_mm": None,
+            "max_mm": None,
+            "interval_rule": "disabled",
+        }
+    minimum, maximum = first_scatter_z_range_mm
+    return {
+        "enabled": True,
+        "min_mm": minimum,
+        "max_mm": maximum,
+        "interval_rule": "closed: min_mm <= first_scatter_z <= max_mm",
+    }
+
+
 def write_outputs(
     frame: pd.DataFrame,
     output_dir: Path,
@@ -467,6 +523,7 @@ def write_outputs(
     ranges: list[RangeSpec],
     input_root: Path,
     events_name: str,
+    first_scatter_z_range_mm: tuple[float, float] | None,
 ) -> dict[str, Any]:
     response_csv = output_dir / "grid_response_long.csv"
     ordered = frame.copy()
@@ -528,6 +585,9 @@ def write_outputs(
             {"slit_id": item.slit_id, "left_mm": item.left_mm, "right_mm": item.right_mm}
             for item in ranges
         ],
+        "event_filters": {
+            "first_scatter_z": first_scatter_z_filter_manifest(first_scatter_z_range_mm),
+        },
         "response_csv": response_csv,
         "matrix_channels": list(MATRIX_CHANNELS),
         "phantom_ids": phantom_ids,
@@ -562,6 +622,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--events-name", default="events_clean.csv")
     parser.add_argument("--metadata-name", default="metadata.yaml")
     parser.add_argument("--control-phantom")
+    parser.add_argument(
+        "--first-scatter-z-range-mm",
+        nargs=2,
+        type=float,
+        metavar=("MIN_MM", "MAX_MM"),
+        help="closed first_scatter_z interval applied before all response calculations",
+    )
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args(argv)
 
@@ -571,6 +638,9 @@ def main(argv: list[str] | None = None) -> int:
     ranges = validate_det_x_ranges()
     energy_filter = normalize_energy_filter(args.energy)
     control_phantom = control_phantom_for(args.experiment, args.control_phantom)
+    first_scatter_z_range_mm = validate_first_scatter_z_range(
+        args.first_scatter_z_range_mm
+    )
     ensure_output_dir(args.output_dir, args.overwrite)
 
     event_files = discover_event_files(args.input_root, args.events_name)
@@ -583,7 +653,7 @@ def main(argv: list[str] | None = None) -> int:
         info = run_info_for(event_file, args.metadata_name)
         if info.experiment != args.experiment or info.energy_token != energy_filter:
             continue
-        frame = load_events(event_file, ranges)
+        frame = load_events(event_file, ranges, first_scatter_z_range_mm)
         rows.extend(aggregate_run(info, frame, ranges))
         matched_runs += 1
 
@@ -603,8 +673,14 @@ def main(argv: list[str] | None = None) -> int:
         ranges,
         args.input_root,
         args.events_name,
+        first_scatter_z_range_mm,
     )
     print(f"processed {matched_runs} run(s)")
+    if first_scatter_z_range_mm is None:
+        print("first_scatter_z filter: disabled")
+    else:
+        minimum, maximum = first_scatter_z_range_mm
+        print(f"first_scatter_z filter: [{minimum:g}, {maximum:g}] mm (inclusive)")
     print(f"response: {output_info['response_csv']}")
     print(f"manifest: {output_info['manifest']}")
     print(

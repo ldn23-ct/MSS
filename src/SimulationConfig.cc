@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <limits>
 #include <stdexcept>
 
 namespace {
@@ -15,6 +16,27 @@ void RequireFinite(double value, const std::string& field)
 {
     if (!IsFinite(value)) {
         throw std::runtime_error(field + " must be finite");
+    }
+}
+
+void RequirePoseOffset(double value, const std::string& field)
+{
+    RequireFinite(value, field);
+    constexpr long double scale = 1000000.0L;
+    const long double scaled = static_cast<long double>(value) * scale;
+    if (scaled < static_cast<long double>(std::numeric_limits<long long>::min())
+        || scaled > static_cast<long double>(std::numeric_limits<long long>::max())) {
+        throw std::runtime_error(field + " is outside the supported range");
+    }
+    if (std::abs(scaled - std::round(scaled)) > 1.0e-6L) {
+        throw std::runtime_error(field + " must contain at most six decimal places");
+    }
+}
+
+void RequirePoseOffsets(const std::vector<double>& values, const std::string& field)
+{
+    for (const double value : values) {
+        RequirePoseOffset(value, field);
     }
 }
 
@@ -73,6 +95,10 @@ void SimulationConfig::Validate() const
         && pose.list_head_offset_x_mm.size() != pose.list_head_offset_y_mm.size()) {
         throw std::runtime_error("pose.list.head_offset_x_mm and pose.list.head_offset_y_mm must have the same length");
     }
+    RequirePoseOffsets(pose.list_head_offset_x_mm, "pose.list.head_offset_x_mm");
+    RequirePoseOffsets(pose.list_head_offset_y_mm, "pose.list.head_offset_y_mm");
+    RequirePoseOffsets(pose.grid_x_offsets_mm, "pose.grid.x_offsets_mm");
+    RequirePoseOffsets(pose.grid_y_offsets_mm, "pose.grid.y_offsets_mm");
 
     if (source.particle != "gamma") {
         throw std::runtime_error("source.particle must be gamma");
@@ -151,16 +177,4 @@ void SimulationConfig::Validate() const
         throw std::runtime_error("output.existing_run_policy must be fail or overwrite");
     }
 
-    if (diagnostics.configured && diagnostics.case_id.empty()) {
-        throw std::runtime_error("diagnostics.case_id must be non-empty");
-    }
-    if (diagnostics.phase_space.enable && diagnostics.phase_space.csv_name.empty()) {
-        throw std::runtime_error("diagnostics.phase_space.csv_name must be non-empty when enabled");
-    }
-    if (diagnostics.phase_space.enable
-        && (diagnostics.phase_space.csv_name == output.events_csv_name
-            || diagnostics.phase_space.csv_name == "events_debug.csv"
-            || diagnostics.phase_space.csv_name == output.metadata_yaml_name)) {
-        throw std::runtime_error("diagnostics.phase_space.csv_name conflicts with an existing run output file");
-    }
 }

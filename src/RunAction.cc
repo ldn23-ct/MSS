@@ -47,9 +47,6 @@ void RunAction::BeginOfRunAction(const G4Run*)
 
     EnsureTmpDirectory();
     writer_.Open(TempCsvPath(CurrentThreadId()), config_.run.debug);
-    if (config_.diagnostics.phase_space.enable) {
-        phaseSpaceWriter_.Open(PhaseSpaceTempPath(CurrentThreadId()));
-    }
 }
 
 void RunAction::EndOfRunAction(const G4Run*)
@@ -57,29 +54,18 @@ void RunAction::EndOfRunAction(const G4Run*)
     if (writer_.IsOpen()) {
         writer_.Close();
     }
-    if (phaseSpaceWriter_.IsOpen()) {
-        phaseSpaceWriter_.Close();
-    }
 
     if (!configured_ || role_ == OutputRole::Worker) {
         return;
     }
 
     MergeThreadCsvFiles();
-    if (config_.diagnostics.phase_space.enable) {
-        MergePhaseSpaceThreadCsvFiles();
-    }
     metadataWriter_.Write(MetadataPath(), config_, vehicleROI_, pose_, BuildRunId(), OutputCsvName());
 }
 
 CsvWriter* RunAction::Writer()
 {
     return &writer_;
-}
-
-PhaseSpaceCsvWriter* RunAction::PhaseSpaceWriter()
-{
-    return config_.diagnostics.phase_space.enable ? &phaseSpaceWriter_ : nullptr;
 }
 
 std::string RunAction::BuildRunId() const
@@ -133,27 +119,6 @@ std::vector<std::string> RunAction::ExpectedTempCsvPaths() const
     paths.reserve(static_cast<std::size_t>(threadCount));
     for (int threadId = 0; threadId < threadCount; ++threadId) {
         paths.push_back(TempCsvPath(threadId));
-    }
-    return paths;
-}
-
-std::string RunAction::PhaseSpaceFinalPath() const
-{
-    return (fs::path(RunDirectory()) / config_.diagnostics.phase_space.csv_name).string();
-}
-
-std::string RunAction::PhaseSpaceTempPath(int threadId) const
-{
-    return (fs::path(TmpDirectory()) / ("phase_space_thread" + std::to_string(threadId) + ".csv")).string();
-}
-
-std::vector<std::string> RunAction::ExpectedPhaseSpaceTempPaths() const
-{
-    const int threadCount = (config_.run.number_of_threads > 1) ? config_.run.number_of_threads : 1;
-    std::vector<std::string> paths;
-    paths.reserve(static_cast<std::size_t>(threadCount));
-    for (int threadId = 0; threadId < threadCount; ++threadId) {
-        paths.push_back(PhaseSpaceTempPath(threadId));
     }
     return paths;
 }
@@ -228,12 +193,4 @@ void RunAction::MergeThreadCsvFiles()
 {
     const bool deleteInputFiles = !config_.run.debug;
     CsvWriter::MergeFiles(ExpectedTempCsvPaths(), FinalCsvPath(), config_.run.debug, deleteInputFiles);
-}
-
-void RunAction::MergePhaseSpaceThreadCsvFiles()
-{
-    PhaseSpaceCsvWriter::MergeFiles(
-        ExpectedPhaseSpaceTempPaths(),
-        PhaseSpaceFinalPath(),
-        true);
 }

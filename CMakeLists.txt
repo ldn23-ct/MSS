@@ -29,7 +29,6 @@ add_executable(MSS
     src/ImagingHeadConstruction.cc
     src/MaterialManager.cc
     src/MetadataWriter.cc
-    src/PhaseSpaceCsvWriter.cc
     src/PhysicsList.cc
     src/PoseRunController.cc
     src/PrimaryGeneratorAction.cc
@@ -60,16 +59,10 @@ include(CTest)
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_test(
-        NAME diagnostics_unit
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_diagnostics.py
+        NAME core_experiment_contract_unit
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_core_experiment_contract.py
     )
-    set_tests_properties(diagnostics_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-
-    add_test(
-        NAME near_door_unit
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_near_door_experiments.py
-    )
-    set_tests_properties(near_door_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(core_experiment_contract_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     add_test(
         NAME experiment_queue_unit
@@ -78,17 +71,9 @@ if(BUILD_TESTING)
     set_tests_properties(experiment_queue_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
     add_test(
-        NAME detector_response_unit
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_detector_response.py
+        NAME source_response_config_unit
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/test_source_response_experiment_configs.py
     )
-    set_tests_properties(detector_response_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(source_response_config_unit PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 
-    add_test(
-        NAME diagnostics_smoke
-        COMMAND ${Python3_EXECUTABLE}
-                ${CMAKE_SOURCE_DIR}/tests/smoke_diagnostics.py
-                --binary $<TARGET_FILE:MSS>
-                --repo-root ${CMAKE_SOURCE_DIR}
-    )
-    set_tests_properties(diagnostics_smoke PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 endif()
