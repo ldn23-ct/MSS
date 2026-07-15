@@ -7,7 +7,9 @@ import argparse
 import copy
 import csv
 import math
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -273,9 +275,14 @@ def generate(
     n_primary_per_pose: int = DEFAULT_N_PRIMARY_PER_POSE,
     threads: int = DEFAULT_THREADS,
     base_seed: int = DEFAULT_BASE_SEED,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
-    if output_dir.exists() and any(output_dir.iterdir()):
-        raise FileExistsError(f"generated output directory is not empty: {output_dir}")
+    if output_dir.is_symlink() or (output_dir.exists() and not output_dir.is_dir()):
+        raise ValueError(f"generated output path must be a directory, not a file or symlink: {output_dir}")
+    if output_dir.exists() and any(output_dir.iterdir()) and not overwrite:
+        raise FileExistsError(
+            f"generated output directory is not empty: {output_dir}; use --overwrite to replace it"
+        )
     if not campaign_id.strip():
         raise ValueError("campaign_id must be non-empty")
     if not math.isfinite(energy_keV) or energy_keV <= 0.0:
@@ -292,6 +299,15 @@ def generate(
     validate_profile_file(profile_file)
     profile_file_text = repo_relative(repo_root, profile_file)
     energy_token = format_number_token(energy_keV)
+
+    staging_dir: Path | None = None
+    write_root = output_dir
+    if overwrite:
+        output_dir.parent.mkdir(parents=True, exist_ok=True)
+        staging_dir = Path(
+            tempfile.mkdtemp(prefix=f".{output_dir.name}.staging-", dir=output_dir.parent)
+        )
+        write_root = staging_dir
 
     manifest: dict[str, Any] = {
         "schema_version": 1,
@@ -342,127 +358,138 @@ def generate(
         "cases": [],
     }
 
-    seed_cursor = base_seed
-    for scan_mode, phantom_id, profile_id in condition_specs():
-        geometry_file = str(phantoms[phantom_id]["geometry_file"])
-        output_directory = (
-            f"results/article/{campaign_id}/runs/{scan_mode}/{phantom_id}/{profile_id}"
-        )
-        condition_id = (
-            f"source_response_{scan_mode}_{phantom_id}_{profile_id}_E{energy_token}"
-        )
-        for pose_index, (x_mm, y_mm) in enumerate(offsets_for_condition(scan_mode)):
-            pose_id = build_pose_id(x_mm, y_mm)
-            if scan_mode == "grid":
-                case_id = (
-                    f"source_response_grid_{phantom_id}_{profile_id}_{pose_id}_"
-                    f"E{energy_token}_seed{seed_cursor}"
-                )
-                config_path = (
-                    output_dir
-                    / "configs"
-                    / "grid"
-                    / f"{phantom_id}_{profile_id}"
-                    / f"{pose_id}.yaml"
-                )
-            else:
-                case_id = (
-                    f"source_response_center_{phantom_id}_{profile_id}_"
-                    f"E{energy_token}_seed{seed_cursor}"
-                )
-                config_path = (
-                    output_dir / "configs" / "center" / f"{phantom_id}_{profile_id}.yaml"
-                )
-
-            config = build_config(
-                base_config,
-                case_id=case_id,
-                geometry_file=geometry_file,
-                profile_file=profile_file_text,
-                profile_id=profile_id,
-                head_offset_x_mm=x_mm,
-                head_offset_y_mm=y_mm,
-                energy_keV=energy_keV,
-                n_primary_per_pose=n_primary_per_pose,
-                threads=threads,
-                base_seed=seed_cursor,
-                output_directory=output_directory,
+    try:
+        seed_cursor = base_seed
+        for scan_mode, phantom_id, profile_id in condition_specs():
+            geometry_file = str(phantoms[phantom_id]["geometry_file"])
+            output_directory = (
+                f"results/{campaign_id}/runs/{scan_mode}/{phantom_id}/{profile_id}"
             )
-            write_yaml(config_path, config)
-            manifest["cases"].append(
-                {
-                    "case_id": case_id,
-                    "condition_id": condition_id,
-                    "config_file": repo_relative(repo_root, config_path),
-                    "task_granularity": "one_pose_per_config",
-                    "scan_mode": scan_mode,
-                    "phantom_id": phantom_id,
-                    "geometry_file": geometry_file,
-                    "defect": copy.deepcopy(phantoms[phantom_id]["defect"]),
-                    "profile_id": profile_id,
-                    "slit_ids": list(PROFILE_SETTINGS[profile_id]["slit_ids"]),
-                    "detector_x_range_zero_mm": list(
-                        PROFILE_SETTINGS[profile_id]["detector_x_range_zero_mm"]
-                    ),
-                    "energy_keV": float(energy_keV),
-                    "pose_index": pose_index,
-                    "pose_id": pose_id,
-                    "head_offset_x_mm": float(x_mm),
-                    "head_offset_y_mm": float(y_mm),
-                    "pose_count": 1,
-                    "seed": seed_cursor,
-                    "seed_start": seed_cursor,
-                    "seed_end": seed_cursor,
-                    "n_primary_per_pose": n_primary_per_pose,
-                    "number_of_threads": threads,
-                    "output_directory": output_directory,
-                }
+            condition_id = (
+                f"source_response_{scan_mode}_{phantom_id}_{profile_id}_E{energy_token}"
             )
-            seed_cursor += 1
+            for pose_index, (x_mm, y_mm) in enumerate(offsets_for_condition(scan_mode)):
+                pose_id = build_pose_id(x_mm, y_mm)
+                if scan_mode == "grid":
+                    case_id = (
+                        f"source_response_grid_{phantom_id}_{profile_id}_{pose_id}_"
+                        f"E{energy_token}_seed{seed_cursor}"
+                    )
+                    config_path = (
+                        output_dir
+                        / "configs"
+                        / "grid"
+                        / f"{phantom_id}_{profile_id}"
+                        / f"{pose_id}.yaml"
+                    )
+                else:
+                    case_id = (
+                        f"source_response_center_{phantom_id}_{profile_id}_"
+                        f"E{energy_token}_seed{seed_cursor}"
+                    )
+                    config_path = (
+                        output_dir / "configs" / "center" / f"{phantom_id}_{profile_id}.yaml"
+                    )
 
-    cases_by_condition = {
-        (case["scan_mode"], case["phantom_id"], case["profile_id"]): case
-        for case in manifest["cases"]
-        if case["scan_mode"] == "center"
-    }
+                config = build_config(
+                    base_config,
+                    case_id=case_id,
+                    geometry_file=geometry_file,
+                    profile_file=profile_file_text,
+                    profile_id=profile_id,
+                    head_offset_x_mm=x_mm,
+                    head_offset_y_mm=y_mm,
+                    energy_keV=energy_keV,
+                    n_primary_per_pose=n_primary_per_pose,
+                    threads=threads,
+                    base_seed=seed_cursor,
+                    output_directory=output_directory,
+                )
+                write_yaml(write_root / config_path.relative_to(output_dir), config)
+                manifest["cases"].append(
+                    {
+                        "case_id": case_id,
+                        "condition_id": condition_id,
+                        "config_file": repo_relative(repo_root, config_path),
+                        "task_granularity": "one_pose_per_config",
+                        "scan_mode": scan_mode,
+                        "phantom_id": phantom_id,
+                        "geometry_file": geometry_file,
+                        "defect": copy.deepcopy(phantoms[phantom_id]["defect"]),
+                        "profile_id": profile_id,
+                        "slit_ids": list(PROFILE_SETTINGS[profile_id]["slit_ids"]),
+                        "detector_x_range_zero_mm": list(
+                            PROFILE_SETTINGS[profile_id]["detector_x_range_zero_mm"]
+                        ),
+                        "energy_keV": float(energy_keV),
+                        "pose_index": pose_index,
+                        "pose_id": pose_id,
+                        "head_offset_x_mm": float(x_mm),
+                        "head_offset_y_mm": float(y_mm),
+                        "pose_count": 1,
+                        "seed": seed_cursor,
+                        "seed_start": seed_cursor,
+                        "seed_end": seed_cursor,
+                        "n_primary_per_pose": n_primary_per_pose,
+                        "number_of_threads": threads,
+                        "output_directory": output_directory,
+                    }
+                )
+                seed_cursor += 1
 
-    def e7_case_reference(
-        phantom_id: str, defect_size_mm: tuple[float, float, float] | None
-    ) -> dict[str, Any]:
-        case = cases_by_condition[("center", phantom_id, "P001")]
-        reference = {
-            "phantom_id": phantom_id,
-            "case_id": case["case_id"],
-            "config_file": case["config_file"],
+        cases_by_condition = {
+            (case["scan_mode"], case["phantom_id"], case["profile_id"]): case
+            for case in manifest["cases"]
+            if case["scan_mode"] == "center"
         }
-        if defect_size_mm is not None:
-            reference["defect_size_mm"] = list(defect_size_mm)
-        return reference
 
-    e7_design = manifest["scan_design"]["e7_size_series"]
-    e7_design["baseline"] = e7_case_reference("P0", None)
-    e7_design["series"] = [
-        e7_case_reference(phantom_id, defect_size_mm)
-        for phantom_id, defect_size_mm in E7_SIZE_SERIES
-    ]
+        def e7_case_reference(
+            phantom_id: str, defect_size_mm: tuple[float, float, float] | None
+        ) -> dict[str, Any]:
+            case = cases_by_condition[("center", phantom_id, "P001")]
+            reference = {
+                "phantom_id": phantom_id,
+                "case_id": case["case_id"],
+                "config_file": case["config_file"],
+            }
+            if defect_size_mm is not None:
+                reference["defect_size_mm"] = list(defect_size_mm)
+            return reference
 
-    total_pose_runs = len(manifest["cases"])
-    manifest["summary"] = {
-        "physical_condition_count": len(condition_specs()),
-        "config_count": len(manifest["cases"]),
-        "task_count": len(manifest["cases"]),
-        "center_config_count": sum(
-            case["scan_mode"] == "center" for case in manifest["cases"]
-        ),
-        "grid_condition_count": len(GRID_PHANTOM_IDS),
-        "grid_config_count": sum(case["scan_mode"] == "grid" for case in manifest["cases"]),
-        "total_pose_runs": total_pose_runs,
-        "total_primary": total_pose_runs * n_primary_per_pose,
-        "seed_start": base_seed,
-        "seed_end": seed_cursor - 1,
-    }
-    write_yaml(output_dir / "manifest.yaml", manifest)
-    return manifest
+        e7_design = manifest["scan_design"]["e7_size_series"]
+        e7_design["baseline"] = e7_case_reference("P0", None)
+        e7_design["series"] = [
+            e7_case_reference(phantom_id, defect_size_mm)
+            for phantom_id, defect_size_mm in E7_SIZE_SERIES
+        ]
+
+        total_pose_runs = len(manifest["cases"])
+        manifest["summary"] = {
+            "physical_condition_count": len(condition_specs()),
+            "config_count": len(manifest["cases"]),
+            "task_count": len(manifest["cases"]),
+            "center_config_count": sum(
+                case["scan_mode"] == "center" for case in manifest["cases"]
+            ),
+            "grid_condition_count": len(GRID_PHANTOM_IDS),
+            "grid_config_count": sum(
+                case["scan_mode"] == "grid" for case in manifest["cases"]),
+            "total_pose_runs": total_pose_runs,
+            "total_primary": total_pose_runs * n_primary_per_pose,
+            "seed_start": base_seed,
+            "seed_end": seed_cursor - 1,
+        }
+        write_yaml(write_root / "manifest.yaml", manifest)
+
+        if staging_dir is not None:
+            if output_dir.exists():
+                shutil.rmtree(output_dir)
+            staging_dir.replace(output_dir)
+        return manifest
+    except Exception:
+        if staging_dir is not None and staging_dir.exists():
+            shutil.rmtree(staging_dir)
+        raise
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -486,6 +513,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--campaign-id", default=DEFAULT_CAMPAIGN_ID)
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="replace the entire generated output directory after successful generation",
+    )
     parser.add_argument("--energy-kev", type=parse_positive_float, default=DEFAULT_ENERGY_KEV)
     parser.add_argument(
         "--n-primary-per-pose",
@@ -514,6 +546,7 @@ def main(argv: list[str] | None = None) -> int:
             n_primary_per_pose=args.n_primary_per_pose,
             threads=args.threads,
             base_seed=args.base_seed,
+            overwrite=args.overwrite,
         )
     except Exception as error:
         print(f"source-response config generation error: {error}", file=sys.stderr)

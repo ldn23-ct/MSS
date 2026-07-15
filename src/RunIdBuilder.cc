@@ -47,23 +47,6 @@ std::string FormatEnergyValue(double value)
     return SanitizeToken(text);
 }
 
-std::string SystemId(const SimulationConfig& config)
-{
-    return config.collimator.enable ? "collimated" : "open";
-}
-
-std::string ModelState(const SimulationConfig& config)
-{
-    if (config.vehicle.model_type == "normal") {
-        return "normal";
-    }
-
-    const std::string target = config.vehicle.selected_target_component
-                                   ? SanitizeToken(*config.vehicle.selected_target_component)
-                                   : "unknown_target";
-    return "abnormal_" + target + "_" + SanitizeToken(config.vehicle.abnormal_material);
-}
-
 std::string EnergyId(const SimulationConfig& config)
 {
     if (config.source.energy_mode == "mono") {
@@ -78,8 +61,7 @@ namespace mss {
 
 std::string BuildRunId(const SimulationConfig& config, const ScanPose& pose)
 {
-    return pose.pose_id + "_" + SystemId(config) + "_" + ModelState(config) + "_"
-        + EnergyId(config) + "_seed" + std::to_string(pose.random_seed);
+    return pose.pose_id + "_" + EnergyId(config) + "_seed" + std::to_string(pose.random_seed);
 }
 
 }  // namespace mss

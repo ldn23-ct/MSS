@@ -51,7 +51,10 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
             self.assertEqual(4, manifest["summary"]["grid_condition_count"])
             self.assertEqual(324, manifest["summary"]["grid_config_count"])
             self.assertEqual(341, manifest["summary"]["total_pose_runs"])
-            self.assertEqual(6_820_000_000, manifest["summary"]["total_primary"])
+            self.assertEqual(
+                341 * source_response.DEFAULT_N_PRIMARY_PER_POSE,
+                manifest["summary"]["total_primary"],
+            )
             self.assertEqual(1234, manifest["summary"]["seed_start"])
             self.assertEqual(1574, manifest["summary"]["seed_end"])
             self.assertEqual(341, len(manifest["cases"]))
@@ -76,6 +79,12 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
             self.assertEqual(
                 {"one_pose_per_config"},
                 {case["task_granularity"] for case in manifest["cases"]},
+            )
+            self.assertTrue(
+                all(
+                    case["output_directory"].startswith("results/articlev2/runs/")
+                    for case in manifest["cases"]
+                )
             )
 
     def test_profiles_grid_offsets_and_generated_yaml_are_exact(self):
@@ -127,7 +136,10 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
                 )
             )
             self.assertEqual(560.0, grid_config["source"]["mono_energy_keV"])
-            self.assertEqual(20_000_000, grid_config["run"]["n_primary_per_pose"])
+            self.assertEqual(
+                source_response.DEFAULT_N_PRIMARY_PER_POSE,
+                grid_config["run"]["n_primary_per_pose"],
+            )
             self.assertEqual(8, grid_config["run"]["number_of_threads"])
 
     def test_each_grid_condition_expands_to_exact_81_pose_cartesian_product(self):
@@ -274,7 +286,10 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
                     [20.0, 127.0], config["detector"]["detector_x_range_zero_mm"]
                 )
                 self.assertEqual(560.0, config["source"]["mono_energy_keV"])
-                self.assertEqual(20_000_000, config["run"]["n_primary_per_pose"])
+                self.assertEqual(
+                    source_response.DEFAULT_N_PRIMARY_PER_POSE,
+                    config["run"]["n_primary_per_pose"],
+                )
                 self.assertEqual(8, config["run"]["number_of_threads"])
 
     def test_seed_ranges_are_contiguous_and_do_not_overlap(self):
@@ -348,6 +363,11 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
         args = source_response.parse_args([])
         self.assertEqual("articlev2", args.campaign_id)
         self.assertEqual(REPO_ROOT / "config/generated/articlev2", args.output_dir)
+        self.assertFalse(args.overwrite)
+
+    def test_cli_parses_explicit_overwrite(self):
+        args = source_response.parse_args(["--overwrite"])
+        self.assertTrue(args.overwrite)
 
     def test_nonempty_output_directory_fails_fast(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -356,6 +376,60 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
             (output_dir / "keep.txt").write_text("user data", encoding="utf-8")
             with self.assertRaisesRegex(FileExistsError, "not empty"):
                 self.generate(output_dir)
+
+    def test_overwrite_replaces_entire_generated_directory_without_touching_results(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output_dir = root / "generated"
+            first_manifest = self.generate(output_dir, campaign_id="old_campaign")
+            old_config = Path(first_manifest["cases"][0]["config_file"])
+            old_config.write_text("old config\n", encoding="utf-8")
+            (output_dir / "manual.txt").write_text("discard me\n", encoding="utf-8")
+            (output_dir / "obsolete" / "old.yaml").parent.mkdir()
+            (output_dir / "obsolete" / "old.yaml").write_text("obsolete\n", encoding="utf-8")
+            results_marker = root / "results" / "keep.txt"
+            results_marker.parent.mkdir()
+            results_marker.write_text("results stay\n", encoding="utf-8")
+
+            manifest = self.generate(
+                output_dir,
+                campaign_id="new_campaign",
+                energy_keV=570.0,
+                overwrite=True,
+            )
+
+            self.assertEqual("new_campaign", manifest["campaign_id"])
+            self.assertEqual(341, manifest["summary"]["config_count"])
+            self.assertFalse((output_dir / "manual.txt").exists())
+            self.assertFalse((output_dir / "obsolete").exists())
+            self.assertEqual("results stay\n", results_marker.read_text(encoding="utf-8"))
+
+            generated_manifest = load_yaml(output_dir / "manifest.yaml")
+            self.assertEqual("new_campaign", generated_manifest["campaign_id"])
+            config = load_yaml(Path(manifest["cases"][0]["config_file"]))
+            self.assertEqual(570.0, config["source"]["mono_energy_keV"])
+            self.assertEqual("fail", config["output"]["existing_run_policy"])
+            self.assertTrue(
+                config["output"]["output_directory"].startswith(
+                    "results/new_campaign/runs/"
+                )
+            )
+
+    def test_overwrite_failure_preserves_existing_generated_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            output_dir = Path(tmp) / "generated"
+            output_dir.mkdir()
+            marker = output_dir / "keep.txt"
+            marker.write_text("preserve me\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(FileNotFoundError, "collimator profile file"):
+                self.generate(
+                    output_dir,
+                    profile_file=Path(tmp) / "missing_profiles.csv",
+                    overwrite=True,
+                )
+
+            self.assertEqual("preserve me\n", marker.read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

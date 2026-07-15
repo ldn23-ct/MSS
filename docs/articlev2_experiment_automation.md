@@ -44,7 +44,7 @@
 |---|---|
 | campaign | `articlev2` |
 | energy | `560 keV` mono |
-| primary | 每 pose `20,000,000` |
+| primary | 每 pose `100` |
 | threads | 每个 MSS 进程 `8` |
 | base seed | `1234` |
 | 标准 center | `P0–P6 × P001/P002`，14 个任务 |
@@ -54,7 +54,7 @@
 | center 配置数 | `17` |
 | grid 配置数 | `324` |
 | 总配置/任务/pose run | `341` |
-| 总 primary | `6,820,000,000` |
+| 总 primary | `34,100` |
 | seed 范围 | `1234–1574` |
 
 profile 与探测范围映射为：
@@ -147,6 +147,7 @@ config/generated/articlev2/
 --profile-file PATH
 --campaign-id ID
 --output-dir PATH
+--overwrite
 --energy-kev VALUE
 --n-primary-per-pose N
 --threads N
@@ -173,26 +174,31 @@ config/generated/<campaign-id>/
 生成 YAML 中的仿真结果根目录也使用 campaign：
 
 ```text
-results/article/<campaign-id>/runs/...
+results/<campaign-id>/runs/...
 ```
 
-仅覆盖 `--output-dir` 只改变 generated 配置保存位置，不改变配置内部的结果 campaign 路径；需要隔离新结果时应同时使用新的 `--campaign-id`。
+仅覆盖 `--output-dir` 只改变 generated 配置保存位置，不改变配置内部的结果 campaign 路径；结果根目录由 `--campaign-id` 决定。需要隔离新结果时应同时使用新的 `--campaign-id`。
 
 ### 3.4 非空目录策略
 
-生成器不会覆盖非空输出目录。如果目标目录中已有文件，会 fail fast：
+默认情况下，生成器不会覆盖非空输出目录。如果目标目录中已有文件，会 fail fast：
 
 ```text
 generated output directory is not empty
 ```
 
-重新生成时应采用以下方式之一：
+确认需要用新配置完全替换指定 generated 目录时，显式传入 `--overwrite`：
 
-1. 使用新的 `--campaign-id`；
-2. 使用新的 `--output-dir`，并确认结果 campaign 是否也需要修改；
-3. 人工把旧 generated 目录移动到备份位置，再使用原 campaign 生成。
+```bash
+python3 scripts/generate_source_response_experiment_configs.py \
+  --campaign-id articlev2 \
+  --output-dir config/generated/articlev2 \
+  --overwrite
+```
 
-不要在未检查内容的情况下删除现有 generated 配置。`config/generated/` 默认被 Git 忽略，工作区文件可能是唯一副本。
+覆盖模式先在 `--output-dir` 的同级临时目录完成全部 YAML 和 `manifest.yaml` 生成；仅当生成成功后，才完整替换目标目录。因此目标目录中的任意手工文件、旧 manifest、旧 YAML 和过期子目录都会被舍弃；若生成校验失败，原目录保持不变。
+
+`--overwrite` 只作用于 `--output-dir` 指定的 generated 配置目录。它不会删除或覆盖 `results/` 下的仿真 run 目录；生成 YAML 中的 `output.existing_run_policy` 仍为 `fail`。覆盖前应确认 `--output-dir` 正确；如需保留旧配置，请先使用新的 `--campaign-id`、新的 `--output-dir` 或手工备份。
 
 ## 4. 单 pose 配置语义
 
@@ -407,13 +413,13 @@ python3 scripts/run_experiment_queue.py \
 center 结果写入：
 
 ```text
-results/article/articlev2/runs/center/<phantom>/<profile>/<run-id>/
+results/articlev2/runs/center/<phantom>/<profile>/<run-id>/
 ```
 
 grid 结果写入：
 
 ```text
-results/article/articlev2/runs/grid/<phantom>/<profile>/<run-id>/
+results/articlev2/runs/grid/<phantom>/<profile>/<run-id>/
 ```
 
 每个正式 run 目录包含：
@@ -427,13 +433,13 @@ tmp/
 run ID 由 MSS 生成，当前格式为：
 
 ```text
-<pose-id>_<collimated|open>_<model-state>_<energy>_seed<seed>
+<pose-id>_<energy>_seed<seed>
 ```
 
-articlev2 默认均为 collimated、normal 和 `560 keV`。例如：
+collimator 和 model-state 仍记录在配置及 metadata 中，但不再进入 run ID。articlev2 默认能量为 `560 keV`，例如：
 
 ```text
-pose_xm7p5_y2p5_collimated_normal_E560keV_seed1262
+pose_xm7p5_y2p5_E560keV_seed1262
 ```
 
 队列把任务判定为完成需要同时满足：

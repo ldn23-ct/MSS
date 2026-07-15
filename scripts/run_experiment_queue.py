@@ -189,25 +189,14 @@ def generate_poses(config: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def build_run_id(config: dict[str, Any], pose: dict[str, Any]) -> str:
-    collimator = config.get("collimator", {})
-    vehicle = config.get("vehicle", {})
     source = config.get("source", {})
-
-    system = "collimated" if bool(collimator.get("enable", True)) else "open"
-    model_type = str(vehicle.get("model_type", "normal"))
-    if model_type == "normal":
-        model_state = "normal"
-    else:
-        target = sanitize_token(str(vehicle.get("selected_target_component") or "unknown_target"))
-        material = sanitize_token(str(vehicle.get("abnormal_material") or "unknown_material"))
-        model_state = f"abnormal_{target}_{material}"
 
     if source.get("energy_mode") == "mono":
         energy = "E" + format_energy_value(source.get("mono_energy_keV", 0.0)) + "keV"
     else:
         energy = "spectrum"
 
-    return f"{pose['pose_id']}_{system}_{model_state}_{energy}_seed{pose['random_seed']}"
+    return f"{pose['pose_id']}_{energy}_seed{pose['random_seed']}"
 
 
 def output_csv_name(config: dict[str, Any]) -> str:

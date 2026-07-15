@@ -71,13 +71,13 @@ class ExperimentQueueTests(unittest.TestCase):
         self.assertEqual(
             [
                 "/tmp/source_response_queue_unit/"
-                "pose_xm7p5_y2p5_collimated_normal_E560keV_seed1234/metadata.yaml",
+                "pose_xm7p5_y2p5_E560keV_seed1234/metadata.yaml",
                 "/tmp/source_response_queue_unit/"
-                "pose_xm2p5_y2p5_collimated_normal_E560keV_seed1235/metadata.yaml",
+                "pose_xm2p5_y2p5_E560keV_seed1235/metadata.yaml",
                 "/tmp/source_response_queue_unit/"
-                "pose_x2p5_y2p5_collimated_normal_E560keV_seed1236/metadata.yaml",
+                "pose_x2p5_y2p5_E560keV_seed1236/metadata.yaml",
                 "/tmp/source_response_queue_unit/"
-                "pose_x7p5_y2p5_collimated_normal_E560keV_seed1237/metadata.yaml",
+                "pose_x7p5_y2p5_E560keV_seed1237/metadata.yaml",
             ],
             [item["metadata"] for item in expected],
         )
@@ -728,21 +728,21 @@ class ExperimentQueueTests(unittest.TestCase):
                         "case_id": "article_E0_P0_E80_center_b0_seed9000",
                         "batch_index": 0,
                         "seed": 9000,
-                        "source_run_id": "pose_x0_y320_open_normal_E80keV_seed9000",
+                        "source_run_id": "pose_x0_y320_E80keV_seed9000",
                         "n_primary": 10,
                     },
                     {
                         "case_id": "article_E0_P0_E80_center_b1_seed9001",
                         "batch_index": 1,
                         "seed": 9001,
-                        "source_run_id": "pose_x0_y320_open_normal_E80keV_seed9001",
+                        "source_run_id": "pose_x0_y320_E80keV_seed9001",
                         "n_primary": 10,
                     },
                     {
                         "case_id": "article_E0_P0_E80_center_b2_seed9002",
                         "batch_index": 2,
                         "seed": 9002,
-                        "source_run_id": "pose_x0_y320_open_normal_E80keV_seed9002",
+                        "source_run_id": "pose_x0_y320_E80keV_seed9002",
                         "n_primary": 10,
                     },
                 ],
@@ -825,7 +825,7 @@ class ExperimentQueueTests(unittest.TestCase):
                         root
                         / "results/article/unit/runs/E0_P0_E80_center"
                         / f"b{batch_index}"
-                        / f"pose_x0_y320_open_normal_E80keV_seed{seed}"
+                        / f"pose_x0_y320_E80keV_seed{seed}"
                         / "events.csv"
                     ).is_file()
                 )
