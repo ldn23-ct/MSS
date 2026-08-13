@@ -381,6 +381,7 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
                         ("P6", "P001"),
                     ],
                     "n_primary_per_pose": 80_000_000,
+                    "threads": 4,
                     "base_seed": 10_000,
                     "seed_end": 10_323,
                     "detector_range": [20.0, 127.0],
@@ -395,6 +396,7 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
                         ("P5", "P002"),
                     ],
                     "n_primary_per_pose": 100_000_000,
+                    "threads": 4,
                     "base_seed": 10_324,
                     "seed_end": 10_647,
                     "detector_range": [11.0, 101.0],
@@ -409,6 +411,7 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
                     grid_only=True,
                     grid_conditions=expected["grid_conditions"],
                     n_primary_per_pose=expected["n_primary_per_pose"],
+                    threads=expected["threads"],
                     base_seed=expected["base_seed"],
                 )
 
@@ -472,6 +475,7 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
                         expected["n_primary_per_pose"],
                         config["run"]["n_primary_per_pose"],
                     )
+                    self.assertEqual(expected["threads"], config["run"]["number_of_threads"])
                     self.assertEqual("list", config["pose"]["mode"])
                     self.assertEqual(1, len(experiment_queue.generate_poses(config)))
 
