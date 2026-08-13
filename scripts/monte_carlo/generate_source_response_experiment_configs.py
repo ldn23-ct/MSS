@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate articlev2 P0-P9 source-response experiment configs for MSS."""
+"""Generate source-response experiment configs for MSS."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ E7_ADDITIONAL_PHANTOM_IDS = ("P7", "P8", "P9")
 PHANTOM_IDS = STANDARD_PHANTOM_IDS + E7_ADDITIONAL_PHANTOM_IDS
 CENTER_PROFILE_IDS = ("P001", "P002")
 GRID_PHANTOM_IDS = ("P0", "P2", "P4", "P6")
+DEFAULT_GRID_CONDITIONS = tuple((phantom_id, "P001") for phantom_id in GRID_PHANTOM_IDS)
 GRID_OFFSETS_MM = (-10.0, -7.5, -5.0, -2.5, 0.0, 2.5, 5.0, 7.5, 10.0)
 E7_SIZE_SERIES: tuple[tuple[str, tuple[float, float, float]], ...] = (
     ("P7", (5.0, 5.0, 5.0)),
@@ -105,6 +106,24 @@ def parse_positive_float(text: str) -> float:
     if not math.isfinite(value) or value <= 0.0:
         raise argparse.ArgumentTypeError("value must be finite and positive")
     return value
+
+
+def parse_grid_condition(text: str) -> tuple[str, str]:
+    parts = [part.strip() for part in text.split(":")]
+    if len(parts) != 2 or not all(parts):
+        raise argparse.ArgumentTypeError(
+            "grid condition must use PHANTOM:PROFILE, for example P1:P002"
+        )
+    phantom_id, profile_id = parts
+    if phantom_id not in STANDARD_PHANTOM_IDS:
+        raise argparse.ArgumentTypeError(
+            f"grid phantom must be one of {', '.join(STANDARD_PHANTOM_IDS)}"
+        )
+    if profile_id not in CENTER_PROFILE_IDS:
+        raise argparse.ArgumentTypeError(
+            f"grid profile must be one of {', '.join(CENTER_PROFILE_IDS)}"
+        )
+    return phantom_id, profile_id
 
 
 def validate_geometry(path: Path, phantom_id: str) -> dict[str, Any]:
@@ -244,13 +263,47 @@ def build_config(
     return config
 
 
-def condition_specs() -> list[tuple[str, str, str]]:
+def selected_grid_conditions(
+    *,
+    grid_only: bool,
+    grid_conditions: tuple[tuple[str, str], ...] | list[tuple[str, str]] | None,
+) -> tuple[tuple[str, str], ...]:
+    if not grid_only:
+        if grid_conditions is not None:
+            raise ValueError("grid_conditions may only be supplied when grid_only is true")
+        return DEFAULT_GRID_CONDITIONS
+    if not grid_conditions:
+        raise ValueError("grid_only requires at least one grid condition")
+
+    selected = tuple(grid_conditions)
+    for phantom_id, profile_id in selected:
+        if phantom_id not in STANDARD_PHANTOM_IDS:
+            raise ValueError(f"unsupported grid phantom: {phantom_id}")
+        if profile_id not in CENTER_PROFILE_IDS:
+            raise ValueError(f"unsupported grid profile: {profile_id}")
+    if len(set(selected)) != len(selected):
+        raise ValueError("grid conditions must be unique")
+    return selected
+
+
+def condition_specs(
+    *,
+    grid_only: bool = False,
+    grid_conditions: tuple[tuple[str, str], ...] | list[tuple[str, str]] | None = None,
+) -> list[tuple[str, str, str]]:
+    selected_grid = selected_grid_conditions(
+        grid_only=grid_only,
+        grid_conditions=grid_conditions,
+    )
+    if grid_only:
+        return [("grid", phantom_id, profile_id) for phantom_id, profile_id in selected_grid]
+
     specs: list[tuple[str, str, str]] = []
     for phantom_id in STANDARD_PHANTOM_IDS:
         for profile_id in CENTER_PROFILE_IDS:
             specs.append(("center", phantom_id, profile_id))
-    for phantom_id in GRID_PHANTOM_IDS:
-        specs.append(("grid", phantom_id, "P001"))
+    for phantom_id, profile_id in selected_grid:
+        specs.append(("grid", phantom_id, profile_id))
     for phantom_id in E7_ADDITIONAL_PHANTOM_IDS:
         specs.append(("center", phantom_id, "P001"))
     return specs
@@ -275,6 +328,8 @@ def generate(
     n_primary_per_pose: int = DEFAULT_N_PRIMARY_PER_POSE,
     threads: int = DEFAULT_THREADS,
     base_seed: int = DEFAULT_BASE_SEED,
+    grid_only: bool = False,
+    grid_conditions: tuple[tuple[str, str], ...] | list[tuple[str, str]] | None = None,
     overwrite: bool = False,
 ) -> dict[str, Any]:
     if output_dir.is_symlink() or (output_dir.exists() and not output_dir.is_dir()):
@@ -293,6 +348,12 @@ def generate(
         raise ValueError("threads must be positive")
     if base_seed < 0:
         raise ValueError("base_seed must be non-negative")
+
+    selected_grid = selected_grid_conditions(
+        grid_only=grid_only,
+        grid_conditions=grid_conditions,
+    )
+    specs = condition_specs(grid_only=grid_only, grid_conditions=grid_conditions)
 
     base_config = load_yaml(base_config_path)
     phantoms = collect_phantoms(repo_root, geometry_dir)
@@ -326,29 +387,31 @@ def generate(
         "profile_settings": copy.deepcopy(PROFILE_SETTINGS),
         "scan_design": {
             "center": {
-                "phantom_ids": list(STANDARD_PHANTOM_IDS),
-                "profile_ids": list(CENTER_PROFILE_IDS),
+                "phantom_ids": [] if grid_only else list(STANDARD_PHANTOM_IDS),
+                "profile_ids": [] if grid_only else list(CENTER_PROFILE_IDS),
                 "pose_count_per_config": 1,
-                "condition_count": len(STANDARD_PHANTOM_IDS) * len(CENTER_PROFILE_IDS),
+                "condition_count": (
+                    0 if grid_only else len(STANDARD_PHANTOM_IDS) * len(CENTER_PROFILE_IDS)
+                ),
             },
             "grid": {
-                "phantom_ids": list(GRID_PHANTOM_IDS),
-                "profile_ids": ["P001"],
+                "phantom_ids": list(dict.fromkeys(item[0] for item in selected_grid)),
+                "profile_ids": list(dict.fromkeys(item[1] for item in selected_grid)),
+                "conditions": [
+                    {
+                        "phantom_id": phantom_id,
+                        "profile_id": profile_id,
+                        "n_primary_per_pose": n_primary_per_pose,
+                    }
+                    for phantom_id, profile_id in selected_grid
+                ],
                 "x_offsets_mm": list(GRID_OFFSETS_MM),
                 "y_offsets_mm": list(GRID_OFFSETS_MM),
-                "condition_count": len(GRID_PHANTOM_IDS),
+                "condition_count": len(selected_grid),
                 "pose_count_per_condition": len(GRID_OFFSETS_MM) ** 2,
                 "config_count_per_condition": len(GRID_OFFSETS_MM) ** 2,
                 "pose_count_per_config": 1,
                 "includes_center": True,
-            },
-            "e7_size_series": {
-                "experiment_id": "E7",
-                "scan_mode": "center",
-                "profile_id": "P001",
-                "slit_id": "S4",
-                "baseline": None,
-                "series": [],
             },
         },
         "run_safety": {
@@ -357,10 +420,19 @@ def generate(
         },
         "cases": [],
     }
+    if not grid_only:
+        manifest["scan_design"]["e7_size_series"] = {
+            "experiment_id": "E7",
+            "scan_mode": "center",
+            "profile_id": "P001",
+            "slit_id": "S4",
+            "baseline": None,
+            "series": [],
+        }
 
     try:
         seed_cursor = base_seed
-        for scan_mode, phantom_id, profile_id in condition_specs():
+        for scan_mode, phantom_id, profile_id in specs:
             geometry_file = str(phantoms[phantom_id]["geometry_file"])
             output_directory = (
                 f"results/{campaign_id}/events/raw/{scan_mode}/{phantom_id}/{profile_id}"
@@ -437,41 +509,42 @@ def generate(
                 )
                 seed_cursor += 1
 
-        cases_by_condition = {
-            (case["scan_mode"], case["phantom_id"], case["profile_id"]): case
-            for case in manifest["cases"]
-            if case["scan_mode"] == "center"
-        }
-
-        def e7_case_reference(
-            phantom_id: str, defect_size_mm: tuple[float, float, float] | None
-        ) -> dict[str, Any]:
-            case = cases_by_condition[("center", phantom_id, "P001")]
-            reference = {
-                "phantom_id": phantom_id,
-                "case_id": case["case_id"],
-                "config_file": case["config_file"],
+        if not grid_only:
+            cases_by_condition = {
+                (case["scan_mode"], case["phantom_id"], case["profile_id"]): case
+                for case in manifest["cases"]
+                if case["scan_mode"] == "center"
             }
-            if defect_size_mm is not None:
-                reference["defect_size_mm"] = list(defect_size_mm)
-            return reference
 
-        e7_design = manifest["scan_design"]["e7_size_series"]
-        e7_design["baseline"] = e7_case_reference("P0", None)
-        e7_design["series"] = [
-            e7_case_reference(phantom_id, defect_size_mm)
-            for phantom_id, defect_size_mm in E7_SIZE_SERIES
-        ]
+            def e7_case_reference(
+                phantom_id: str, defect_size_mm: tuple[float, float, float] | None
+            ) -> dict[str, Any]:
+                case = cases_by_condition[("center", phantom_id, "P001")]
+                reference = {
+                    "phantom_id": phantom_id,
+                    "case_id": case["case_id"],
+                    "config_file": case["config_file"],
+                }
+                if defect_size_mm is not None:
+                    reference["defect_size_mm"] = list(defect_size_mm)
+                return reference
+
+            e7_design = manifest["scan_design"]["e7_size_series"]
+            e7_design["baseline"] = e7_case_reference("P0", None)
+            e7_design["series"] = [
+                e7_case_reference(phantom_id, defect_size_mm)
+                for phantom_id, defect_size_mm in E7_SIZE_SERIES
+            ]
 
         total_pose_runs = len(manifest["cases"])
         manifest["summary"] = {
-            "physical_condition_count": len(condition_specs()),
+            "physical_condition_count": len(specs),
             "config_count": len(manifest["cases"]),
             "task_count": len(manifest["cases"]),
             "center_config_count": sum(
                 case["scan_mode"] == "center" for case in manifest["cases"]
             ),
-            "grid_condition_count": len(GRID_PHANTOM_IDS),
+            "grid_condition_count": len(selected_grid),
             "grid_config_count": sum(
                 case["scan_mode"] == "grid" for case in manifest["cases"]),
             "total_pose_runs": total_pose_runs,
@@ -526,7 +599,24 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--threads", type=parse_positive_int, default=DEFAULT_THREADS)
     parser.add_argument("--base-seed", type=parse_non_negative_int, default=DEFAULT_BASE_SEED)
+    parser.add_argument(
+        "--grid-only",
+        action="store_true",
+        help="generate only explicitly selected grid conditions",
+    )
+    parser.add_argument(
+        "--grid-condition",
+        action="append",
+        type=parse_grid_condition,
+        help="grid condition in PHANTOM:PROFILE form; repeat for multiple conditions",
+    )
     args = parser.parse_args(argv)
+    if args.grid_only and not args.grid_condition:
+        parser.error("--grid-only requires at least one --grid-condition")
+    if args.grid_condition and not args.grid_only:
+        parser.error("--grid-condition requires --grid-only")
+    if args.grid_condition and len(set(args.grid_condition)) != len(args.grid_condition):
+        parser.error("--grid-condition values must be unique")
     if args.output_dir is None:
         args.output_dir = args.repo_root / "config/generated" / args.campaign_id
     return args
@@ -546,6 +636,8 @@ def main(argv: list[str] | None = None) -> int:
             n_primary_per_pose=args.n_primary_per_pose,
             threads=args.threads,
             base_seed=args.base_seed,
+            grid_only=args.grid_only,
+            grid_conditions=args.grid_condition,
             overwrite=args.overwrite,
         )
     except Exception as error:

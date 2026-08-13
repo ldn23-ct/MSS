@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 
@@ -366,6 +366,150 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
     def test_cli_parses_explicit_overwrite(self):
         args = source_response.parse_args(["--overwrite"])
         self.assertTrue(args.overwrite)
+
+    def test_grid_only_campaigns_match_v3_topup_contract(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            campaigns = (
+                {
+                    "campaign_id": "articlev3_grid_p001_add80m",
+                    "output_dir": root / "p001",
+                    "grid_conditions": [
+                        ("P0", "P001"),
+                        ("P2", "P001"),
+                        ("P4", "P001"),
+                        ("P6", "P001"),
+                    ],
+                    "n_primary_per_pose": 80_000_000,
+                    "base_seed": 10_000,
+                    "seed_end": 10_323,
+                    "detector_range": [20.0, 127.0],
+                },
+                {
+                    "campaign_id": "articlev3_grid_p002_100m",
+                    "output_dir": root / "p002",
+                    "grid_conditions": [
+                        ("P0", "P002"),
+                        ("P1", "P002"),
+                        ("P3", "P002"),
+                        ("P5", "P002"),
+                    ],
+                    "n_primary_per_pose": 100_000_000,
+                    "base_seed": 10_324,
+                    "seed_end": 10_647,
+                    "detector_range": [11.0, 101.0],
+                },
+            )
+
+            all_seeds: set[int] = set()
+            for expected in campaigns:
+                manifest = self.generate(
+                    expected["output_dir"],
+                    campaign_id=expected["campaign_id"],
+                    grid_only=True,
+                    grid_conditions=expected["grid_conditions"],
+                    n_primary_per_pose=expected["n_primary_per_pose"],
+                    base_seed=expected["base_seed"],
+                )
+
+                self.assertEqual(4, manifest["summary"]["physical_condition_count"])
+                self.assertEqual(0, manifest["summary"]["center_config_count"])
+                self.assertEqual(4, manifest["summary"]["grid_condition_count"])
+                self.assertEqual(324, manifest["summary"]["grid_config_count"])
+                self.assertEqual(324, manifest["summary"]["task_count"])
+                self.assertEqual(
+                    324 * expected["n_primary_per_pose"],
+                    manifest["summary"]["total_primary"],
+                )
+                self.assertEqual(expected["base_seed"], manifest["summary"]["seed_start"])
+                self.assertEqual(expected["seed_end"], manifest["summary"]["seed_end"])
+                self.assertNotIn("e7_size_series", manifest["scan_design"])
+                self.assertEqual([], manifest["scan_design"]["center"]["phantom_ids"])
+                self.assertEqual(
+                    [
+                        {
+                            "phantom_id": phantom_id,
+                            "profile_id": profile_id,
+                            "n_primary_per_pose": expected["n_primary_per_pose"],
+                        }
+                        for phantom_id, profile_id in expected["grid_conditions"]
+                    ],
+                    manifest["scan_design"]["grid"]["conditions"],
+                )
+
+                cases = manifest["cases"]
+                self.assertEqual(
+                    set(expected["grid_conditions"]),
+                    {(case["phantom_id"], case["profile_id"]) for case in cases},
+                )
+                self.assertEqual(
+                    {expected["n_primary_per_pose"]},
+                    {case["n_primary_per_pose"] for case in cases},
+                )
+                seeds = {case["seed"] for case in cases}
+                self.assertEqual(
+                    set(range(expected["base_seed"], expected["seed_end"] + 1)),
+                    seeds,
+                )
+                self.assertTrue(all_seeds.isdisjoint(seeds))
+                all_seeds.update(seeds)
+                self.assertTrue(
+                    all(
+                        case["output_directory"].startswith(
+                            f"results/{expected['campaign_id']}/events/raw/grid/"
+                        )
+                        for case in cases
+                    )
+                )
+
+                for case in cases:
+                    config = load_yaml(Path(case["config_file"]))
+                    self.assertEqual(
+                        expected["detector_range"],
+                        config["detector"]["detector_x_range_zero_mm"],
+                    )
+                    self.assertEqual(
+                        expected["n_primary_per_pose"],
+                        config["run"]["n_primary_per_pose"],
+                    )
+                    self.assertEqual("list", config["pose"]["mode"])
+                    self.assertEqual(1, len(experiment_queue.generate_poses(config)))
+
+            self.assertEqual(set(range(10_000, 10_648)), all_seeds)
+
+    def test_grid_only_cli_requires_valid_unique_explicit_conditions(self):
+        args = source_response.parse_args(
+            [
+                "--campaign-id", "custom_grid",
+                "--grid-only",
+                "--grid-condition", "P1:P002",
+                "--grid-condition", "P2:P001",
+            ]
+        )
+        self.assertTrue(args.grid_only)
+        self.assertEqual([("P1", "P002"), ("P2", "P001")], args.grid_condition)
+        self.assertEqual(REPO_ROOT / "config/generated/custom_grid", args.output_dir)
+
+        invalid_argv = (
+            ["--grid-only"],
+            ["--grid-condition", "P1:P002"],
+            ["--grid-only", "--grid-condition", "P1:P002", "--grid-condition", "P1:P002"],
+            ["--grid-only", "--grid-condition", "P7:P001"],
+            ["--grid-only", "--grid-condition", "P1:P003"],
+            ["--grid-only", "--grid-condition", "P1-P002"],
+        )
+        for argv in invalid_argv:
+            with self.subTest(argv=argv), redirect_stderr(StringIO()):
+                with self.assertRaises(SystemExit):
+                    source_response.parse_args(argv)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaisesRegex(ValueError, "must be unique"):
+                self.generate(
+                    Path(tmp) / "generated",
+                    grid_only=True,
+                    grid_conditions=[("P1", "P002"), ("P1", "P002")],
+                )
 
     def test_nonempty_output_directory_fails_fast(self):
         with tempfile.TemporaryDirectory() as tmp:
