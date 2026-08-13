@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 import tempfile
 import textwrap
 import unittest
@@ -16,9 +15,8 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-import run_experiment_queue as queue  # noqa: E402
+from scripts.monte_carlo import run_experiment_queue as queue
 
 
 def load_json(path: Path):
@@ -147,7 +145,6 @@ class ExperimentQueueTests(unittest.TestCase):
         self,
         root: Path,
         configs: list[Path],
-        experiments: list[str] | None = None,
         run_safety: dict | None = None,
     ) -> Path:
         manifest = {
@@ -155,7 +152,6 @@ class ExperimentQueueTests(unittest.TestCase):
                 {
                     "case_id": config.stem,
                     "config_file": config.as_posix(),
-                    **({"experiment": experiments[index]} if experiments is not None else {}),
                 }
                 for index, config in enumerate(configs)
             ]
@@ -180,8 +176,8 @@ class ExperimentQueueTests(unittest.TestCase):
 
                 import yaml
 
-                sys.path.insert(0, {str(REPO_ROOT / "scripts")!r})
-                import run_experiment_queue as queue
+                sys.path.insert(0, {str(REPO_ROOT)!r})
+                from scripts.monte_carlo import run_experiment_queue as queue
 
                 parser = argparse.ArgumentParser()
                 parser.add_argument("--config", required=True)
@@ -555,16 +551,16 @@ class ExperimentQueueTests(unittest.TestCase):
 
             self.assertTrue(lock_path.exists())
 
-    def test_experiment_range_index_and_limit_filters(self):
+    def test_index_range_and_limit_filters(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             configs = [
-                self.write_config(root, "case_e0"),
-                self.write_config(root, "case_e1"),
-                self.write_config(root, "case_e3"),
-                self.write_config(root, "case_e4"),
+                self.write_config(root, "case_0"),
+                self.write_config(root, "case_1"),
+                self.write_config(root, "case_2"),
+                self.write_config(root, "case_3"),
             ]
-            manifest = self.write_manifest(root, configs, experiments=["E0", "E1", "E3", "E4"])
+            manifest = self.write_manifest(root, configs)
             fake = self.write_fake_binary(root)
             order_log = root / "order.log"
             os.environ["FAKE_MSS_ORDER_LOG"] = order_log.as_posix()
@@ -575,10 +571,6 @@ class ExperimentQueueTests(unittest.TestCase):
                     root,
                     manifest,
                     fake,
-                    "--from-experiment",
-                    "E0",
-                    "--to-experiment",
-                    "E3",
                     "--start-index",
                     "1",
                     "--end-index",
@@ -588,38 +580,8 @@ class ExperimentQueueTests(unittest.TestCase):
                     save_paths=False,
                 ),
             )
-
             self.assertEqual(
-                ["start:case_e1", "end:case_e1"],
-                order_log.read_text(encoding="utf-8").splitlines(),
-            )
-
-    def test_only_experiments_filter(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            configs = [
-                self.write_config(root, "case_e0"),
-                self.write_config(root, "case_e4"),
-            ]
-            manifest = self.write_manifest(root, configs, experiments=["E0", "E4"])
-            fake = self.write_fake_binary(root)
-            order_log = root / "order.log"
-            os.environ["FAKE_MSS_ORDER_LOG"] = order_log.as_posix()
-
-            self.assertEqual(
-                0,
-                self.run_queue(
-                    root,
-                    manifest,
-                    fake,
-                    "--only-experiments",
-                    "E4",
-                    save_paths=False,
-                ),
-            )
-
-            self.assertEqual(
-                ["start:case_e4", "end:case_e4"],
+                ["start:case_1", "end:case_1"],
                 order_log.read_text(encoding="utf-8").splitlines(),
             )
 
@@ -653,311 +615,6 @@ class ExperimentQueueTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(RuntimeError, "above manifest threshold"):
                 queue.run_queue(args)
-
-    def test_article_batches_auto_merge_after_all_manifest_cases_complete(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            configs = []
-            cases = []
-            for batch_index, seed in enumerate([9000, 9001, 9002]):
-                case_id = f"article_E0_P0_E80_center_b{batch_index}_seed{seed}"
-                config_path = self.write_config(root, case_id, energy_keV=80, n_primary=10)
-                config = queue.load_yaml(config_path)
-                config["run"]["random_seed"] = seed
-                config["output"]["output_directory"] = (
-                    root / "results/article/unit/runs/E0_P0_E80_center" / f"b{batch_index}"
-                ).as_posix()
-                config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-                configs.append(config_path)
-                cases.append(
-                    {
-                        "case_id": case_id,
-                        "condition_id": "E0_P0_E80_center",
-                        "config_file": config_path.as_posix(),
-                        "experiment": "E0",
-                        "phantom_id": "P0",
-                        "phantom_group": "pmma",
-                        "defect_depth_id": 0,
-                        "defect_depth_label": "control",
-                        "geometry_file": "config/geometry/phantom_yaml_files/P0.yaml",
-                        "energy_keV": 80.0,
-                        "pose": "center",
-                        "head_offset_x_mm": 0,
-                        "head_offset_y_mm": 0,
-                        "batch_index": batch_index,
-                        "batch_count": 3,
-                        "seed": seed,
-                        "n_primary_per_pose": 10,
-                        "raw_output_directory": config["output"]["output_directory"],
-                        "condition_output_directory": (
-                            root / "results/article/unit/by_condition/E0/P0/E80/center"
-                        ).as_posix(),
-                    }
-                )
-            manifest = {
-                "experiment": "article_simulation_campaign",
-                "campaign_id": "unit",
-                "condition_output_root": (root / "results/article/unit/by_condition").as_posix(),
-                "cases": cases,
-            }
-            manifest_path = root / "manifest.yaml"
-            manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
-            fake = self.write_fake_binary(root)
-            os.environ["FAKE_MSS_WRITE_EVENTS"] = "1"
-
-            self.assertEqual(0, self.run_queue(root, manifest_path, fake))
-
-            merged_dir = root / "results/article/unit/by_condition/E0/P0/E80/center"
-            self.assertTrue((merged_dir / "events.csv").is_file())
-            self.assertTrue((merged_dir / "metadata.yaml").is_file())
-            self.assertEqual(
-                ["event_id,hit_id", "2,7", "12,7", "22,7"],
-                (merged_dir / "events.csv").read_text(encoding="utf-8").splitlines(),
-            )
-            metadata = yaml.safe_load((merged_dir / "metadata.yaml").read_text(encoding="utf-8"))
-            self.assertTrue(metadata["merged_article_batches"])
-            self.assertEqual(30, metadata["n_primary"])
-            self.assertEqual([9000, 9001, 9002], metadata["merge"]["seeds"])
-            self.assertFalse(metadata["raw_output_preserved"])
-            self.assertFalse(metadata["merge"]["raw_output_preserved"])
-            self.assertEqual("removed", metadata["merge"]["raw_cleanup_status"])
-            self.assertEqual(3, metadata["merge"]["raw_run_dirs_removed"])
-            self.assertEqual(
-                [
-                    {
-                        "case_id": "article_E0_P0_E80_center_b0_seed9000",
-                        "batch_index": 0,
-                        "seed": 9000,
-                        "source_run_id": "pose_x0_y320_E80keV_seed9000",
-                        "n_primary": 10,
-                    },
-                    {
-                        "case_id": "article_E0_P0_E80_center_b1_seed9001",
-                        "batch_index": 1,
-                        "seed": 9001,
-                        "source_run_id": "pose_x0_y320_E80keV_seed9001",
-                        "n_primary": 10,
-                    },
-                    {
-                        "case_id": "article_E0_P0_E80_center_b2_seed9002",
-                        "batch_index": 2,
-                        "seed": 9002,
-                        "source_run_id": "pose_x0_y320_E80keV_seed9002",
-                        "n_primary": 10,
-                    },
-                ],
-                metadata["merge"]["source_cases"],
-            )
-            for batch_index in range(3):
-                self.assertFalse(
-                    (
-                        root
-                        / "results/article/unit/runs/E0_P0_E80_center"
-                        / f"b{batch_index}"
-                    ).exists()
-                )
-            self.assertFalse((root / "results/article/unit/runs").exists())
-            state = load_json(root / "queue_state.json")
-            self.assertEqual("completed", state["merge"]["status"])
-            self.assertEqual(1, state["merge"]["condition_count"])
-            self.assertFalse(state["merge"]["raw_runs_preserved"])
-            self.assertEqual(3, state["merge"]["raw_run_dirs_removed"])
-
-    def test_article_keep_raw_runs_preserves_batch_outputs_after_merge(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            cases = []
-            for batch_index, seed in enumerate([9100, 9101]):
-                case_id = f"article_E0_P0_E80_center_b{batch_index}_seed{seed}"
-                config_path = self.write_config(root, case_id, energy_keV=80, n_primary=10)
-                config = queue.load_yaml(config_path)
-                config["run"]["random_seed"] = seed
-                config["output"]["output_directory"] = (
-                    root / "results/article/unit/runs/E0_P0_E80_center" / f"b{batch_index}"
-                ).as_posix()
-                config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-                cases.append(
-                    {
-                        "case_id": case_id,
-                        "condition_id": "E0_P0_E80_center",
-                        "config_file": config_path.as_posix(),
-                        "experiment": "E0",
-                        "phantom_id": "P0",
-                        "phantom_group": "pmma",
-                        "defect_depth_id": 0,
-                        "defect_depth_label": "control",
-                        "geometry_file": "config/geometry/phantom_yaml_files/P0.yaml",
-                        "energy_keV": 80.0,
-                        "pose": "center",
-                        "head_offset_x_mm": 0,
-                        "head_offset_y_mm": 0,
-                        "batch_index": batch_index,
-                        "batch_count": 2,
-                        "seed": seed,
-                        "n_primary_per_pose": 10,
-                        "raw_output_directory": config["output"]["output_directory"],
-                        "condition_output_directory": (
-                            root / "results/article/unit/by_condition/E0/P0/E80/center"
-                        ).as_posix(),
-                    }
-                )
-            manifest = {
-                "experiment": "article_simulation_campaign",
-                "campaign_id": "unit",
-                "condition_output_root": (root / "results/article/unit/by_condition").as_posix(),
-                "cases": cases,
-            }
-            manifest_path = root / "manifest.yaml"
-            manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
-            fake = self.write_fake_binary(root)
-            os.environ["FAKE_MSS_WRITE_EVENTS"] = "1"
-
-            self.assertEqual(0, self.run_queue(root, manifest_path, fake, "--keep-raw-runs"))
-
-            merged_dir = root / "results/article/unit/by_condition/E0/P0/E80/center"
-            metadata = yaml.safe_load((merged_dir / "metadata.yaml").read_text(encoding="utf-8"))
-            self.assertTrue(metadata["raw_output_preserved"])
-            self.assertEqual("preserved", metadata["merge"]["raw_cleanup_status"])
-            self.assertEqual(0, metadata["merge"]["raw_run_dirs_removed"])
-            for batch_index, seed in enumerate([9100, 9101]):
-                self.assertTrue(
-                    (
-                        root
-                        / "results/article/unit/runs/E0_P0_E80_center"
-                        / f"b{batch_index}"
-                        / f"pose_x0_y320_E80keV_seed{seed}"
-                        / "events.csv"
-                    ).is_file()
-                )
-
-    def test_article_resume_uses_merged_metadata_after_raw_runs_are_removed(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            cases = []
-            for batch_index, seed in enumerate([9200, 9201]):
-                case_id = f"article_E0_P0_E80_center_b{batch_index}_seed{seed}"
-                config_path = self.write_config(root, case_id, energy_keV=80, n_primary=10)
-                config = queue.load_yaml(config_path)
-                config["run"]["random_seed"] = seed
-                config["output"]["output_directory"] = (
-                    root / "results/article/unit/runs/E0_P0_E80_center" / f"b{batch_index}"
-                ).as_posix()
-                config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
-                cases.append(
-                    {
-                        "case_id": case_id,
-                        "condition_id": "E0_P0_E80_center",
-                        "config_file": config_path.as_posix(),
-                        "experiment": "E0",
-                        "phantom_id": "P0",
-                        "phantom_group": "pmma",
-                        "defect_depth_id": 0,
-                        "defect_depth_label": "control",
-                        "geometry_file": "config/geometry/phantom_yaml_files/P0.yaml",
-                        "energy_keV": 80.0,
-                        "pose": "center",
-                        "head_offset_x_mm": 0,
-                        "head_offset_y_mm": 0,
-                        "batch_index": batch_index,
-                        "batch_count": 2,
-                        "seed": seed,
-                        "n_primary_per_pose": 10,
-                        "raw_output_directory": config["output"]["output_directory"],
-                        "condition_output_directory": (
-                            root / "results/article/unit/by_condition/E0/P0/E80/center"
-                        ).as_posix(),
-                    }
-                )
-            manifest = {
-                "experiment": "article_simulation_campaign",
-                "campaign_id": "unit",
-                "condition_output_root": (root / "results/article/unit/by_condition").as_posix(),
-                "cases": cases,
-            }
-            manifest_path = root / "manifest.yaml"
-            manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
-            fake = self.write_fake_binary(root)
-            order_log = root / "order.log"
-            os.environ["FAKE_MSS_WRITE_EVENTS"] = "1"
-            os.environ["FAKE_MSS_ORDER_LOG"] = order_log.as_posix()
-
-            self.assertEqual(0, self.run_queue(root, manifest_path, fake))
-            self.assertFalse((root / "results/article/unit/runs").exists())
-            order_log.unlink()
-
-            self.assertEqual(0, self.run_queue(root, manifest_path, fake))
-
-            self.assertFalse(order_log.exists())
-            state = load_json(root / "queue_state.json")
-            self.assertEqual("completed", state["merge"]["status"])
-            self.assertEqual("not_needed", state["merge"]["raw_cleanup_status"])
-            self.assertEqual(0, state["merge"]["raw_run_dirs_removed"])
-
-    def test_article_merge_skips_when_full_manifest_is_incomplete(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            config_a = self.write_config(root, "case_a", n_primary=10)
-            config_b = self.write_config(root, "case_b", n_primary=10)
-            manifest = {
-                "experiment": "article_simulation_campaign",
-                "campaign_id": "unit",
-                "condition_output_root": (root / "results/article/unit/by_condition").as_posix(),
-                "cases": [
-                    {
-                        "case_id": "case_a",
-                        "condition_id": "E0_P0_E80_center",
-                        "config_file": config_a.as_posix(),
-                        "experiment": "E0",
-                        "phantom_id": "P0",
-                        "energy_keV": 80.0,
-                        "pose": "center",
-                        "head_offset_x_mm": 0,
-                        "head_offset_y_mm": 0,
-                        "geometry_file": "config/geometry/phantom_yaml_files/P0.yaml",
-                        "defect_depth_id": 0,
-                        "batch_index": 0,
-                        "seed": 9000,
-                        "condition_output_directory": (
-                            root / "results/article/unit/by_condition/E0/P0/E80/center"
-                        ).as_posix(),
-                    },
-                    {
-                        "case_id": "case_b",
-                        "condition_id": "E0_P0_E80_center",
-                        "config_file": config_b.as_posix(),
-                        "experiment": "E0",
-                        "phantom_id": "P0",
-                        "energy_keV": 80.0,
-                        "pose": "center",
-                        "head_offset_x_mm": 0,
-                        "head_offset_y_mm": 0,
-                        "geometry_file": "config/geometry/phantom_yaml_files/P0.yaml",
-                        "defect_depth_id": 0,
-                        "batch_index": 1,
-                        "seed": 9001,
-                        "condition_output_directory": (
-                            root / "results/article/unit/by_condition/E0/P0/E80/center"
-                        ).as_posix(),
-                    },
-                ],
-            }
-            manifest_path = root / "manifest.yaml"
-            manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
-            fake = self.write_fake_binary(root)
-
-            self.assertEqual(0, self.run_queue(root, manifest_path, fake, "--limit", "1"))
-
-            state = load_json(root / "queue_state.json")
-            self.assertEqual("skipped", state["merge"]["status"])
-            self.assertIn("incomplete", state["merge"]["message"])
-            self.assertFalse((root / "results/article/unit/by_condition").exists())
-            expected_a = queue.expected_run_dirs(
-                REPO_ROOT,
-                config_a,
-                queue.load_yaml(config_a),
-            )[0]
-            self.assertTrue(Path(expected_a["run_dir"]).is_dir())
-
 
 if __name__ == "__main__":
     unittest.main()

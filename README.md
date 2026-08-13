@@ -1,8 +1,8 @@
 # MSS
 
-`MSS` 是一个 Geant4 gamma 背散射 Monte Carlo 仿真项目。项目 v2 已完成并归档，包含稳定的车辆 ROI 事件级仿真核心，以及已经实现并冻结的 article v1 实验和后处理链路。
+`MSS` 是一个 Geant4 gamma 背散射 Monte Carlo 仿真项目。项目保留稳定的车辆 ROI 事件级仿真核心，并以 articlev2 作为当前唯一活跃的数据处理与实验后处理链路。
 
-核心 v2 链路只生成事件级数据，不实现 pose-level summary、scan-level summary、统计图、图像重建或真实探测器响应。
+Geant4 核心只生成事件级数据，不实现 pose-level summary、scan-level summary、统计图、图像重建或真实探测器响应；显式 Python 后处理层负责清洗、审计与论文图表。
 
 ## 项目 v2 结构与归档入口
 
@@ -11,14 +11,15 @@
 | 层次 | 职责 | 当前定位 |
 |---|---|---|
 | Geant4 仿真核心 | 固定车辆 ROI、移动成像头、事件追踪与 `events.csv + metadata.yaml` | 稳定基础，供后续实验复用 |
-| 共享实验基础设施 | manifest、队列执行、完成检测、状态恢复与分片 | v2 article v1 使用 |
-| 实验族 | 定义配置矩阵、模体、扫描和运行条件 | article v1 已实现并冻结 |
-| 派生后处理 | 合并、统计、响应图和分析报告 | 显式 Python 工具，不属于 Geant4 自动输出 |
+| Monte Carlo 自动化 | manifest、逐 pose 配置、队列执行、状态恢复与分片 | `scripts/monte_carlo/` |
+| 基础数据处理 | 有效深度筛选、slit 标签、边界校准和数据审计 | `scripts/data_processing/` |
+| 实验后处理 | E1 正式分析；E2/E3 接口预留 | `scripts/postprocessing/` |
 
 主要文档入口：
 
 - Geant4 核心规格：[`docs/archive/v2/spec.md`](docs/archive/v2/spec.md)、[`docs/archive/v2/decisions.md`](docs/archive/v2/decisions.md)、[`docs/archive/v2/architecture.md`](docs/archive/v2/architecture.md)。
-- Article v1：[`docs/archive/v2/article_design.md`](docs/archive/v2/article_design.md) 与 [`docs/archive/v2/article_experiment_automation.md`](docs/archive/v2/article_experiment_automation.md)，当前冻结，仅用于复现和兼容性维护。
+- Article v1：仅保留 [`docs/archive/v2/`](docs/archive/v2/) 历史文档，运行脚本和兼容入口已移除。
+- Article V2：[`docs/articlev2_experiment_automation.md`](docs/articlev2_experiment_automation.md) 和 [`docs/articlev2_analysis/`](docs/articlev2_analysis/)。
 
 下一项目版本尚未开始，版本号未定义。工作区中的预研草案或配套资产不属于项目 v2，也不代表相关能力已经实现。
 
@@ -210,31 +211,38 @@ Debug 模式 `run.debug: true` 输出 `events_debug.csv`，语义为：
 
 `metadata.yaml` 记录 run-level 信息，包括 pose、seed、thread、vehicle/source/collimator/detector/physics/world/output policy 等配置快照。
 
-## 实验队列
+## Articlev2 自动化与后处理
 
-`scripts/run_experiment_queue.py` 是 v2 article v1 使用的串行执行器。`--manifest` 必须显式指定；manifest 的最小契约为 `cases[].config_file`。队列会检查预期的 `metadata.yaml` 与事件 CSV，跳过已经完整的 case。
-
-Article v1 dry-run 示例：
+生成配置并执行 dry-run：
 
 ```bash
-python3 scripts/run_experiment_queue.py \
-  --manifest config/generated/article/article_run01/manifest.yaml \
+python -m scripts.monte_carlo.generate_source_response_experiment_configs
+python -m scripts.monte_carlo.run_experiment_queue \
+  --manifest config/generated/articlev2/manifest.yaml \
   --binary ./build/MSS \
   --dry-run
 ```
 
-保存状态、lock 和日志时必须显式提供独立的 state file：
+权威结果链路固定为：
 
-```bash
-python3 scripts/run_experiment_queue.py \
-  --manifest config/generated/article/article_run01/manifest.yaml \
-  --binary ./build/MSS \
-  --state-file results/queues/article_run01/queue_state.json \
-  --log-dir results/queues/article_run01/logs \
-  --allow-large-run
+```text
+results/articlev2/events/raw
+  -> results/articlev2/events/valid
+  -> results/articlev2/data_processing/audit
+  -> results/articlev2/postprocessing/E1
 ```
 
-传入 `--state-file` 会自动启用保存模式。分片、范围筛选和恢复流程见对应 automation 文档；只有冻结的 article v1 manifest 会触发 batch 合并特例。
+清洗、审计和 E1 分析：
+
+```bash
+python -m scripts.data_processing.clean_events --results-root results/articlev2
+python -m scripts.data_processing.audit_experiment_data \
+  --results-root results/articlev2 --overwrite
+python -m scripts.postprocessing.e1.run --results-root results/articlev2
+```
+
+各脚本的输入、输出和失败条件见对应子目录 README。article v1 batch merge、raw cleanup、实验编号过滤及旧脚本路径不再提供兼容入口。
+结果分层与 provenance 约定见 [`results/README.md`](results/README.md)。
 
 ## 输入数据说明
 
@@ -255,7 +263,7 @@ legacy macro 中出现的 PMMA、空气缺陷、镜像准直器、镜像探测�
 当前 Geant4 基础程序仍不实现：
 
 - pose-level summary 或 scan-level summary；
-- 通用 Python 后处理分析、统计图、差异图或论文指标计算；
+- Geant4 内部自动生成 Python 后处理统计或论文图表；
 - 图像重建、连续运动扫描或运动模糊；
 - 真实探测器材料响应或能量沉积 scoring；
 - 整车 CAD 复现、镜像准直器或镜像探测器。

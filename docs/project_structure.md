@@ -1,9 +1,9 @@
 # MSS 项目 v2 归档与交接导航
 
-> 文档状态：项目级长期入口，当前用于项目 v2 归档与后续版本交接。
-> 职责：说明 v2 已完成内容、归档文档、代码与配置文件职责，以及后续工作必须保持的兼容边界。
+> 文档状态：项目级长期入口，记录稳定 Geant4 核心与当前 articlev2 数据链路。
+> 职责：说明代码、数据、后处理、测试与归档文档的当前边界。
 > 归档基线：`docs/archive/v2/`。
-> 后续版本：尚未开始，版本号未定义。
+> 活跃实验链路：articlev2；article v1 仅保留历史文档。
 
 ## 1. 版本定位与阅读顺序
 
@@ -14,15 +14,17 @@
 | `docs/archive/v1/` | 第一轮历史资料 | 仅用于了解旧 PMMA、macro 和旧 CSV 实现，不作为当前代码依据。 |
 | `docs/archive/v2/` | 项目 v2 正式归档基线 | 记录已完成 Geant4 核心及冻结 article v1 的规格、决策、架构、实施和验收。 |
 | `docs/project_structure.md` | 跨版本导航与 v2 交接摘要 | 新任务和新接手人员的第一阅读入口。 |
-| 根级其他预研文档及配套资产 | 未启动草案 | 不属于 v2，不代表已经实现、验证或进入当前主线，本文件不展开其方案内容。 |
+| `docs/articlev2_analysis/` | Article V2 实验数据处理规范 | E1 已实现，E2/E3 为待实现接口。 |
+| 根级其他预研文档及配套资产 | 预研或实验设计 | 是否进入正式主线由相应状态说明和 `articlev2_analysis/` 导航决定。 |
 
 建议阅读顺序：
 
 1. 先读本文件，确认任务属于 v2 维护还是未来新版本。
 2. 维护 Geant4 核心时，依次阅读 `archive/v2/spec.md`、`decisions.md`、`architecture.md`。
-3. 复现 article v1 时，阅读 `archive/v2/article_design.md` 和 `article_experiment_automation.md`。
+3. 查询 article v1 历史时，阅读 `archive/v2/article_design.md` 和 `article_experiment_automation.md`；仓库不再提供其运行脚本。
 4. 需要核对实现过程或验收范围时，再读 `milestones.md` 和 `acceptance_checklist.md`。
 5. 未来新版本必须先建立新的正式需求和设计文档，不得直接把预研草案或 v1 历史规则写回 v2 核心。
+6. 编写或查阅 Article V2 数据处理方法时，读取 `docs/articlev2_analysis/`。
 
 ## 2. 项目 v2 总结
 
@@ -45,7 +47,7 @@ MSS / Geant4
    └── metadata.yaml
    │
    ▼
-显式 Python 实验队列、合并和 article v1 后处理
+显式 Python Monte Carlo 自动化、基础数据处理与 E1 后处理
 ```
 
 Geant4 核心只负责事件级 Monte Carlo 数据。位姿级统计、扫描级统计、batch 合并、图表和报告不由 `MSS` 自动生成。
@@ -62,17 +64,13 @@ Geant4 核心只负责事件级 Monte Carlo 数据。位姿级统计、扫描级
 - Formal 输出语义为 `1 row = 1 detected gamma hit`；debug 输出语义为 `1 row = 1 gamma track summary`。
 - 支持多线程临时 CSV、master 合并、run-level metadata、输出目录保护和几何可视化。
 
-### 2.3 已完成并冻结的 article v1
+### 2.3 Article v1 历史状态
 
-Article v1 是 v2 内已经形成闭环的实验链路，当前只用于复现和兼容性维护：
+Article v1 曾形成完整实验链路，但活跃脚本、专属队列逻辑和测试已在项目整改中移除。其设计与验收说明仅保存在 `docs/archive/v2/`，不再构成可执行接口。
 
-- 生成 E0/E1/E3/E4 等 article campaign 的逐任务 YAML 和 manifest。
-- 使用共享队列串行运行、检测完成状态、保存状态、分片和恢复。
-- 对 article manifest 执行 batch 事件合并并建立 `by_condition/`。
-- 将原始 detector hit 按固定 `det_x` 区间清洗并分配 S1/S2/S3。
-- 汇总 total/k1/ms 散射计数。
-- 生成 first/last scatter 条件级位置 histogram。
-- 生成 grid response、控制模体差异矩阵和预览图。
+- 不提供 `scripts/article/`、article v1 配置生成器或 batch merge。
+- 不提供旧脚本路径兼容 wrapper。
+- 历史文档中的命令只用于理解旧实现，不保证可运行。
 
 ### 2.4 v2 明确未完成的内容
 
@@ -90,10 +88,11 @@ Article v1 是 v2 内已经形成闭环的实验链路，当前只用于复现�
 | Geant4 核心 | `include/`, `src/` | 配置、几何、source、tracking、输出和 run 生命周期。 |
 | 手工维护配置 | `config/base/`, `config/geometry/`, `config/collimator/`, `config/source/` | 提供基础运行和实验输入。 |
 | 生成配置 | `config/generated/` | 由实验生成器产生，不作为手工规格源，通常不提交。 |
-| 实验自动化 | `scripts/` | Article v1 配置生成和共享队列。 |
-| Article v1 后处理 | `scripts/article/` | 清洗、计数、位置 histogram 和 grid response。 |
-| 测试 | `tests/` | 核心实验契约、队列和 article v1 Python 回归。 |
-| 运行产物 | `results/` | 原始 run、合并数据、队列状态、日志和分析输出，不属于源码。 |
+| Monte Carlo 自动化 | `scripts/monte_carlo/` | Articlev2 配置生成、共享队列、恢复与分片。 |
+| 基础数据处理 | `scripts/data_processing/` | 有效事件、slit 边界/标签和数据资格审计。 |
+| 实验后处理 | `scripts/postprocessing/` | E1 正式实现、E2/E3 接口预留和旧 schema 源码快照。 |
+| 测试 | `tests/` | 核心契约及三个活跃 Python 层的回归。 |
+| 运行产物 | `results/` | raw/valid 事件、数据处理、队列状态、日志和 E1–E3 后处理输出，不属于源码。 |
 | 文档 | `docs/` | 跨版本导航、历史归档和未启动预研草案。 |
 
 ## 4. 根级关键文件
@@ -174,7 +173,7 @@ Article v1 是 v2 内已经形成闭环的实验链路，当前只用于复现�
 | 路径或文件 | 含义与功能 |
 |---|---|
 | `config/base/simulation_config_v2.yaml` | 车辆 ROI 核心的可运行入口样例，展示多 pose、source、collimator、detector 和输出配置。 |
-| `config/base/article_base.yaml` | Article 实验生成器使用的基础 YAML；具体物理条件由生成器覆盖，归档行为以 article v1 automation 文档为准。 |
+| `config/base/article_base.yaml` | Articlev2 配置生成器使用的基础 YAML；具体物理条件由当前生成器覆盖。 |
 | `config/geometry/vehicle_roi_v04.yaml` | 车辆侧向 ROI 几何、材料、region 和可替换 target component。 |
 | `config/geometry/pmma_box.yaml` | 使用同一 VehicleROI-compatible schema 的均匀 PMMA control geometry。 |
 | `config/geometry/phantom_yaml_files/` | Article v1 使用的 P0–P3/P5 PMMA 缺陷模体和 M0–M3 简化金属层模体。 |
@@ -183,18 +182,23 @@ Article v1 是 v2 内已经形成闭环的实验链路，当前只用于复现�
 | `config/collimator/article_collimator_profiles.csv` | Article v1 三通道实验使用的 profile。 |
 | `config/source/spectrum.csv` | Spectrum energy mode 的示例能谱。 |
 | `config/generated/` | 生成器输出的 manifest 和逐 case YAML；可重新生成，不是正式规格。 |
-| `results/` | 仿真、合并、队列和分析产物；不得作为源码或配置基线。 |
+| `results/` | 仿真事件、清洗/审计、队列和实验后处理产物；分层合同见 `results/README.md`。 |
+
+Article V2 当前的权威数据路径是
+`results/articlev2/events/valid/**/events_valid.csv`。它由 `events/raw/**/events.csv` 可重复生成；冻结边界位于
+`results/articlev2/data_processing/slit_channels/slit_channel_boundaries.json`。E1 直接消费
+`slit_group/slit_label` schema，输出位于 `results/articlev2/postprocessing/E1/`；E2/E3 尚无可执行实现。
 
 工作区中可能存在为未来研究准备的额外 geometry、profile 或 generated config。除非未来正式文档明确纳入，它们不属于项目 v2 交付物。
 
 ## 7. Python 脚本导航
 
-### 7.1 V2 共享基础设施与 article v1
+### 7.1 Monte Carlo 自动化
 
 | 脚本 | 职责 |
 |---|---|
-| `scripts/generate_article_experiment_configs.py` | 从 `article_base.yaml` 和 v1 phantom 展开 article v1 campaign、batch、seed、pose 和 manifest。 |
-| `scripts/run_experiment_queue.py` | 按 manifest 串行执行 `MSS --config`，检测完成状态、保存 state/lock/log、支持过滤和分片，并对 article v1 执行 batch merge。 |
+| `scripts/monte_carlo/generate_source_response_experiment_configs.py` | 展开 articlev2 的 341 个单 pose 配置，输出路径固定到 `events/raw`。 |
+| `scripts/monte_carlo/run_experiment_queue.py` | 按 manifest 串行执行 `MSS --config`，检测完成状态、保存 state/lock/log、支持范围和分片。 |
 
 共享队列的最小 manifest 契约为：
 
@@ -203,28 +207,38 @@ cases:
   - config_file: path/to/config.yaml
 ```
 
-只有 manifest 顶层为 `experiment: article_simulation_campaign` 时，队列才执行 article v1 batch 合并。
+队列不再包含 article v1 batch merge、raw cleanup 或实验编号过滤特例。
 
-### 7.2 Article v1 后处理
+### 7.2 基础数据处理
 
 | 脚本 | 职责 |
 |---|---|
-| `scripts/article/clean_events.py` | 递归读取 `events.csv`，按固定 detector-x 区间分配 S1/S2/S3 并写 `events_clean.csv`。 |
-| `scripts/article/summarize_scatter_counts.py` | 对 cleaned events 汇总 S1/S2/S3/ALL 的 total、k1 和 ms。 |
-| `scripts/article/plot_scatter_position_histogram.py` | 按物理条件汇总 first/last scatter 在 x/y/z 的位置 histogram。 |
-| `scripts/article/plot_grid_response.py` | 生成 article v1 grid response、control delta、可选 first-scatter 深度筛选和预览图。 |
+| `scripts/data_processing/clean_events.py` | 过滤非法深度，删除九个 legacy 字段，追加 `slit_group/slit_label` 并原子发布 `events/valid`。 |
+| `scripts/data_processing/estimate_slit_boundaries.py` | 使用 P0 center raw hits 校准边界，输出 JSON、CSV 和 PNG diagnostics。 |
+| `scripts/data_processing/slit_channels.py` | 边界估计、稳定性、profile mapping 和固定标签分配。 |
+| `scripts/data_processing/audit_experiment_data.py` | 审计 raw/valid 配对、行守恒、schema、标签、seed、条件和 boundary hash。 |
+
+### 7.3 E1–E3 后处理
+
+| 路径 | 职责 |
+|---|---|
+| `scripts/postprocessing/e1/run.py` | 当前唯一正式实验入口，生成 E1 figures、tables、report、manifest 和 acceptance。 |
+| `scripts/postprocessing/e1/analyze_roi_sensitivity.py` | E1 detector ROI sensitivity 辅助分析。 |
+| `scripts/postprocessing/e2/`, `e3/` | 待实现接口；必须消费 `events/valid` 中的 `slit_label`。 |
+| `scripts/postprocessing/_archive/` | 不可执行、无回归支持的旧 schema 源码快照。 |
 
 ## 8. 测试与宏文件导航
 
 | 文件 | 覆盖内容 |
 |---|---|
 | `tests/test_core_experiment_contract.py` | `abnormal_material`、自定义材料、run ID 和输出覆盖策略等共享 C++ 契约。 |
-| `tests/test_experiment_queue.py` | 队列执行、恢复、分片、完成检测、v1 state 兼容和 article batch merge。 |
-| `tests/test_article_experiment_configs.py` | Article v1 配置矩阵、batch、seed 和 manifest。 |
-| `tests/test_article_clean_events.py` | Detector channel 清洗和输入验证。 |
-| `tests/test_article_scatter_counts.py` | Total/k1/ms 计数语义。 |
-| `tests/test_article_scatter_position_histogram.py` | 条件级 scatter 位置分箱、provenance 和输出。 |
-| `tests/test_article_grid_response.py` | Grid response、control delta 和深度筛选。 |
+| `tests/test_monte_carlo_config_generation.py` | 341 个配置、路径、seed、覆盖和规模合同。 |
+| `tests/test_monte_carlo_queue.py` | 队列执行、恢复、分片、范围、完成检测、lock 和 large-run guard。 |
+| `tests/test_data_cleaning.py` | 有效深度过滤、字段删除、边界复用、标签、metadata 和 manifest。 |
+| `tests/test_slit_channels.py` | 三峰/谷算法、稳定性、profile 标签、grid offset 和 diagnostics。 |
+| `tests/test_data_audit.py` | raw/valid 配对、计数守恒、schema/标签和 boundary hash。 |
+| `tests/test_e1_analysis.py` | E1 ROI、分箱、计数、输出、验收和覆盖保护。 |
+| `tests/test_e1_roi_sensitivity.py` | E1 ROI sensitivity 指标、图表和原子输出。 |
 | `macros/vis.mac` | 当前 `--ui` 可视化命令。 |
 | `macros/run.mac`, `macros/run_mt.mac` | 第一轮 legacy macro 参考，不是 v2 batch 主入口。 |
 

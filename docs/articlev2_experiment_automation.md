@@ -1,19 +1,24 @@
 # articlev2 仿真实验自动化工具说明
 
-> 文档状态：未启动的后续版本预研草案，不属于项目 v2，不代表已实现状态。
-> 职责：保存候选逐 pose 配置生成、队列执行、恢复和结果组织方案，供未来正式立项时评审。
+> 文档状态：articlev2 当前仿真自动化与后处理运行说明。
+> 职责：说明逐 pose 配置生成、队列执行、恢复、结果组织和 profile-aware 后处理链路。
 > 上游：预研实验设计和项目 v2 的 Geant4 核心。
-> 下游：尚未确定；项目级导航见 [`project_structure.md`](project_structure.md)。
-> 使用限制：正文中的 generator、manifest、campaign、命令和结果路径均为预研方案，不是当前运行说明或验收依据。
+> 下游：articlev2 有效事件数据层、数据审计和 E1 后处理；项目级导航见 [`project_structure.md`](project_structure.md)。
 
 ## 1. 目的与边界
 
-本文说明 `docs/simulation_experiment_design.md` 中当前 articlev2 P0–P9 源项响应实验的配置生成、队列执行和长任务恢复方式。
+本文说明 `docs/simulation_experiment_design_v2.md` 中当前 articlev2 P0–P9 源项响应实验的配置生成、队列执行、数据清洗、审计和 E1 后处理方式。
 
 核心工具为：
 
-- `scripts/generate_source_response_experiment_configs.py`
-- `scripts/run_experiment_queue.py`
+- `scripts/monte_carlo/generate_source_response_experiment_configs.py`
+- `scripts/monte_carlo/run_experiment_queue.py`
+- `scripts/data_processing/clean_events.py`
+- `scripts/data_processing/estimate_slit_boundaries.py`
+- `scripts/data_processing/slit_channels.py`
+- `scripts/data_processing/audit_experiment_data.py`
+- `scripts/postprocessing/e1/run.py`
+- `scripts/postprocessing/e1/analyze_roi_sensitivity.py`
 
 前者把固定的物理条件和扫描设计展开为逐 pose YAML，并生成统一的 `manifest.yaml`；后者读取 manifest，逐项调用现有 `MSS` 程序，并负责 dry-run、完成检测、状态保存和任务恢复。
 
@@ -24,15 +29,15 @@
 - 正式运行前的 dry-run；
 - 队列状态保存、恢复、失败处理和分片；
 - 每个 pose 的原始事件级输出组织；
-- 与旧 `article_run01` 自动化工具和现有 article 后处理脚本的边界。
+- 有效深度事件清洗、固定 S1–S6 channel 标签和数据资格审计；
+- E1 正式分析和 ROI 敏感性分析；
+- E2/E3 预留接口和未迁移源码快照的边界。
 
 本文不定义：
 
 - 正式 Monte Carlo 结果的物理解释；
-- S1–S6 的精确 `det_x` 子窗口；
 - 跨 pose CSV 合并；
-- 位姿级或扫描级 summary；
-- 二维响应图、CNR 或论文统计指标。
+- 尚未实现的 E2/E3 论文统计指标。
 
 所有命令默认从仓库根目录执行。
 
@@ -44,7 +49,7 @@
 |---|---|
 | campaign | `articlev2` |
 | energy | `560 keV` mono |
-| primary | 每 pose `100` |
+| primary | 每 pose `2e7`（以后处理时每个 run 的 metadata 为准） |
 | threads | 每个 MSS 进程 `8` |
 | base seed | `1234` |
 | 标准 center | `P0–P6 × P001/P002`，14 个任务 |
@@ -54,7 +59,7 @@
 | center 配置数 | `17` |
 | grid 配置数 | `324` |
 | 总配置/任务/pose run | `341` |
-| 总 primary | `34,100` |
+| 总 primary | `6.82×10^9` |
 | seed 范围 | `1234–1574` |
 
 profile 与探测范围映射为：
@@ -88,7 +93,7 @@ E7 使用 center、`P001` 和目标 slit `S4`。P4/P001 复用标准 center 条�
 
 ### 3.1 工具职责
 
-`scripts/generate_source_response_experiment_configs.py` 负责：
+`scripts/monte_carlo/generate_source_response_experiment_configs.py` 负责：
 
 - 读取基础运行配置；
 - 验证 P0–P9 geometry YAML；
@@ -111,7 +116,7 @@ config/collimator/article_v2_collimator_profiles.csv
 ### 3.2 默认生成命令
 
 ```bash
-python3 scripts/generate_source_response_experiment_configs.py
+python -m scripts.monte_carlo.generate_source_response_experiment_configs
 ```
 
 默认输出：
@@ -157,7 +162,7 @@ config/generated/articlev2/
 例如生成一个低统计量、单线程的独立检查批次：
 
 ```bash
-python3 scripts/generate_source_response_experiment_configs.py \
+python -m scripts.monte_carlo.generate_source_response_experiment_configs \
   --campaign-id articlev2_check \
   --energy-kev 560 \
   --n-primary-per-pose 10 \
@@ -174,7 +179,7 @@ config/generated/<campaign-id>/
 生成 YAML 中的仿真结果根目录也使用 campaign：
 
 ```text
-results/<campaign-id>/runs/...
+results/<campaign-id>/events/raw/...
 ```
 
 仅覆盖 `--output-dir` 只改变 generated 配置保存位置，不改变配置内部的结果 campaign 路径；结果根目录由 `--campaign-id` 决定。需要隔离新结果时应同时使用新的 `--campaign-id`。
@@ -190,7 +195,7 @@ generated output directory is not empty
 确认需要用新配置完全替换指定 generated 目录时，显式传入 `--overwrite`：
 
 ```bash
-python3 scripts/generate_source_response_experiment_configs.py \
+python -m scripts.monte_carlo.generate_source_response_experiment_configs \
   --campaign-id articlev2 \
   --output-dir config/generated/articlev2 \
   --overwrite
@@ -313,7 +318,7 @@ seed_end: 1574
 正式计算前先运行：
 
 ```bash
-python3 scripts/run_experiment_queue.py \
+python -m scripts.monte_carlo.run_experiment_queue \
   --manifest config/generated/articlev2/manifest.yaml \
   --binary build/MSS \
   --dry-run
@@ -341,7 +346,7 @@ dry-run 中出现 `skip-complete`，表示预期输出已经通过队列的完�
 推荐使用单一总 manifest，并显式保存 articlev2 队列状态：
 
 ```bash
-python3 scripts/run_experiment_queue.py \
+python -m scripts.monte_carlo.run_experiment_queue \
   --manifest config/generated/articlev2/manifest.yaml \
   --binary build/MSS \
   --save-queue \
@@ -388,7 +393,7 @@ queue_state.json.lock
 默认情况下 MSS 的 stdout/stderr 直接输出到终端。如需保存每个任务的日志：
 
 ```bash
-python3 scripts/run_experiment_queue.py \
+python -m scripts.monte_carlo.run_experiment_queue \
   --manifest config/generated/articlev2/manifest.yaml \
   --binary build/MSS \
   --state-file results/queues/articlev2/queue_state.json \
@@ -413,13 +418,13 @@ python3 scripts/run_experiment_queue.py \
 center 结果写入：
 
 ```text
-results/articlev2/runs/center/<phantom>/<profile>/<run-id>/
+results/articlev2/events/raw/center/<phantom>/<profile>/<run-id>/
 ```
 
 grid 结果写入：
 
 ```text
-results/articlev2/runs/grid/<phantom>/<profile>/<run-id>/
+results/articlev2/events/raw/grid/<phantom>/<profile>/<run-id>/
 ```
 
 每个正式 run 目录包含：
@@ -459,7 +464,7 @@ pose_xm7p5_y2p5_E560keV_seed1262
 中断后使用与首次运行相同的 manifest、state file 和筛选参数重新执行命令：
 
 ```bash
-python3 scripts/run_experiment_queue.py \
+python -m scripts.monte_carlo.run_experiment_queue \
   --manifest config/generated/articlev2/manifest.yaml \
   --binary build/MSS \
   --state-file results/queues/articlev2/queue_state.json \
@@ -486,20 +491,12 @@ output:
 
 ## 10. 分段与分片
 
-articlev2 的 manifest case 没有旧 article E0–E5 实验编号。以下通用队列参数不用于 articlev2 任务选择：
-
-```text
---only-experiments
---from-experiment
---to-experiment
-```
-
-应使用 manifest index 或 shard。
+articlev2 队列统一使用 manifest index、数量上限或 shard 选择任务；旧 article 实验编号筛选接口已经移除。
 
 ### 10.1 按 index 区间
 
 ```bash
-python3 scripts/run_experiment_queue.py \
+python -m scripts.monte_carlo.run_experiment_queue \
   --manifest config/generated/articlev2/manifest.yaml \
   --binary build/MSS \
   --start-index 0 \
@@ -527,7 +524,7 @@ python3 scripts/run_experiment_queue.py \
 四个 shard 中的第 0 个：
 
 ```bash
-python3 scripts/run_experiment_queue.py \
+python -m scripts.monte_carlo.run_experiment_queue \
   --manifest config/generated/articlev2/manifest.yaml \
   --binary build/MSS \
   --shard-count 4 \
@@ -541,65 +538,76 @@ python3 scripts/run_experiment_queue.py \
 
 若先使用 `--start-index/--end-index`，shard 会在该区间过滤结果上分配任务；`--limit` 最后生效。
 
-## 11. 与旧 article_run01 自动化的区别
+## 11. article v1 的历史边界
 
-`docs/archive/v2/article_experiment_automation.md` 描述的是 `generate_article_experiment_configs.py` 生成的旧 article campaign。它与本文预研方案不是同一种 manifest：
+旧 article v1 配置生成器、专属 batch merge、raw cleanup 和实验编号筛选已经从活跃代码中移除。历史说明仍可在 `docs/archive/` 查阅，但不能作为当前运行入口。articlev2 的每个配置只对应一个 pose，队列始终保留 `events/raw/` 中的原始事件与 metadata，也不会创建 `by_condition/`。
 
-| 行为 | 旧 article_run01 | articlev2 |
-|---|---|---|
-| 生成器 | `generate_article_experiment_configs.py` | `generate_source_response_experiment_configs.py` |
-| manifest experiment | `article_simulation_campaign` | `source_response_simulation_campaign` |
-| batch | 支持 | 不使用 |
-| 单配置 pose 数 | 一个 | 一个 |
-| batch 自动合并 | 有 | 无 |
-| `by_condition/` | 自动生成 | 不生成 |
-| 跨 pose 合并 | 不做 | 不做 |
-| 原始 run 默认删除 | 合并后可删除 | 始终保留 |
-| `--keep-raw-runs` | 控制 batch 合并后是否保留 raw run | 对 articlev2 无实际作用 |
+## 12. 结果目录契约
 
-队列只有在 manifest 顶层满足：
-
-```yaml
-experiment: article_simulation_campaign
+```text
+results/articlev2/
+├── events/
+│   ├── raw/
+│   └── valid/
+├── data_processing/
+│   ├── slit_channels/
+│   └── audit/
+└── postprocessing/
+    ├── E1/
+    │   ├── figures/
+    │   ├── tables/
+    │   ├── roi_sensitivity/
+    │   └── archive/analysis_v2/
+    ├── E2/
+    └── E3/
 ```
 
-时才执行旧 article batch 合并。articlev2 不满足该条件，因此任务完成后不会自动创建 `by_condition/`，也不会删除 raw run。
+`events/raw/` 是不可原地改写的仿真事实层，`events/valid/` 是带固定 `slit_group/slit_label` 的清洗层；数据处理产物与论文后处理产物分别进入 `data_processing/` 和 `postprocessing/`。完整契约见 `results/README.md`。
 
-## 12. 后处理工具兼容性边界
+## 13. 数据清洗与审计
 
-现有 `scripts/article/` 工具最初面向旧 article_run01 数据，目前不能作为 articlev2 的正式后处理链路直接照搬：
-
-- `clean_events.py` 的 detector 窗口常量只定义三组通道，并按顺序写为 `S1/S2/S3`；它尚未表达 `P001 → S2/S4/S6`、`P002 → S1/S3/S5` 两套精确窗口。
-- `summarize_scatter_counts.py` 当前只接受 `S1/S2/S3`。
-- `plot_grid_response.py` 依赖旧 E0/E1/E3/E4 条件 metadata 或目录语义，不能从 articlev2 原始结果中完整解析当前 source-response 条件。
-- `plot_scatter_position_histogram.py` 能读取普通 run metadata，但仍依赖已经正确完成的 slit 分类，并要求输入属于同一兼容物理条件。
-
-在 S1–S6 精确 `det_x` 窗口、profile-aware 通道映射和 articlev2 条件解析完成适配前，不应使用这些脚本生成 articlev2 正式统计结论。它们不会由配置生成器或队列自动执行。
-
-## 13. 建议检查流程
-
-生成或接收一份 articlev2 campaign 后，建议按以下顺序检查：
-
-1. 查看 manifest `summary` 是否与预期规模一致；
-2. 抽查一个 center YAML 和含小数 offset 的 grid YAML；
-3. 执行完整 manifest dry-run；
-4. 使用独立低统计量 campaign 验证 MSS 链路；
-5. 正式运行时保存 state file；
-6. 定期检查 failed、pending、completed 数量和对应日志；
-7. 全部完成后按 manifest 核对 341 个独立 run 目录；
-8. 在后处理适配完成前保留每个 pose 的原始 `events.csv` 和 `metadata.yaml`。
-
-生成器和队列的回归测试为：
+清洗全部 raw run：
 
 ```bash
-python3 -m unittest \
-  tests/test_source_response_experiment_configs.py \
-  tests/test_experiment_queue.py
+python -m scripts.data_processing.clean_events \
+  --results-root results/articlev2
 ```
 
-查看 CLI 当前参数：
+审计 raw/valid 配对、schema、行数守恒、边界 hash 和标签：
 
 ```bash
-python3 scripts/generate_source_response_experiment_configs.py --help
-python3 scripts/run_experiment_queue.py --help
+python -m scripts.data_processing.audit_experiment_data \
+  --results-root results/articlev2
 ```
+
+默认输出分别位于 `events/valid/` 和 `data_processing/audit/`。目标目录已有内容时必须显式传入 `--overwrite`，发布过程使用临时目录和原子替换，避免留下半成品。
+
+## 14. E1 后处理与预留实验
+
+E1 默认读取审计结果，只处理当前正式 E1 数据：
+
+```bash
+python -m scripts.postprocessing.e1.run \
+  --results-root results/articlev2
+```
+
+结果写入 `postprocessing/E1/`，包含 figures、tables、manifest、report 和 acceptance summary。覆盖已有正式输出时使用 `--overwrite`；同目录中的 `roi_sensitivity/` 和 `archive/` 会被保留。
+
+ROI 敏感性分析独立运行：
+
+```bash
+python -m scripts.postprocessing.e1.analyze_roi_sensitivity \
+  --results-root results/articlev2
+```
+
+E2/E3 当前只有目录、README 和输入输出约定，后续必须基于 `events/valid/` 与 `slit_label` 实现。`scripts/postprocessing/_archive/` 仅保存未迁移旧 schema 源码，不是正式入口，也不维护测试。
+
+## 15. 测试与验收
+
+使用 data conda 环境运行精简后的完整测试：
+
+```bash
+conda run -n data python -m unittest discover -s tests -p 'test_*.py'
+```
+
+正式验收还应确认生成器得到 341 个唯一任务、seed 为 1234–1574，审计 `error_count = 0`，以及 E1 acceptance 为 pass。本轮代码与数据结构整改不要求重新运行昂贵的 Geant4 正式仿真。

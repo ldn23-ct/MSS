@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -13,10 +12,9 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
-import generate_source_response_experiment_configs as source_response  # noqa: E402
-import run_experiment_queue as experiment_queue  # noqa: E402
+from scripts.monte_carlo import generate_source_response_experiment_configs as source_response
+from scripts.monte_carlo import run_experiment_queue as experiment_queue
 
 
 def load_yaml(path: Path):
@@ -82,7 +80,7 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
             )
             self.assertTrue(
                 all(
-                    case["output_directory"].startswith("results/articlev2/runs/")
+                    case["output_directory"].startswith("results/articlev2/events/raw/")
                     for case in manifest["cases"]
                 )
             )
@@ -411,7 +409,7 @@ class SourceResponseExperimentConfigTests(unittest.TestCase):
             self.assertEqual("fail", config["output"]["existing_run_policy"])
             self.assertTrue(
                 config["output"]["output_directory"].startswith(
-                    "results/new_campaign/runs/"
+                    "results/new_campaign/events/raw/"
                 )
             )
 

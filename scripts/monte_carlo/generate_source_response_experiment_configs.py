@@ -363,7 +363,7 @@ def generate(
         for scan_mode, phantom_id, profile_id in condition_specs():
             geometry_file = str(phantoms[phantom_id]["geometry_file"])
             output_directory = (
-                f"results/{campaign_id}/runs/{scan_mode}/{phantom_id}/{profile_id}"
+                f"results/{campaign_id}/events/raw/{scan_mode}/{phantom_id}/{profile_id}"
             )
             condition_id = (
                 f"source_response_{scan_mode}_{phantom_id}_{profile_id}_E{energy_token}"
@@ -493,7 +493,7 @@ def generate(
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    repo_root = Path(__file__).resolve().parents[1]
+    repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=repo_root)
     parser.add_argument(
