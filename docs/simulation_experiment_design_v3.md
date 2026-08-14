@@ -1,10 +1,10 @@
-# 源项响应框架下的 X 射线背散射仿真实验设计（V3）
+# 源项响应框架下的 X 射线背散射仿真实验设计（V3.1）
 
 ## 0. 修订依据与总体定位
 
-本文档在 `simulation_experiment_design_v2.md` 基础上，根据新版 source-response framework 与当前数据落地需求重新整理。
+本文档在 `simulation_experiment_design_v3.md` 基础上，根据 E2 实际数据比较需求对定量分析指标进行收敛，其余实验层级、事件定义和比较关系保持不变。
 
-V3 不再维持原 E1–E6 的独立编号，而将实验合并为三个层级：
+V3.1 延续 V3 的三实验组织：
 
 1. **E1：均匀 PMMA 下的系统响应基线与散射空间特征；**
 2. **E2：缺陷可观测响应与 first-scatter source-region mechanism；**
@@ -23,6 +23,13 @@ V3 不再维持原 E1–E6 的独立编号，而将实验合并为三个层级�
 \]
 
 其中 E1 和 E2 是当前优先完成的数据分析任务；E3 保留为后续应用验证。
+
+V3.1 对 E2 定量指标作如下调整：
+
+- E2-B 的整体计数响应继续使用全通道相对变化量；
+- E2-D 以 source-region 相对计数变化和区域内 total variation distance 作为两个核心指标，分别描述幅值变化与区域内部形态变化；
+- source-region fraction 降为可选组成指标，仅在需要讨论 front/target/behind contribution redistribution 时使用；
+- 深度质心不再作为 E2 的常规指标。
 
 本文档规定实验的科学问题、比较关系和主要统计对象，不承担具体出图脚本和文件操作说明。执行细节由独立的实验指导文档规定。
 
@@ -568,7 +575,7 @@ baseline 与 defect profile 使用：
 \Omega_B
 \]
 
-对 E2-C 的 depth-source histogram 进一步积分。
+对 E2-C 的 depth-source histogram 进一步分区分析。
 
 对每个
 
@@ -576,7 +583,7 @@ baseline 与 defect profile 使用：
 s\in\{total,k1,ms\}
 \]
 
-得到
+首先计算各区域的原始计数
 
 \[
 N_F^{(s)},
@@ -586,23 +593,92 @@ N_T^{(s)},
 N_B^{(s)}.
 \]
 
-计算：
+区域级分析区分两个问题：
+
+1. 该区域的**整体计数幅值是否变化**；
+2. 去除整体计数幅值差异后，该区域内部不同 depth bins 的**相对分布形态是否变化**。
+
+### 8.1 Source-region count response
+
+对
+
+\[
+r\in\{F,T,B\}
+\]
+
+定义区域相对计数变化
 
 \[
 C_r^{(s)}
 =
 \frac{
-N_{r,D}^{(s)}
--
-N_{r,0}^{(s)}
+N_{r,D}^{(s)}-N_{r,0}^{(s)}
 }{
 N_{r,0}^{(s)}
-},
-\qquad
-r\in\{F,T,B\},
+}.
 \]
 
-以及
+该指标用于比较 front、target 和 behind 区域的整体 detected contribution 分别增加或减少多少。
+
+### 8.2 Within-region shape response
+
+为判断某一区域内的变化是否主要表现为整体幅值缩放，对 baseline 与 defect histogram 在该区域内部独立归一化：
+
+\[
+p_{0,r}^{(s)}(z_i)
+=
+\frac{
+H_0^{(s)}(z_i)
+}{
+\sum_{j\in r}H_0^{(s)}(z_j)
+},
+\qquad z_i\in r,
+\]
+
+\[
+p_{D,r}^{(s)}(z_i)
+=
+\frac{
+H_D^{(s)}(z_i)
+}{
+\sum_{j\in r}H_D^{(s)}(z_j)
+},
+\qquad z_i\in r.
+\]
+
+定义区域内 total variation distance：
+
+\[
+D_{\mathrm{TV},r}^{(s)}
+=
+\frac12
+\sum_{i\in r}
+\left|
+p_{D,r}^{(s)}(z_i)
+-
+p_{0,r}^{(s)}(z_i)
+\right|.
+\]
+
+其范围为
+
+\[
+0\le D_{\mathrm{TV},r}^{(s)}\le1.
+\]
+
+如果 defect histogram 在区域内近似满足
+
+\[
+H_D^{(s)}(z_i)
+\approx
+\alpha_r^{(s)}H_0^{(s)}(z_i),
+\]
+
+即各 bin 主要按近似相同比例变化，则区域内归一化后的形态接近不变，\(D_{\mathrm{TV},r}^{(s)}\) 接近 0。较大的 \(D_{\mathrm{TV},r}^{(s)}\) 表示区域内部 bin-to-bin 相对关系发生更明显的重分布。
+
+### 8.3 Optional source-region composition
+
+当需要额外描述 front / target / behind 在全部 detected contribution 中的组成变化时，可计算
 
 \[
 f_r^{(s)}
@@ -614,78 +690,86 @@ N^{(s)}
 }.
 \]
 
-该层用于比较：
+该量属于可选组成指标，不作为 E2-D 的常规核心指标。
 
-1. target region 的 total/k1/ms 变化；
-2. front 与 behind region 是否出现不同方向或不同幅度的变化；
-3. 各 source regions 在总 detected contribution 中的占比是否发生重分布。
+E2-D 的主要比较因此为：
+
+- \(C_F^{(s)},C_T^{(s)},C_B^{(s)}\)：区域整体计数响应；
+- \(D_{\mathrm{TV},F}^{(s)},D_{\mathrm{TV},T}^{(s)},D_{\mathrm{TV},B}^{(s)}\)：去除区域幅值差异后的内部形态响应。
 
 ---
 
-# 9. E2 分布形态指标
+# 9. E2 定量分析指标体系
 
-E2-C 的主图使用 raw counts。分布形态由指标计算，不要求另画归一化 profile。
+E2 的定量指标按照分析层级使用，不在同一结果层重复报告功能相近的统计量。
 
-## 9.1 深度质心
+## 9.1 E2-B：整体计数响应
 
-由 raw histogram 得到归一化分布
-
-\[
-p^{(s)}(z_i)
-=
-\frac{H^{(s)}(z_i)}
-{\sum_i H^{(s)}(z_i)}.
-\]
-
-定义
+对匹配组合 \(P0-S_n\) 与 \(P_n-S_n\)，继续使用
 
 \[
-\mu_z^{(s)}
+C_n^{(s)}
 =
-\sum_i z_i p^{(s)}(z_i),
+\frac{
+N_{D,n}^{(s)}-N_{0,n}^{(s)}
+}{
+N_{0,n}^{(s)}
+},
+\qquad
+s\in\{total,k1,ms\}.
 \]
 
-并比较
+该指标只用于 E2-B，表征整个匹配狭缝内 total、k1 和 ms 的整体计数变化。
+
+## 9.2 E2-D：区域幅值响应
+
+使用
 
 \[
-\Delta\mu_z^{(s)}
-=
-\mu_{z,D}^{(s)}
--
-\mu_{z,0}^{(s)}.
+C_r^{(s)},
+\qquad
+r\in\{F,T,B\},
 \]
 
-该指标描述 detected first-scatter distribution 的整体深度偏移。
+表征不同 first-scatter source regions 的整体计数变化。该指标与 E2-C 中的 raw-count histogram 直接对应。
 
-## 9.2 Total variation distance
+## 9.3 E2-D：区域内部形态响应
 
-定义
+使用
 
 \[
-D_{\mathrm{TV}}^{(s)}
-=
-\frac12
-\sum_i
-\left|
-p_D^{(s)}(z_i)
--
-p_0^{(s)}(z_i)
-\right|.
+D_{\mathrm{TV},r}^{(s)}
 \]
 
-用于量化 baseline 与 defect depth-source distribution 的整体形态差异。
+比较 baseline 与 defect 在同一区域内独立归一化后的 depth-source distribution。该指标用于回答：在区域整体计数变化之外，各 depth bins 的相对大小关系是否发生明显改变。
 
-## 9.3 Source-region fraction
+因此，\(C_r^{(s)}\) 与 \(D_{\mathrm{TV},r}^{(s)}\) 分别描述
+
+\[
+\text{count-amplitude response}
+\quad\text{and}\quad
+\text{within-region shape response}.
+\]
+
+两者作为 E2-D 的核心定量指标。
+
+## 9.4 可选的 source-region fraction
+
+若结果需要讨论 front / target / behind contribution 在总 detected count 中的组成重分布，可补充
 
 \[
 f_F^{(s)},\quad
 f_T^{(s)},\quad
-f_B^{(s)}
+f_B^{(s)}.
 \]
 
-本身也是一种具有直接物理意义的分布形态描述，用于表征 front-target-behind source composition 的变化。
+如果正文只关注各区域的计数变化及区域内部形态稳定性，则不要求常规报告该指标。
 
-因此，E2 不需要额外引入复杂的 histogram overlap coefficient 或大量相似形态指标。
+## 9.5 统计解释
+
+\(D_{\mathrm{TV},r}^{(s)}\) 是分布形态差异的描述量，不设置统一的经验阈值。有限 Monte Carlo histories 会使完全相同的真实分布也产生非零的样本差异，因此在判断较小的 \(D_{\mathrm{TV},r}^{(s)}\) 是否具有实际意义时，应结合对应区域的统计计数与 Monte Carlo 涨落水平解释；必要时可通过独立重复运行或基于计数统计的重采样估计其波动范围。
+
+E2 不再将深度质心 \(\Delta\mu_z^{(s)}\) 作为常规定量指标。只有在实际结果出现明确的整体深度偏移、且该偏移本身成为研究问题时，再作为补充量单独引入。
 
 ---
 

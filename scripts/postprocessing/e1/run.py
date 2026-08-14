@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the canonical Article V2 E1 depth-response analysis."""
+"""Generate the canonical Article V2 E1 paper figures."""
 
 from __future__ import annotations
 
@@ -21,7 +21,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import yaml
-from matplotlib.patches import Rectangle
 
 from scripts.data_processing.common import (
     PROFILE_SLITS,
@@ -30,19 +29,37 @@ from scripts.data_processing.common import (
     acceptance_regions_for_profile,
     load_run_metadata,
 )
-from scripts.data_processing.experiment_contract import (
-    SLIT_DESIGN_DEPTH_MM,
-)
+from scripts.data_processing.experiment_contract import SLIT_DESIGN_DEPTH_MM
 
 
-CLASSES = ("total", "k1", "ms")
 E1_DEPTH_RANGE_MM = (0.0, 220.0)
-E1_BIN_WIDTHS_MM = (2.0, 4.0)
-E1_PLOT_CLASSES = ("k1", "total", "ms")
-COLORS = ("#0072B2", "#D55E00", "#009E73", "#CC79A7", "#E69F00", "#56B4E9")
-E1_VALID_REQUIRED_COLUMNS = {
-    "det_x", "det_y", "scatter_count_total", "first_scatter_z", "slit_group", "slit_label",
+E1_DEPTH_BIN_WIDTH_MM = 2.0
+DEFAULT_SPATIAL_VIEW_QUANTILE = (0.005, 0.995)
+VIEW_PADDING_FRACTION = 0.03
+SLIT_IDS = tuple(f"S{index}" for index in range(1, 7))
+SLIT_COLORS = {
+    slit_id: plt.get_cmap("viridis")(value)
+    for slit_id, value in zip(SLIT_IDS, np.linspace(0.08, 0.92, len(SLIT_IDS)), strict=True)
 }
+FIGURE_NAMES = (
+    "E1-F1_detector_plane_roi.png",
+    "E1-F2_roi_conditioned_total_depth_response.png",
+    "E1-F3_first_last_spatial_comparison.png",
+)
+E1_VALID_REQUIRED_COLUMNS = {
+    "det_x",
+    "det_y",
+    "scatter_count_total",
+    "first_scatter_x",
+    "first_scatter_y",
+    "first_scatter_z",
+    "last_scatter_x",
+    "last_scatter_y",
+    "last_scatter_z",
+    "slit_group",
+    "slit_label",
+}
+NUMERIC_COLUMNS = tuple(sorted(E1_VALID_REQUIRED_COLUMNS.difference({"slit_group", "slit_label"})))
 
 
 @dataclass
@@ -56,17 +73,24 @@ class AnalysisContext:
     _valid_cache: dict[str, pd.DataFrame] = field(default_factory=dict)
     _valid_metadata_cache: dict[str, RunMetadata] = field(default_factory=dict)
 
-    def run_row(self, mode: str, phantom: str, profile: str, x: float = 0, y: float = 0) -> pd.Series:
+    def run_row(
+        self, mode: str, phantom: str, profile: str, x: float = 0, y: float = 0
+    ) -> pd.Series:
         rows = self.inventory[
-            (self.inventory.scan_mode == mode) & (self.inventory.phantom_id == phantom)
+            (self.inventory.scan_mode == mode)
+            & (self.inventory.phantom_id == phantom)
             & (self.inventory.profile_id == profile)
             & np.isclose(self.inventory.head_offset_x_mm.astype(float), x)
             & np.isclose(self.inventory.head_offset_y_mm.astype(float), y)
         ]
         if len(rows) != 1:
-            raise ValueError(f"expected one run for {(mode, phantom, profile, x, y)}, found {len(rows)}")
+            raise ValueError(
+                f"expected one run for {(mode, phantom, profile, x, y)}, found {len(rows)}"
+            )
         if rows.iloc[0]["status"] != "valid":
-            raise ValueError(f"audit inventory marks run invalid: {(mode, phantom, profile, x, y)}")
+            raise ValueError(
+                f"audit inventory marks run invalid: {(mode, phantom, profile, x, y)}"
+            )
         return rows.iloc[0]
 
     def valid_event_path(self, row: pd.Series) -> Path:
@@ -83,8 +107,11 @@ class AnalysisContext:
             missing = sorted(E1_VALID_REQUIRED_COLUMNS.difference(frame.columns))
             if missing:
                 raise ValueError(f"valid events are missing required E1 columns {missing}: {path}")
-            for column in ("det_x", "det_y", "scatter_count_total", "first_scatter_z"):
+            for column in NUMERIC_COLUMNS:
                 frame[column] = pd.to_numeric(frame[column], errors="raise")
+            values = frame[list(NUMERIC_COLUMNS)].to_numpy(dtype=float)
+            if not np.isfinite(values).all():
+                raise ValueError(f"E1 numeric event columns must be finite: {path}")
             self._valid_cache[key] = frame
         return self._valid_cache[key]
 
@@ -95,6 +122,7 @@ class AnalysisContext:
             self._valid_metadata_cache[key] = load_run_metadata(path)
         return self._valid_metadata_cache[key]
 
+
 def validate_audit(audit_dir: Path) -> tuple[dict[str, Any], pd.DataFrame]:
     summary_path = audit_dir / "audit_summary.yaml"
     inventory_path = audit_dir / "condition_inventory.csv"
@@ -102,15 +130,26 @@ def validate_audit(audit_dir: Path) -> tuple[dict[str, Any], pd.DataFrame]:
         raise FileNotFoundError("audit_summary.yaml and condition_inventory.csv are required")
     audit = yaml.safe_load(summary_path.read_text(encoding="utf-8"))
     if audit.get("overall_status") != "pass":
-        raise ValueError("articlev2 audit must pass before analysis")
-    status = audit["experiments"]["E1"]["status"]
+        raise ValueError("articlev2 audit must pass before E1 analysis")
+    status = audit.get("experiments", {}).get("E1", {}).get("status")
     if status != "ready":
         raise ValueError(f"audit status for E1 is {status}, expected ready")
     return audit, pd.read_csv(inventory_path)
 
 
+def scatter_counts(frame: pd.DataFrame) -> pd.Series:
+    values = frame.scatter_count_total.to_numpy(dtype=float)
+    if (
+        not np.isfinite(values).all()
+        or (values < 0).any()
+        or not np.equal(values, np.floor(values)).all()
+    ):
+        raise ValueError("scatter_count_total must contain finite non-negative integers")
+    return frame.scatter_count_total.astype(np.int64)
+
+
 def class_mask(frame: pd.DataFrame, category: str) -> pd.Series:
-    scatter = frame.scatter_count_total
+    scatter = scatter_counts(frame)
     if category == "total":
         return scatter >= 1
     if category == "k1":
@@ -120,74 +159,59 @@ def class_mask(frame: pd.DataFrame, category: str) -> pd.Series:
     raise ValueError(f"unknown event class: {category}")
 
 
-def ensure_dirs(root: Path) -> tuple[Path, Path]:
-    tables, figures = root / "tables", root / "figures"
-    tables.mkdir(parents=True, exist_ok=True); figures.mkdir(parents=True, exist_ok=True)
-    return tables, figures
-
-
-def save_figure(fig: plt.Figure, base: Path, include_pdf: bool = True) -> list[Path]:
-    paths = [base.with_suffix(".png")]
-    fig.savefig(paths[0], dpi=300, bbox_inches="tight")
-    if include_pdf:
-        paths.append(base.with_suffix(".pdf"))
-        fig.savefig(paths[-1], bbox_inches="tight")
-    plt.close(fig)
-    return paths
-
-
-def write_manifest(root: Path, experiment: str, parameters: dict[str, Any], warnings: list[str] | None = None) -> None:
-    files = sorted(
-        path.relative_to(root).as_posix() for path in root.rglob("*")
-        if path.is_file() and path.name != "analysis_manifest.yaml"
-    )
-    data = {"experiment": experiment, "parameters": parameters, "warnings": warnings or [], "outputs": files}
-    (root / "analysis_manifest.yaml").write_text(
-        yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8"
-    )
-
-
-def e1_scatter_counts(frame: pd.DataFrame) -> pd.Series:
-    if "scatter_count_total" not in frame:
-        raise ValueError("E1 events are missing scatter_count_total")
-    values = frame.scatter_count_total.to_numpy(dtype=float)
-    if (
-        not np.isfinite(values).all()
-        or (values < 0).any()
-        or not np.equal(values, np.floor(values)).all()
-    ):
-        raise ValueError("E1 scatter_count_total must contain finite non-negative integers")
-    return frame.scatter_count_total.astype(np.int64)
-
-
 def e1_roi_mask(frame: pd.DataFrame, region: DetectorAcceptanceRegion) -> pd.Series:
-    """Select an existing slit label inside its fixed closed geometry ROI."""
+    """Select the recorded slit channel inside its fixed closed detector ROI."""
     coordinates = frame[["det_x", "det_y"]].to_numpy(dtype=float)
     if not np.isfinite(coordinates).all():
         raise ValueError("E1 detector coordinates must be finite")
     return (
-        frame.slit_label.eq(region.slit_id)
+        frame.slit_label.astype(str).eq(region.slit_id)
         & frame.det_x.between(region.x_min_mm, region.x_max_mm, inclusive="both")
         & frame.det_y.between(region.y_min_mm, region.y_max_mm, inclusive="both")
     )
 
 
-def e1_depth_edges(bin_width_mm: float) -> np.ndarray:
+def depth_edges() -> np.ndarray:
     start, end = E1_DEPTH_RANGE_MM
-    if not math.isfinite(bin_width_mm) or bin_width_mm <= 0:
-        raise ValueError("E1 bin width must be finite and positive")
-    bin_count = (end - start) / bin_width_mm
-    rounded = round(bin_count)
-    if not math.isclose(bin_count, rounded, rel_tol=0, abs_tol=1e-12):
-        raise ValueError("E1 depth range must be an integer multiple of the bin width")
-    return np.linspace(start, end, rounded + 1)
+    return np.arange(start, end + E1_DEPTH_BIN_WIDTH_MM, E1_DEPTH_BIN_WIDTH_MM)
 
 
-def e1_peak_depth(bin_centers: np.ndarray, counts: np.ndarray) -> float:
-    if not len(counts) or counts.max(initial=0) <= 0:
-        return math.nan
-    peak_count = counts.max()
-    return float(bin_centers[np.flatnonzero(counts == peak_count)[0]])
+def padded_quantile_range(
+    values: np.ndarray,
+    quantile: tuple[float, float] = DEFAULT_SPATIAL_VIEW_QUANTILE,
+    *,
+    padding_fraction: float = VIEW_PADDING_FRACTION,
+) -> tuple[float, float]:
+    values = np.asarray(values, dtype=float)
+    if not values.size or not np.isfinite(values).all():
+        raise ValueError("view-range values must be finite and non-empty")
+    low_q, high_q = validate_quantile(quantile)
+    low, high = (float(value) for value in np.quantile(values, (low_q, high_q)))
+    if math.isclose(low, high):
+        scale = max(abs(low), 1.0)
+        low -= scale * padding_fraction
+        high += scale * padding_fraction
+    else:
+        padding = (high - low) * padding_fraction
+        low -= padding
+        high += padding
+    return low, high
+
+
+def validate_quantile(value: tuple[float, float]) -> tuple[float, float]:
+    low, high = (float(item) for item in value)
+    if not (math.isfinite(low) and math.isfinite(high) and 0 <= low < high <= 1):
+        raise ValueError("spatial view quantiles must satisfy 0 <= LOW < HIGH <= 1")
+    return low, high
+
+
+def validate_limit(name: str, value: tuple[float, float] | None) -> tuple[float, float] | None:
+    if value is None:
+        return None
+    low, high = (float(item) for item in value)
+    if not (math.isfinite(low) and math.isfinite(high) and low < high):
+        raise ValueError(f"{name} must contain finite LOW < HIGH")
+    return low, high
 
 
 def _metadata_range(metadata: RunMetadata, field: str) -> tuple[float, float]:
@@ -200,455 +224,424 @@ def _metadata_range(metadata: RunMetadata, field: str) -> tuple[float, float]:
     return low, high
 
 
-def run_e1(ctx: AnalysisContext) -> None:
-    root = ctx.output_root
-    tables, figures = ensure_dirs(root)
-    event_count_rows: list[dict[str, Any]] = []
-    design_fraction_rows: list[dict[str, Any]] = []
-    peak_rows: list[dict[str, Any]] = []
-    peak_lookup: dict[tuple[str, str, float], float] = {}
-    histogram_frames: dict[float, pd.DataFrame] = {}
+def _save_png(fig: plt.Figure, path: Path) -> None:
+    if path.suffix != ".png":
+        raise ValueError(f"E1 figures must use PNG: {path}")
+    fig.savefig(path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def _load_inputs(
+    ctx: AnalysisContext,
+) -> tuple[
+    pd.DataFrame,
+    dict[str, pd.DataFrame],
+    dict[str, pd.DataFrame],
+    dict[str, DetectorAcceptanceRegion],
+    list[str],
+    tuple[float, float],
+]:
+    frames: list[pd.DataFrame] = []
+    frames_by_profile: dict[str, pd.DataFrame] = {}
     selected_by_slit: dict[str, pd.DataFrame] = {}
-    plot_data: dict[str, tuple[pd.DataFrame, RunMetadata, tuple[DetectorAcceptanceRegion, ...]]] = {}
+    regions_by_slit: dict[str, DetectorAcceptanceRegion] = {}
     input_files: list[str] = []
+    y_ranges: list[tuple[float, float]] = []
 
     for profile_id, slit_ids in PROFILE_SLITS.items():
         run = ctx.run_row("center", "P0", profile_id)
         metadata = ctx.valid_metadata(run)
         if (
-            metadata.scan_mode != "center" or metadata.phantom_id != "P0"
+            metadata.scan_mode != "center"
+            or metadata.phantom_id != "P0"
             or metadata.profile_id != profile_id
-            or metadata.head_offset_x_mm != 0 or metadata.head_offset_y_mm != 0
+            or metadata.head_offset_x_mm != 0
+            or metadata.head_offset_y_mm != 0
         ):
             raise ValueError(f"unexpected E1 valid-run metadata: {metadata.metadata_path}")
         frame = ctx.valid_events(run).copy()
-        frame["_scatter_count"] = e1_scatter_counts(frame)
-        depths = frame.first_scatter_z.to_numpy(dtype=float)
-        if not np.isfinite(depths).all() or (depths < 0).any():
-            raise ValueError(f"E1 valid first_scatter_z must be finite and non-negative: {metadata.metadata_path}")
+        scatter_counts(frame)
+        if (frame.first_scatter_z < E1_DEPTH_RANGE_MM[0]).any() or (
+            frame.first_scatter_z > E1_DEPTH_RANGE_MM[1]
+        ).any():
+            raise ValueError(f"E1 first-scatter depth falls outside 0-220 mm: {metadata.metadata_path}")
         if frame.slit_group.isna().any() or not frame.slit_group.astype(str).eq(profile_id).all():
             raise ValueError(f"E1 slit_group must equal profile {profile_id}: {metadata.metadata_path}")
-        labels = frame.slit_label.astype(str)
-        invalid_labels = sorted(set(labels).difference(slit_ids))
+        frame["slit_label"] = frame.slit_label.astype(str)
+        invalid_labels = sorted(set(frame.slit_label).difference(slit_ids))
         if invalid_labels:
-            raise ValueError(
-                f"E1 slit_label must be one of {slit_ids} for {profile_id}: {invalid_labels}"
-            )
-        frame["slit_label"] = labels
-        regions = acceptance_regions_for_profile(
-            profile_id, metadata.head_offset_x_mm, metadata.head_offset_y_mm
-        )
-        detector_x_range = _metadata_range(metadata, "actual_x_range_mm")
-        detector_y_range = _metadata_range(metadata, "actual_y_range_mm")
-        for region in regions:
-            if (
-                region.x_min_mm < detector_x_range[0] or region.x_max_mm > detector_x_range[1]
-                or region.y_min_mm < detector_y_range[0] or region.y_max_mm > detector_y_range[1]
-            ):
-                raise ValueError(f"E1 acceptance region is outside detector bounds: {region}")
-        plot_data[profile_id] = (frame, metadata, regions)
-        input_files.append(
-            ctx.valid_event_path(run).relative_to(ctx.results_root).as_posix()
-        )
-        by_slit = {region.slit_id: region for region in regions}
-        for slit_id in slit_ids:
-            selected_by_slit[slit_id] = frame.loc[e1_roi_mask(frame, by_slit[slit_id])].copy()
+            raise ValueError(f"E1 slit_label must be one of {slit_ids}: {invalid_labels}")
 
-    for slit_index in range(1, 7):
-        slit_id = f"S{slit_index}"
-        design_depth = SLIT_DESIGN_DEPTH_MM[slit_id]
-        selected = selected_by_slit[slit_id]
-        scatter = selected._scatter_count
-        total_count = int((scatter >= 1).sum())
-        k1_count = int((scatter == 1).sum())
-        ms_count = int((scatter >= 2).sum())
-        if total_count != k1_count + ms_count:
-            raise AssertionError(f"E1 total != k1 + ms for {slit_id}")
-        event_count_rows.append({
-            "slit": slit_id,
-            "design_depth_mm": design_depth,
-            "total_count": total_count,
-            "k1_count": k1_count,
-            "ms_count": ms_count,
-            "k1_fraction": k1_count / total_count if total_count else math.nan,
-            "ms_fraction": ms_count / total_count if total_count else math.nan,
-        })
-        for category in CLASSES:
-            category_mask = class_mask(
-                pd.DataFrame({"scatter_count_total": scatter}, index=selected.index), category
-            )
-            category_depths = selected.loc[category_mask, "first_scatter_z"]
-            region_left = design_depth - 5.0
-            region_right = design_depth + 5.0
-            region_count = int(((category_depths >= region_left) & (category_depths < region_right)).sum())
-            class_total = len(category_depths)
-            design_fraction_rows.append({
-                "slit": slit_id,
-                "design_depth_mm": design_depth,
-                "scatter_class": category,
-                "region_left_mm": region_left,
-                "region_right_mm": region_right,
-                "region_count": region_count,
-                "class_total_count": class_total,
-                "region_fraction": region_count / class_total if class_total else math.nan,
-            })
-
-    outside_range_counts: dict[str, int] = {}
-    for bin_width in E1_BIN_WIDTHS_MM:
-        edges = e1_depth_edges(bin_width)
-        centers = (edges[:-1] + edges[1:]) / 2
-        depth_rows: list[dict[str, Any]] = []
-        for slit_index in range(1, 7):
-            slit_id = f"S{slit_index}"
-            design_depth = SLIT_DESIGN_DEPTH_MM[slit_id]
-            selected = selected_by_slit[slit_id]
-            for category in CLASSES:
-                category_mask = class_mask(selected, category)
-                values = selected.loc[category_mask, "first_scatter_z"].to_numpy(dtype=float)
-                counts, _ = np.histogram(values, bins=edges)
-                histogram_count = int(counts.sum())
-                outside_range_counts[f"{slit_id}.{category}"] = int(len(values) - histogram_count)
-                if histogram_count == 0:
-                    ctx.warnings.append(f"E1 empty {bin_width:g} mm histogram: {slit_id}-{category}")
-                normalized = (
-                    counts.astype(float) / histogram_count
-                    if histogram_count else np.full(len(counts), math.nan)
-                )
-                poisson_sigma = np.sqrt(counts.astype(float))
-                relative_error = np.divide(
-                    1.0,
-                    poisson_sigma,
-                    out=np.full(len(counts), math.nan),
-                    where=counts > 0,
-                )
-                for index, count in enumerate(counts):
-                    depth_rows.append({
-                        "slit": slit_id,
-                        "design_depth_mm": design_depth,
-                        "scatter_class": category,
-                        "bin_left_mm": edges[index],
-                        "bin_right_mm": edges[index + 1],
-                        "bin_center_mm": centers[index],
-                        "raw_count": int(count),
-                        "normalized_count": normalized[index],
-                        "poisson_sigma": poisson_sigma[index],
-                        "relative_poisson_error": relative_error[index],
-                    })
-                peak_depth = e1_peak_depth(centers, counts)
-                peak_lookup[(slit_id, category, bin_width)] = peak_depth
-                peak_rows.append({
-                    "slit": slit_id,
-                    "design_depth_mm": design_depth,
-                    "scatter_class": category,
-                    "bin_width_mm": bin_width,
-                    "peak_depth_mm": peak_depth,
-                    "peak_raw_count": int(counts.max()) if histogram_count else 0,
-                })
-        histogram_frames[bin_width] = pd.DataFrame(depth_rows)
-
-    comparison_rows = [
-        {
-            "slit": f"S{slit_index}",
-            "scatter_class": category,
-            "peak_2mm": peak_lookup[(f"S{slit_index}", category, 2.0)],
-            "peak_4mm": peak_lookup[(f"S{slit_index}", category, 4.0)],
-            "peak_shift_mm": (
-                peak_lookup[(f"S{slit_index}", category, 4.0)]
-                - peak_lookup[(f"S{slit_index}", category, 2.0)]
-            ),
-        }
-        for slit_index in range(1, 7)
-        for category in CLASSES
-    ]
-
-    event_counts = pd.DataFrame(event_count_rows)
-    design_fractions = pd.DataFrame(design_fraction_rows)
-    peak_summary = pd.DataFrame(peak_rows)
-    binning_comparison = pd.DataFrame(comparison_rows)
-    if not (event_counts.total_count == event_counts.k1_count + event_counts.ms_count).all():
-        raise AssertionError("E1 classification partition failed")
-    if (
-        len(event_counts) != 6
-        or len(histogram_frames[2.0]) != 1980
-        or len(histogram_frames[4.0]) != 990
-        or len(peak_summary) != 36
-        or len(design_fractions) != 18
-        or len(binning_comparison) != 18
-    ):
-        raise AssertionError("E1 output row count contract failed")
-
-    event_counts.to_csv(tables / "E1_event_counts.csv", index=False, na_rep="NaN")
-    histogram_frames[2.0].to_csv(
-        tables / "E1_depth_profiles_2mm.csv", index=False, na_rep="NaN"
-    )
-    histogram_frames[4.0].to_csv(
-        tables / "E1_depth_profiles_4mm.csv", index=False, na_rep="NaN"
-    )
-    peak_summary.to_csv(tables / "E1_peak_summary.csv", index=False, na_rep="NaN")
-    design_fractions.to_csv(
-        tables / "E1_design_depth_fraction.csv", index=False, na_rep="NaN"
-    )
-    binning_comparison.to_csv(
-        tables / "E1_binning_comparison.csv", index=False, na_rep="NaN"
-    )
-
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6), constrained_layout=True)
-    for axis, profile_id in zip(axes, PROFILE_SLITS):
-        frame, metadata, regions = plot_data[profile_id]
-        for region in regions:
-            color = COLORS[int(region.slit_id[1:]) - 1]
-            hits = frame[frame.slit_label == region.slit_id]
-            axis.scatter(
-                hits.det_x, hits.det_y, s=2, alpha=.18, color=color,
-                label=region.slit_id, rasterized=True,
-            )
-            axis.add_patch(Rectangle(
-                (region.x_min_mm, region.y_min_mm),
-                region.x_max_mm - region.x_min_mm,
-                region.y_max_mm - region.y_min_mm,
-                fill=False, linewidth=1.6, edgecolor=color,
-            ))
-            axis.text(
-                (region.x_min_mm + region.x_max_mm) / 2,
-                region.y_max_mm - 5,
-                region.slit_id,
-                color=color, ha="center", va="top", fontsize=9,
-                bbox={"facecolor": "white", "edgecolor": "none", "alpha": .7, "pad": 1},
-            )
+        regions = acceptance_regions_for_profile(profile_id)
         x_range = _metadata_range(metadata, "actual_x_range_mm")
         y_range = _metadata_range(metadata, "actual_y_range_mm")
-        axis.set(xlim=x_range, ylim=y_range, xlabel="Detector x (mm)", ylabel="Detector y (mm)")
-        axis.set_title(f"{profile_id}: {' / '.join(PROFILE_SLITS[profile_id])}")
-        axis.grid(alpha=.15)
-        axis.legend(loc="lower right", ncol=3, fontsize=8)
-    save_figure(fig, figures / "E1_detector_plane_distribution", include_pdf=False)
+        for region in regions:
+            if (
+                region.x_min_mm < x_range[0]
+                or region.x_max_mm > x_range[1]
+                or region.y_min_mm < y_range[0]
+                or region.y_max_mm > y_range[1]
+            ):
+                raise ValueError(f"E1 acceptance region is outside detector bounds: {region}")
+            regions_by_slit[region.slit_id] = region
+            selected_by_slit[region.slit_id] = frame.loc[e1_roi_mask(frame, region)].copy()
 
-    for bin_width in E1_BIN_WIDTHS_MM:
-        depth_response = histogram_frames[bin_width]
-        fig, axes = plt.subplots(3, 1, figsize=(11, 11), sharex=True, constrained_layout=True)
-        for panel_index, (axis, category) in enumerate(zip(axes, E1_PLOT_CLASSES)):
-            for slit_index in range(1, 7):
-                slit_id = f"S{slit_index}"
-                data = depth_response[
-                    (depth_response.slit == slit_id)
-                    & (depth_response.scatter_class == category)
+        frames.append(frame)
+        frames_by_profile[profile_id] = frame
+        y_ranges.append(y_range)
+        input_files.append(ctx.valid_event_path(run).relative_to(ctx.results_root).as_posix())
+
+    if set(selected_by_slit) != set(SLIT_IDS):
+        raise AssertionError("E1 input profiles do not cover S1-S6")
+    return (
+        pd.concat(frames, ignore_index=True),
+        frames_by_profile,
+        selected_by_slit,
+        regions_by_slit,
+        input_files,
+        (min(item[0] for item in y_ranges), max(item[1] for item in y_ranges)),
+    )
+
+
+def run_e1(
+    ctx: AnalysisContext,
+    *,
+    spatial_view_quantile: tuple[float, float] = DEFAULT_SPATIAL_VIEW_QUANTILE,
+    spatial_xlim: tuple[float, float] | None = None,
+    spatial_ylim: tuple[float, float] | None = None,
+    spatial_zlim: tuple[float, float] | None = None,
+) -> dict[str, Any]:
+    spatial_view_quantile = validate_quantile(spatial_view_quantile)
+    spatial_xlim = validate_limit("spatial_xlim", spatial_xlim)
+    spatial_ylim = validate_limit("spatial_ylim", spatial_ylim)
+    spatial_zlim = validate_limit("spatial_zlim", spatial_zlim)
+    figures = ctx.output_root / "figures"
+    figures.mkdir(parents=True, exist_ok=True)
+    (
+        all_events,
+        frames_by_profile,
+        selected_by_slit,
+        regions_by_slit,
+        input_files,
+        detector_y_range,
+    ) = _load_inputs(ctx)
+
+    # E1-F1: the two real acquisition configurations are shown independently.
+    acquisition_groups = (("P002", ("S1", "S3", "S5")), ("P001", ("S2", "S4", "S6")))
+    detector_group_x_ranges: dict[str, list[float]] = {}
+    fig, axes = plt.subplots(
+        1, 2, figsize=(13.5, 6.2), sharey=True, constrained_layout=True
+    )
+    for index, (axis, (profile_id, slit_ids)) in enumerate(
+        zip(axes, acquisition_groups, strict=True)
+    ):
+        frame = frames_by_profile[profile_id]
+        event_low, event_high = (
+            float(value)
+            for value in np.quantile(
+                frame.det_x.to_numpy(dtype=float), DEFAULT_SPATIAL_VIEW_QUANTILE
+            )
+        )
+        roi_low = min(regions_by_slit[slit_id].x_min_mm for slit_id in slit_ids)
+        roi_high = max(regions_by_slit[slit_id].x_max_mm for slit_id in slit_ids)
+        core_low, core_high = min(event_low, roi_low), max(event_high, roi_high)
+        padding = (core_high - core_low) * VIEW_PADDING_FRACTION
+        x_range = (core_low - padding, core_high + padding)
+        detector_group_x_ranges[profile_id] = [float(x_range[0]), float(x_range[1])]
+        for slit_id in slit_ids:
+            region = regions_by_slit[slit_id]
+            axis.axvspan(
+                region.x_min_mm, region.x_max_mm, color="#BDBDBD", alpha=0.18, zorder=0
+            )
+            axis.axvline(
+                region.x_min_mm, color="#333333", linestyle="--", linewidth=0.9, zorder=1
+            )
+            axis.axvline(
+                region.x_max_mm, color="#333333", linestyle="--", linewidth=0.9, zorder=1
+            )
+            hits = frame[frame.slit_label == slit_id]
+            axis.scatter(
+                hits.det_x,
+                hits.det_y,
+                s=2,
+                alpha=0.28,
+                color=SLIT_COLORS[slit_id],
+                label=slit_id,
+                rasterized=True,
+            )
+            axis.text(
+                (region.x_min_mm + region.x_max_mm) / 2,
+                0.975,
+                f"{slit_id} ROI",
+                transform=axis.get_xaxis_transform(),
+                ha="center",
+                va="top",
+                fontsize=8,
+                color="#222222",
+                bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.65, "pad": 1},
+            )
+        axis.set(
+            xlim=x_range,
+            ylim=detector_y_range,
+            xlabel="Detector-plane x (mm)",
+            title=f"({chr(ord('a') + index)}) {' / '.join(slit_ids)} group ({profile_id})",
+        )
+        axis.legend(ncol=3, loc="lower center", fontsize=8)
+    axes[0].set_ylabel("Detector-plane y (mm)")
+    fig.suptitle("E1-F1  Detector-plane valid events and acquisition-group slit ROIs")
+    _save_png(fig, figures / FIGURE_NAMES[0])
+
+    # E1-F2: one independently normalized total profile per ROI.
+    edges = depth_edges()
+    profile_counts: dict[str, np.ndarray] = {}
+    roi_counts: dict[str, int] = {}
+    fig, axis = plt.subplots(figsize=(11.5, 6.4), constrained_layout=True)
+    for slit_id in SLIT_IDS:
+        selected = selected_by_slit[slit_id]
+        selected = selected.loc[class_mask(selected, "total")]
+        counts, _ = np.histogram(selected.first_scatter_z.to_numpy(dtype=float), bins=edges)
+        if counts.sum() != len(selected) or counts.sum() == 0:
+            raise ValueError(f"E1 {slit_id} total depth histogram is empty or loses events")
+        normalized = counts.astype(float) / counts.sum()
+        profile_counts[slit_id] = counts
+        roi_counts[slit_id] = int(counts.sum())
+        axis.stairs(normalized, edges, color=SLIT_COLORS[slit_id], label=slit_id, linewidth=1.6)
+        design_depth = SLIT_DESIGN_DEPTH_MM[slit_id]
+        axis.plot(
+            [design_depth, design_depth],
+            [-0.028, 0],
+            transform=axis.get_xaxis_transform(),
+            clip_on=False,
+            color=SLIT_COLORS[slit_id],
+            linewidth=1.0,
+        )
+        axis.text(
+            design_depth,
+            -0.045,
+            f"{design_depth:g}",
+            transform=axis.get_xaxis_transform(),
+            clip_on=False,
+            ha="center",
+            va="top",
+            fontsize=8,
+            color=SLIT_COLORS[slit_id],
+        )
+    axis.set(
+        xlim=E1_DEPTH_RANGE_MM,
+        ylabel="Normalized detected contribution",
+        title="E1-F2  ROI-conditioned total first-scatter depth response",
+    )
+    axis.set_xlabel("First-scatter depth z (mm)", labelpad=38)
+    axis.legend(ncol=6, loc="upper right")
+    _save_png(fig, figures / FIGURE_NAMES[1])
+
+    # E1-F3: preserve the two real acquisition configurations in a 2x2 overlay.
+    spatial_ranges: dict[str, dict[str, tuple[float, float]]] = {}
+    spatial_outside_counts: dict[str, dict[str, int]] = {}
+    spatial_point_counts: dict[str, dict[str, int]] = {}
+    spatial_profile_event_counts: dict[str, int] = {}
+    fig, axes = plt.subplots(2, 2, figsize=(13.5, 10), constrained_layout=True)
+    panel_index = 0
+    for row_index, (profile_id, slit_ids) in enumerate(acquisition_groups):
+        frame = frames_by_profile[profile_id]
+        pooled_coordinates = {
+            coordinate: np.concatenate(
+                [
+                    frame[f"first_scatter_{coordinate}"].to_numpy(dtype=float),
+                    frame[f"last_scatter_{coordinate}"].to_numpy(dtype=float),
                 ]
-                color = COLORS[slit_index - 1]
-                plot_edges = np.r_[data.bin_left_mm.to_numpy(), data.bin_right_mm.iloc[-1]]
-                axis.stairs(
-                    data.normalized_count.to_numpy(), plot_edges, label=slit_id, color=color
+            )
+            for coordinate in ("x", "y", "z")
+        }
+        group_ranges = {
+            "x": spatial_xlim
+            or padded_quantile_range(pooled_coordinates["x"], spatial_view_quantile),
+            "y": spatial_ylim
+            or padded_quantile_range(pooled_coordinates["y"], spatial_view_quantile),
+            "z": spatial_zlim
+            or padded_quantile_range(pooled_coordinates["z"], spatial_view_quantile),
+        }
+        spatial_ranges[profile_id] = group_ranges
+        spatial_outside_counts[profile_id] = {}
+        spatial_point_counts[profile_id] = {}
+        spatial_profile_event_counts[profile_id] = int(len(frame))
+        group_label = "/".join(slit_ids)
+        for column_index, (horizontal, projection) in enumerate((('x', 'xz'), ('y', 'yz'))):
+            axis = axes[row_index, column_index]
+            horizontal_range = group_ranges[horizontal]
+            z_range = group_ranges["z"]
+            for scatter_name, color, zorder in (
+                ("first", "#0072B2", 1),
+                ("last", "#D55E00", 2),
+            ):
+                horizontal_values = frame[
+                    f"{scatter_name}_scatter_{horizontal}"
+                ].to_numpy(dtype=float)
+                z_values = frame[f"{scatter_name}_scatter_z"].to_numpy(dtype=float)
+                outside = ~(
+                    (horizontal_values >= horizontal_range[0])
+                    & (horizontal_values <= horizontal_range[1])
+                    & (z_values >= z_range[0])
+                    & (z_values <= z_range[1])
                 )
-                axis.axvline(
-                    SLIT_DESIGN_DEPTH_MM[slit_id], color=color,
-                    linestyle="--", linewidth=.9, alpha=.55,
+                key = f"{scatter_name}_{projection}"
+                spatial_outside_counts[profile_id][key] = int(outside.sum())
+                spatial_point_counts[profile_id][key] = int(len(horizontal_values))
+                axis.scatter(
+                    horizontal_values,
+                    z_values,
+                    s=2,
+                    alpha=0.12,
+                    color=color,
+                    label=f"{scatter_name.capitalize()} scatter",
+                    zorder=zorder,
+                    rasterized=True,
                 )
-            axis.set_ylabel("Normalized count")
-            axis.set_title(f"({chr(ord('a') + panel_index)}) {category}")
-            axis.grid(alpha=.2)
-        axes[0].legend(ncol=6, loc="upper right")
-        axes[-1].set(
-            xlabel="Track-local first-scatter depth z (mm)", xlim=E1_DEPTH_RANGE_MM
-        )
-        save_figure(
-            fig,
-            figures / f"E1_depth_response_{int(bin_width)}mm",
-            include_pdf=False,
-        )
+            axis.set(
+                xlim=horizontal_range,
+                ylim=z_range,
+                xlabel=f"{horizontal} (mm)",
+                ylabel="z (mm)",
+                title=(
+                    f"({chr(ord('a') + panel_index)}) {group_label} ({profile_id}) "
+                    f"{horizontal}-z"
+                ),
+            )
+            axis.legend(loc="upper right", fontsize=8, markerscale=2.5)
+            panel_index += 1
+    fig.suptitle("E1-F3  All-valid-events first/last scatter overlay")
+    _save_png(fig, figures / FIGURE_NAMES[2])
 
-    fixed_regions = {
-        profile_id: [
-            {
-                "slit_id": region.slit_id,
+    for profile_id, slit_ids in acquisition_groups:
+        for projection in ("xz", "yz"):
+            print(
+                f"E1-F3 {profile_id} {'/'.join(slit_ids)} {projection} outside displayed view: "
+                f"first={spatial_outside_counts[profile_id][f'first_{projection}']}, "
+                f"last={spatial_outside_counts[profile_id][f'last_{projection}']}"
+            )
+
+    return {
+        "input_files": input_files,
+        "all_valid_event_count": int(len(all_events)),
+        "roi_total_counts": roi_counts,
+        "acquisition_groups": {
+            profile_id: list(slit_ids) for profile_id, slit_ids in acquisition_groups
+        },
+        "profile_normalized_sums": {
+            slit_id: float((counts / counts.sum()).sum()) for slit_id, counts in profile_counts.items()
+        },
+        "detector_group_x_ranges_mm": detector_group_x_ranges,
+        "spatial_view_quantile": [float(value) for value in spatial_view_quantile],
+        "spatial_manual_limits": {
+            "x_mm": list(spatial_xlim) if spatial_xlim is not None else None,
+            "y_mm": list(spatial_ylim) if spatial_ylim is not None else None,
+            "z_mm": list(spatial_zlim) if spatial_zlim is not None else None,
+        },
+        "spatial_view_ranges_mm": {
+            profile_id: {
+                f"{coordinate}_mm": [float(value) for value in group_ranges[coordinate]]
+                for coordinate in ("x", "y", "z")
+            }
+            for profile_id, group_ranges in spatial_ranges.items()
+        },
+        "spatial_profile_event_counts": spatial_profile_event_counts,
+        "spatial_point_counts": spatial_point_counts,
+        "spatial_outside_view_counts": spatial_outside_counts,
+        "fixed_regions": {
+            slit_id: {
                 "x_range_mm": [region.x_min_mm, region.x_max_mm],
                 "y_range_mm": [region.y_min_mm, region.y_max_mm],
             }
-            for region in acceptance_regions_for_profile(profile_id)
-        ]
-        for profile_id in PROFILE_SLITS
+            for slit_id, region in regions_by_slit.items()
+        },
     }
-    write_manifest(root, "E1", {
-        "input_source": "audited valid-event CSV selected by condition inventory",
-        "input_layer": "events/valid",
-        "input_files": input_files,
-        "valid_events_manifest": "events/valid/valid_events_manifest.yaml",
-        "phantom_id": "P0",
-        "scan_mode": "center",
-        "slit_identity_column": "slit_label",
-        "slit_identity_rule": "use existing slit_label; never derive or reassign from detector position",
-        "depth_bin_widths_mm": list(E1_BIN_WIDTHS_MM),
-        "depth_range_mm": list(E1_DEPTH_RANGE_MM),
-        "depth_interval_rule": "left-closed-right-open",
-        "normalization": "independent integral normalization within each slit and scatter class",
-        "zero_denominator_rule": "NaN",
-        "poisson_statistics": {
-            "sigma": "sqrt(raw_count)",
-            "relative_error": "1/sqrt(raw_count); NaN when raw_count is zero",
-        },
-        "peak_tie_rule": "shallowest maximum bin center",
-        "roi_interval_rule": "closed in detector x and y",
-        "roi_selection_rule": "existing slit_label AND fixed geometry ROI",
-        "fixed_acceptance_regions": fixed_regions,
-        "design_depth_mm": SLIT_DESIGN_DEPTH_MM,
-        "design_depth_region_rule": "left-closed-right-open: depth-5 <= first_scatter_z < depth+5",
-        "count_unit": "detected gamma hit",
-        "scatter_classes": {
-            "total": "scatter_count_total >= 1",
-            "k1": "scatter_count_total == 1",
-            "ms": "scatter_count_total >= 2",
-        },
-        "scatter_history": "track-local; secondary gamma does not inherit parent history",
-        "figure_formats": ["png"],
-        "data_quality": {
-            "total_equals_k1_plus_ms": True,
-            "slit_group_and_label_validation": True,
-            "histogram_outside_range_count_by_slit_class": outside_range_counts,
-        },
-    }, ctx.warnings)
 
 
-def write_report(root: Path, warnings: list[str]) -> None:
-    counts = pd.read_csv(root / "tables" / "E1_event_counts.csv")
+def write_report(root: Path, summary: dict[str, Any], warnings: list[str]) -> None:
     lines = [
         "# Article V2 E1 Analysis Results",
         "",
-        "## Outputs",
+        "E1 completed with the frozen three-figure paper contract.",
         "",
-        "| Design item | Artifact |",
-        "|---|---|",
-        "| Detector plane distribution | `figures/E1_detector_plane_distribution.png` |",
-        "| Normalized depth response (2 mm) | `figures/E1_depth_response_2mm.png` |",
-        "| Normalized depth response (4 mm) | `figures/E1_depth_response_4mm.png` |",
-        "",
-        "## Event counts",
-        "",
-        "| Slit | Design depth (mm) | total | k1 | MS | k1 fraction | MS fraction |",
-        "|---|---:|---:|---:|---:|---:|---:|",
-    ]
-    for row in counts.itertuples(index=False):
-        lines.append(
-            f"| {row.slit} | {row.design_depth_mm:g} | {row.total_count} | "
-            f"{row.k1_count} | {row.ms_count} | {row.k1_fraction:.6g} | "
-            f"{row.ms_fraction:.6g} |"
-        )
-    valid = bool((counts.total_count == counts.k1_count + counts.ms_count).all())
-    lines.extend([
-        "",
-        f"E1 event-accounting checks: **{'pass' if valid else 'fail'}**.",
+        f"- All valid P0 center events: {summary['all_valid_event_count']}",
+        f"- ROI-selected total counts: {summary['roi_total_counts']}",
+        "- Depth profiles: 2 mm bins over 0–220 mm, independently normalized by slit.",
+        "- Detector plane: P002 S1/S3/S5 and P001 S2/S4/S6 are shown in separate panels.",
+        "- Spatial overlay: the same two acquisition groups form the rows of a 2×2 figure.",
+        f"- Spatial view ranges (mm): {summary['spatial_view_ranges_mm']}",
+        f"- Spatial points outside displayed views: {summary['spatial_outside_view_counts']}",
+        "- Spatial limits affect display only; every valid first/last point is retained.",
+        "- Figures: PNG only; no E1 result tables are produced.",
         "",
         "## Warnings",
         "",
-    ])
+    ]
     lines.extend([f"- {item}" for item in warnings] if warnings else ["- None."])
     lines.append("")
     (root / "report.md").write_text("\n".join(lines), encoding="utf-8")
 
 
-def validate_generated_outputs(root: Path) -> dict[str, Any]:
-    expected_files = {
-        "analysis_manifest.yaml",
-        "report.md",
-        "tables/E1_event_counts.csv",
-        "tables/E1_depth_profiles_2mm.csv",
-        "tables/E1_depth_profiles_4mm.csv",
-        "tables/E1_peak_summary.csv",
-        "tables/E1_design_depth_fraction.csv",
-        "tables/E1_binning_comparison.csv",
-        "figures/E1_detector_plane_distribution.png",
-        "figures/E1_depth_response_2mm.png",
-        "figures/E1_depth_response_4mm.png",
-    }
-    actual_files = {
-        path.relative_to(root).as_posix()
-        for path in root.rglob("*")
-        if path.is_file()
-    }
-    checks: dict[str, Any] = {
-        "E1_output_contract": {
-            "actual": sorted(actual_files),
-            "expected": sorted(expected_files),
-            "pass": actual_files == expected_files,
-        }
-    }
-
-    counts = pd.read_csv(root / "tables" / "E1_event_counts.csv")
-    fractions = counts.k1_fraction + counts.ms_fraction
-    conservation = bool(
-        len(counts) == 6
-        and set(counts.slit) == {f"S{index}" for index in range(1, 7)}
-        and (counts.total_count == counts.k1_count + counts.ms_count).all()
-        and np.allclose(fractions[counts.total_count > 0], 1.0)
+def validate_generated_outputs(root: Path, summary: dict[str, Any]) -> dict[str, Any]:
+    figure_dir = root / "figures"
+    actual_figures = {path.name for path in figure_dir.iterdir() if path.is_file()}
+    expected_figures = set(FIGURE_NAMES)
+    normalized = all(
+        math.isclose(value, 1.0, rel_tol=0, abs_tol=1e-12)
+        for value in summary["profile_normalized_sums"].values()
     )
-    checks["E1_event_accounting"] = {
-        "actual": conservation,
-        "expected": True,
-        "pass": conservation,
-    }
-
-    for width, expected_rows, expected_bins in ((2, 1980, 110), (4, 990, 55)):
-        data = pd.read_csv(root / f"tables/E1_depth_profiles_{width}mm.csv")
-        bins = data[["bin_left_mm", "bin_right_mm"]].drop_duplicates().sort_values(
-            "bin_left_mm"
+    spatial_counts = summary["spatial_point_counts"]
+    profile_event_counts = summary["spatial_profile_event_counts"]
+    spatial_accounting = bool(spatial_counts) and set(spatial_counts) == set(profile_event_counts)
+    if spatial_accounting:
+        spatial_accounting = all(
+            set(counts) == {"first_xz", "last_xz", "first_yz", "last_yz"}
+            and all(value == profile_event_counts[profile_id] for value in counts.values())
+            for profile_id, counts in spatial_counts.items()
         )
-        groups = data.groupby(["slit", "scatter_class"], sort=False)
-        group_totals = groups.raw_count.sum()
-        normalized_sums = groups.normalized_count.sum(min_count=1)
-        histogram_valid = bool(
-            len(data) == expected_rows
-            and len(bins) == expected_bins
-            and bins.bin_left_mm.iloc[0] == E1_DEPTH_RANGE_MM[0]
-            and bins.bin_right_mm.iloc[-1] == E1_DEPTH_RANGE_MM[1]
-            and np.allclose((bins.bin_right_mm - bins.bin_left_mm).to_numpy(), width)
-        )
-        normalized = bool(
-            len(group_totals) == 18
-            and (group_totals > 0).all()
-            and np.allclose(normalized_sums.to_numpy(), 1.0)
-        )
-        positive = data.raw_count > 0
-        poisson = bool(
-            np.allclose(data.poisson_sigma, np.sqrt(data.raw_count))
-            and data.loc[~positive, "relative_poisson_error"].isna().all()
-            and np.allclose(
-                data.loc[positive, "relative_poisson_error"],
-                1.0 / np.sqrt(data.loc[positive, "raw_count"]),
-            )
-        )
-        checks[f"E1_{width}mm_histogram"] = {
-            "actual": {"rows": len(data), "bins": len(bins)},
-            "expected": {"rows": expected_rows, "bins": expected_bins},
-            "pass": histogram_valid,
-        }
-        checks[f"E1_{width}mm_normalization"] = {
-            "actual": normalized,
+    checks = {
+        "E1_figure_contract": {
+            "actual": sorted(actual_figures),
+            "expected": sorted(expected_figures),
+            "pass": actual_figures == expected_figures,
+        },
+        "E1_png_only": {
+            "actual": not any(path.suffix.lower() == ".pdf" for path in root.rglob("*")),
             "expected": True,
+            "pass": not any(path.suffix.lower() == ".pdf" for path in root.rglob("*")),
+        },
+        "E1_no_result_tables": {
+            "actual": not (root / "tables").exists(),
+            "expected": True,
+            "pass": not (root / "tables").exists(),
+        },
+        "E1_six_roi_profiles": {
+            "actual": sorted(summary["roi_total_counts"]),
+            "expected": list(SLIT_IDS),
+            "pass": set(summary["roi_total_counts"]) == set(SLIT_IDS)
+            and all(value > 0 for value in summary["roi_total_counts"].values()),
+        },
+        "E1_profile_normalization": {
+            "actual": summary["profile_normalized_sums"],
+            "expected": {slit_id: 1.0 for slit_id in SLIT_IDS},
             "pass": normalized,
-        }
-        checks[f"E1_{width}mm_poisson"] = {
-            "actual": poisson,
-            "expected": True,
-            "pass": poisson,
-        }
-
-    peaks = pd.read_csv(root / "tables" / "E1_peak_summary.csv")
-    design = pd.read_csv(root / "tables" / "E1_design_depth_fraction.csv")
-    comparison = pd.read_csv(root / "tables" / "E1_binning_comparison.csv")
-    summary_valid = bool(
-        len(peaks) == 36
-        and set(peaks.bin_width_mm) == {2.0, 4.0}
-        and len(design) == 18
-        and np.allclose(design.region_left_mm, design.design_depth_mm - 5.0)
-        and np.allclose(design.region_right_mm, design.design_depth_mm + 5.0)
-        and len(comparison) == 18
-        and np.allclose(
-            comparison.peak_shift_mm,
-            comparison.peak_4mm - comparison.peak_2mm,
-            equal_nan=True,
-        )
-    )
-    checks["E1_summary_contract"] = {
-        "actual": summary_valid,
-        "expected": True,
-        "pass": summary_valid,
+        },
+        "E1_spatial_event_accounting": {
+            "actual": spatial_counts,
+            "expected": {
+                profile_id: {
+                    key: event_count
+                    for key in ("first_xz", "last_xz", "first_yz", "last_yz")
+                }
+                for profile_id, event_count in profile_event_counts.items()
+            },
+            "pass": spatial_accounting,
+        },
+        "E1_acquisition_group_panels": {
+            "actual": summary["acquisition_groups"],
+            "expected": {"P002": ["S1", "S3", "S5"], "P001": ["S2", "S4", "S6"]},
+            "pass": summary["acquisition_groups"]
+            == {"P002": ["S1", "S3", "S5"], "P001": ["S2", "S4", "S6"]},
+        },
     }
     passed = all(item["pass"] for item in checks.values())
     result = {"overall_status": "pass" if passed else "fail", "checks": checks}
@@ -667,31 +660,85 @@ def relative_to_campaign(path: Path, results_root: Path) -> str:
         return path.resolve().as_posix()
 
 
-def run_analysis(results_root: Path, audit_dir: Path, output_dir: Path) -> None:
+def write_manifest(
+    root: Path,
+    results_root: Path,
+    audit_dir: Path,
+    summary: dict[str, Any],
+    warnings: list[str],
+) -> None:
+    outputs = sorted(
+        path.relative_to(root).as_posix()
+        for path in root.rglob("*")
+        if path.is_file() and path.name != "analysis_manifest.yaml"
+    )
+    data = {
+        "schema_version": 2,
+        "analysis": "articlev2_e1_paper_figures",
+        "experiment": "E1",
+        "results_root": ".",
+        "audit_summary": relative_to_campaign(audit_dir / "audit_summary.yaml", results_root),
+        "parameters": {
+            "input_layer": "events/valid",
+            "input_files": summary["input_files"],
+            "phantom_id": "P0",
+            "scan_mode": "center",
+            "slit_identity_rule": "validate recorded slit_label; select inside fixed closed detector ROI",
+            "depth_bin_width_mm": E1_DEPTH_BIN_WIDTH_MM,
+            "depth_range_mm": list(E1_DEPTH_RANGE_MM),
+            "depth_normalization": "independent integral normalization for each slit total profile",
+            "detector_group_view_rule": "pooled central 99 percent plus every group ROI and 3 percent padding",
+            "acquisition_groups": summary["acquisition_groups"],
+            "detector_group_x_ranges_mm": summary["detector_group_x_ranges_mm"],
+            "spatial_rendering": "rasterized first/last scatter overlay",
+            "spatial_view_quantile": summary["spatial_view_quantile"],
+            "spatial_manual_limits": summary["spatial_manual_limits"],
+            "spatial_view_ranges_mm": summary["spatial_view_ranges_mm"],
+            "spatial_view_padding_fraction": VIEW_PADDING_FRACTION,
+            "fixed_acceptance_regions": summary["fixed_regions"],
+            "figure_formats": ["png"],
+            "formal_figure_count": len(FIGURE_NAMES),
+            "formal_table_count": 0,
+        },
+        "data_quality": {
+            "all_valid_event_count": summary["all_valid_event_count"],
+            "roi_total_counts": summary["roi_total_counts"],
+            "profile_normalized_sums": summary["profile_normalized_sums"],
+            "spatial_profile_event_counts": summary["spatial_profile_event_counts"],
+            "spatial_point_counts": summary["spatial_point_counts"],
+            "spatial_outside_view_counts": summary["spatial_outside_view_counts"],
+        },
+        "warnings": warnings,
+        "outputs": outputs,
+    }
+    (root / "analysis_manifest.yaml").write_text(
+        yaml.safe_dump(data, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
+
+
+def run_analysis(
+    results_root: Path,
+    audit_dir: Path,
+    output_dir: Path,
+    *,
+    spatial_view_quantile: tuple[float, float] = DEFAULT_SPATIAL_VIEW_QUANTILE,
+    spatial_xlim: tuple[float, float] | None = None,
+    spatial_ylim: tuple[float, float] | None = None,
+    spatial_zlim: tuple[float, float] | None = None,
+) -> None:
     audit, inventory = validate_audit(audit_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     context = AnalysisContext(results_root, audit_dir, output_dir, inventory, audit)
-    run_e1(context)
-    write_report(output_dir, context.warnings)
-    validate_generated_outputs(output_dir)
-    manifest_path = output_dir / "analysis_manifest.yaml"
-    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-    manifest.update({
-        "schema_version": 1,
-        "analysis": "articlev2_e1_depth_response",
-        "results_root": ".",
-        "audit_summary": relative_to_campaign(
-            audit_dir / "audit_summary.yaml", results_root
-        ),
-        "outputs": sorted(
-            path.relative_to(output_dir).as_posix()
-            for path in output_dir.rglob("*")
-            if path.is_file() and path != manifest_path
-        ),
-    })
-    manifest_path.write_text(
-        yaml.safe_dump(manifest, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    summary = run_e1(
+        context,
+        spatial_view_quantile=spatial_view_quantile,
+        spatial_xlim=spatial_xlim,
+        spatial_ylim=spatial_ylim,
+        spatial_zlim=spatial_zlim,
     )
+    write_report(output_dir, summary, context.warnings)
+    validate_generated_outputs(output_dir, summary)
+    write_manifest(output_dir, results_root, audit_dir, summary, context.warnings)
 
 
 def publish(staging: Path, output_dir: Path, overwrite: bool) -> None:
@@ -723,6 +770,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--results-root", type=Path, required=True)
     parser.add_argument("--audit-dir", type=Path)
     parser.add_argument("--output-dir", type=Path)
+    parser.add_argument(
+        "--spatial-view-quantile",
+        nargs=2,
+        type=float,
+        metavar=("LOW", "HIGH"),
+        default=DEFAULT_SPATIAL_VIEW_QUANTILE,
+    )
+    parser.add_argument("--spatial-xlim", nargs=2, type=float, metavar=("LOW", "HIGH"))
+    parser.add_argument("--spatial-ylim", nargs=2, type=float, metavar=("LOW", "HIGH"))
+    parser.add_argument("--spatial-zlim", nargs=2, type=float, metavar=("LOW", "HIGH"))
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args(argv)
 
@@ -730,12 +787,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     results_root = args.results_root.resolve()
-    audit_dir = (
-        args.audit_dir or results_root / "data_processing" / "audit"
-    ).resolve()
-    output_dir = (
-        args.output_dir or results_root / "postprocessing" / "E1"
-    ).resolve()
+    audit_dir = (args.audit_dir or results_root / "data_processing" / "audit").resolve()
+    output_dir = (args.output_dir or results_root / "postprocessing" / "E1").resolve()
     protected = {
         results_root,
         (results_root / "events").resolve(),
@@ -747,17 +800,21 @@ def main(argv: list[str] | None = None) -> int:
     if output_dir.exists() and not args.overwrite:
         raise FileExistsError(f"output directory exists; pass --overwrite: {output_dir}")
     output_dir.parent.mkdir(parents=True, exist_ok=True)
-    staging = Path(
-        tempfile.mkdtemp(prefix=f".{output_dir.name}.staging-", dir=output_dir.parent)
-    )
+    staging = Path(tempfile.mkdtemp(prefix=f".{output_dir.name}.staging-", dir=output_dir.parent))
     try:
-        run_analysis(results_root, audit_dir, staging)
+        run_analysis(
+            results_root,
+            audit_dir,
+            staging,
+            spatial_view_quantile=tuple(args.spatial_view_quantile),
+            spatial_xlim=tuple(args.spatial_xlim) if args.spatial_xlim else None,
+            spatial_ylim=tuple(args.spatial_ylim) if args.spatial_ylim else None,
+            spatial_zlim=tuple(args.spatial_zlim) if args.spatial_zlim else None,
+        )
         publish(staging, output_dir, args.overwrite)
     except Exception:
         shutil.rmtree(staging, ignore_errors=True)
         raise
-    event_counts = pd.read_csv(output_dir / "tables" / "E1_event_counts.csv")
-    print(event_counts.to_string(index=False))
     print(f"report: {output_dir / 'report.md'}")
     print(f"acceptance: {output_dir / 'acceptance_summary.yaml'}")
     return 0

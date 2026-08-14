@@ -3,11 +3,11 @@
 > 文档状态：articlev2 当前仿真自动化与后处理运行说明。
 > 职责：说明逐 pose 配置生成、队列执行、恢复、结果组织和 profile-aware 后处理链路。
 > 上游：预研实验设计和项目 v2 的 Geant4 核心。
-> 下游：articlev2 有效事件数据层、数据审计和 E1 后处理；项目级导航见 [`project_structure.md`](project_structure.md)。
+> 下游：articlev2 有效事件数据层、数据审计和 E1/E2 后处理；项目级导航见 [`project_structure.md`](project_structure.md)。
 
 ## 1. 目的与边界
 
-本文说明 `docs/simulation_experiment_design_v2.md` 中当前 articlev2 P0–P9 源项响应实验的配置生成、队列执行、数据清洗、审计和 E1 后处理方式。
+本文说明当前 articlev2 P0–P9 源项响应实验的配置生成、队列执行、数据清洗、审计和 E1/E2 后处理方式。分析科学问题与图表合同分别见 `simulation_experiment_design_v3.md` 和 `articlev2_analysis/`。
 
 核心工具为：
 
@@ -19,6 +19,7 @@
 - `scripts/data_processing/audit_experiment_data.py`
 - `scripts/postprocessing/e1/run.py`
 - `scripts/postprocessing/e1/analyze_roi_sensitivity.py`
+- `scripts/postprocessing/e2/run.py`
 
 前者把固定的物理条件和扫描设计展开为逐 pose YAML，并生成统一的 `manifest.yaml`；后者读取 manifest，逐项调用现有 `MSS` 程序，并负责 dry-run、完成检测、状态保存和任务恢复。
 
@@ -30,14 +31,15 @@
 - 队列状态保存、恢复、失败处理和分片；
 - 每个 pose 的原始事件级输出组织；
 - 有效深度事件清洗、固定 S1–S6 channel 标签和数据资格审计；
-- E1 正式分析和 ROI 敏感性分析；
-- E2/E3 预留接口和未迁移源码快照的边界。
+- E1 正式三图分析和 ROI 敏感性分析；
+- E2 默认四图两表、显式多 case depth-bin 分析及 partial grid 预览；
+- E3 预留接口和未迁移源码快照的边界。
 
 本文不定义：
 
 - 正式 Monte Carlo 结果的物理解释；
 - 跨 pose CSV 合并；
-- 尚未实现的 E2/E3 论文统计指标。
+- 尚未冻结的 E3 source-truth imaging utility 指标。
 
 所有命令默认从仓库根目录执行。
 
@@ -555,9 +557,8 @@ results/articlev2/
 └── postprocessing/
     ├── E1/
     │   ├── figures/
-    │   ├── tables/
     │   ├── roi_sensitivity/
-    │   └── archive/analysis_v2/
+    │   └── archive/
     ├── E2/
     └── E3/
 ```
@@ -582,25 +583,36 @@ python -m scripts.data_processing.audit_experiment_data \
 
 默认输出分别位于 `events/valid/` 和 `data_processing/audit/`。目标目录已有内容时必须显式传入 `--overwrite`，发布过程使用临时目录和原子替换，避免留下半成品。
 
-## 14. E1 后处理与预留实验
+## 14. E1/E2 后处理与 E3 预留
 
 E1 默认读取审计结果，只处理当前正式 E1 数据：
 
 ```bash
-python -m scripts.postprocessing.e1.run \
-  --results-root results/articlev2
+conda run -n data python -m scripts.postprocessing.e1.run \
+  --results-root results/articlev2 \
+  --overwrite
 ```
 
-结果写入 `postprocessing/E1/`，包含 figures、tables、manifest、report 和 acceptance summary。覆盖已有正式输出时使用 `--overwrite`；同目录中的 `roi_sensitivity/` 和 `archive/` 会被保留。
+结果写入 `postprocessing/E1/`，正式内容为三张 PNG 以及 manifest、report 和 acceptance summary；E1-F3 按 P002 S1/S3/S5 与 P001 S2/S4/S6 分为 2×2 panels。不生成 E1 常规表或 PDF，覆盖时同目录中的 `roi_sensitivity/` 和 `archive/` 会被保留。
 
 ROI 敏感性分析独立运行：
 
 ```bash
-python -m scripts.postprocessing.e1.analyze_roi_sensitivity \
+conda run -n data python -m scripts.postprocessing.e1.analyze_roi_sensitivity \
   --results-root results/articlev2
 ```
 
-E2/E3 当前只有目录、README 和输入输出约定，后续必须基于 `events/valid/` 与 `slit_label` 实现。`scripts/postprocessing/_archive/` 仅保存未迁移旧 schema 源码，不是正式入口，也不维护测试。
+E2 默认生成四图两表，并可用重复 `--case BASELINE:DEFECT:SLIT:SCATTER_CLASS` 显式生成多个 depth-bin resolved case；图名携带 case/class，同一比较的 E2-T2 只生成一次。当前 campaign 只有 P2-S2、P4-S4、P6-S6 的完整 grid pair，使用以下命令生成明确标记为 `partial` 的 3×4 预览及默认 P4-S4 total 结果：
+
+```bash
+conda run -n data python -m scripts.postprocessing.e2.run \
+  --results-root results/articlev2 \
+  --case P0:P4:S4:total \
+  --allow-partial-grid \
+  --overwrite
+```
+
+`--min-baseline-count` 可显式屏蔽低 baseline-count bins；默认只将零分母设为 NaN。F2/F3/F4 与 E2-T2 的 bin width 由 `run_e2(..., depth_bin_width_mm=...)` 和脚本顶部 2 mm 默认值统一控制，不另设 CLI。缺失的 P0/P1/P3/P5 × P002 grid 共 324 poses 未包含在当前 341-task campaign 中，也不会由后处理补造。完整数据到位后去掉 `--allow-partial-grid` 运行严格验收。E3 仍为待设计接口；`scripts/postprocessing/_archive/` 不是正式入口，也不维护测试。
 
 ## 15. 测试与验收
 
@@ -610,4 +622,4 @@ E2/E3 当前只有目录、README 和输入输出约定，后续必须基于 `ev
 conda run -n data python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-正式验收还应确认生成器得到 341 个唯一任务、seed 为 1234–1574，审计 `error_count = 0`，以及 E1 acceptance 为 pass。本轮代码与数据结构整改不要求重新运行昂贵的 Geant4 正式仿真。
+正式验收还应确认生成器得到 341 个唯一任务、seed 为 1234–1574，审计 `error_count = 0`，E1 acceptance 为 `pass`，且当前 E2 acceptance 为带 324 个缺失 poses 记录的 `partial`。本轮不重新运行昂贵的 Geant4 正式仿真。

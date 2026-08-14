@@ -4,196 +4,203 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-
 from scripts.postprocessing.e1 import run as analysis
 
 
-class ArticleV2AnalysisPipelineTests(unittest.TestCase):
-    def test_e1_depth_bins_and_design_depths(self):
-        self.assertEqual((0.0, 220.0), analysis.E1_DEPTH_RANGE_MM)
-        self.assertEqual((2.0, 4.0), analysis.E1_BIN_WIDTHS_MM)
-        self.assertEqual(110, len(analysis.e1_depth_edges(2.0)) - 1)
-        self.assertEqual(55, len(analysis.e1_depth_edges(4.0)) - 1)
-        self.assertTrue(np.allclose(np.diff(analysis.e1_depth_edges(2.0)), 2.0))
-        self.assertTrue(np.allclose(np.diff(analysis.e1_depth_edges(4.0)), 4.0))
-        self.assertEqual(
-            {f"S{index}": float(index * 15) for index in range(1, 7)},
-            analysis.SLIT_DESIGN_DEPTH_MM,
-        )
-
-    def test_e1_valid_label_roi_outputs_and_statistics(self):
-        class FakeContext:
-            def __init__(self, output_root: Path):
-                self.output_root = output_root
-                self.results_root = output_root / "results"
-                self.warnings = []
-                self.profiles = {}
-                for profile, slits in analysis.PROFILE_SLITS.items():
-                    rows = []
-                    for slit in slits:
-                        region = next(
-                            item for item in analysis.acceptance_regions_for_profile(profile)
-                            if item.slit_id == slit
-                        )
-                        own_x = (region.x_min_mm + region.x_max_mm) / 2
-                        other = next(item for item in analysis.acceptance_regions_for_profile(profile)
-                                     if item.slit_id != slit)
-                        other_x = (other.x_min_mm + other.x_max_mm) / 2
-                        depth = analysis.SLIT_DESIGN_DEPTH_MM[slit]
-                        rows.extend([
-                            {"det_x": own_x, "det_y": 0, "scatter_count_total": 0,
-                             "first_scatter_z": 1.0, "slit_group": profile, "slit_label": slit},
-                            {"det_x": own_x, "det_y": 0, "scatter_count_total": 1,
-                             "first_scatter_z": depth - 5.0, "slit_group": profile, "slit_label": slit},
-                            {"det_x": own_x, "det_y": 0, "scatter_count_total": 2,
-                             "first_scatter_z": depth + 5.0, "slit_group": profile, "slit_label": slit},
-                            {"det_x": own_x, "det_y": 0, "scatter_count_total": 2,
-                             "first_scatter_z": depth + 4.999, "slit_group": profile, "slit_label": slit},
-                            {"det_x": other_x, "det_y": 0, "scatter_count_total": 1,
-                             "first_scatter_z": depth, "slit_group": profile, "slit_label": slit},
-                            {"det_x": own_x, "det_y": 0, "scatter_count_total": 1,
-                             "first_scatter_z": 221.0, "slit_group": profile, "slit_label": slit},
-                        ])
-                    self.profiles[profile] = pd.DataFrame(rows)
-
-            def run_row(self, mode, phantom, profile, x=0, y=0):
-                return profile
-
-            def valid_events(self, row):
-                return self.profiles[row].copy()
-
-            def valid_event_path(self, row):
-                return self.results_root / f"events/valid/{row}/events_valid.csv"
-
-            def valid_metadata(self, row):
-                x_range = [20, 127] if row == "P001" else [11, 101]
-                return SimpleNamespace(
-                    scan_mode="center", phantom_id="P0", profile_id=row,
-                    head_offset_x_mm=0, head_offset_y_mm=0,
-                    metadata_path=Path(f"/valid/{row}/metadata.yaml"),
-                    raw={"detector": {
-                        "actual_x_range_mm": x_range,
-                        "actual_y_range_mm": [-100, 100],
-                    }},
+class FakeE1Context:
+    def __init__(self, output_root: Path):
+        self.output_root = output_root
+        self.results_root = output_root / "results"
+        self.warnings: list[str] = []
+        self.profiles: dict[str, pd.DataFrame] = {}
+        for profile, slits in analysis.PROFILE_SLITS.items():
+            rows = []
+            for slit in slits:
+                region = next(
+                    item
+                    for item in analysis.acceptance_regions_for_profile(profile)
+                    if item.slit_id == slit
                 )
+                detector_x = (region.x_min_mm + region.x_max_mm) / 2
+                depth = analysis.SLIT_DESIGN_DEPTH_MM[slit]
+                for scatter, delta in ((1, -1.0), (2, 1.0), (3, 3.0)):
+                    rows.append(
+                        {
+                            "det_x": detector_x,
+                            "det_y": float(scatter),
+                            "scatter_count_total": scatter,
+                            "first_scatter_x": float(scatter),
+                            "first_scatter_y": float(-scatter),
+                            "first_scatter_z": depth + delta,
+                            "last_scatter_x": float(scatter * 4),
+                            "last_scatter_y": float(-scatter * 5),
+                            "last_scatter_z": depth + delta + 10,
+                            "slit_group": profile,
+                            "slit_label": slit,
+                        }
+                    )
+            self.profiles[profile] = pd.DataFrame(rows)
 
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            analysis.run_e1(FakeContext(root))
-            counts = pd.read_csv(root / "tables/E1_event_counts.csv")
-            profiles_2mm = pd.read_csv(root / "tables/E1_depth_profiles_2mm.csv")
-            profiles_4mm = pd.read_csv(root / "tables/E1_depth_profiles_4mm.csv")
-            peaks = pd.read_csv(root / "tables/E1_peak_summary.csv")
-            fractions = pd.read_csv(root / "tables/E1_design_depth_fraction.csv")
-            comparison = pd.read_csv(root / "tables/E1_binning_comparison.csv")
-            self.assertEqual(6, len(counts))
-            self.assertTrue((counts.total_count == 4).all())
-            self.assertTrue((counts.k1_count == 2).all())
-            self.assertTrue((counts.ms_count == 2).all())
-            self.assertTrue(np.allclose(counts.k1_fraction, .5))
-            self.assertTrue(np.allclose(counts.ms_fraction, .5))
-            self.assertEqual((1980, 990), (len(profiles_2mm), len(profiles_4mm)))
-            self.assertEqual((36, 18, 18), (len(peaks), len(fractions), len(comparison)))
-            for profiles in (profiles_2mm, profiles_4mm):
-                sums = profiles.groupby(["slit", "scatter_class"]).normalized_count.sum()
-                self.assertTrue(np.allclose(sums, 1.0))
-                zero = profiles.raw_count == 0
-                self.assertTrue(profiles.loc[zero, "relative_poisson_error"].isna().all())
-                self.assertTrue(np.allclose(profiles.poisson_sigma, np.sqrt(profiles.raw_count)))
-            sample = fractions[(fractions.slit == "S1") & (fractions.scatter_class == "k1")].iloc[0]
-            self.assertEqual((10.0, 20.0, 1, 2), (
-                sample.region_left_mm, sample.region_right_mm,
-                sample.region_count, sample.class_total_count,
-            ))
-            self.assertAlmostEqual(.5, sample.region_fraction)
-            analysis.write_report(root, [])
-            acceptance = analysis.validate_generated_outputs(root)
-            self.assertEqual("pass", acceptance["overall_status"])
-            self.assertTrue((root / "report.md").is_file())
-            expected_figures = {
-                "E1_detector_plane_distribution.png",
-                "E1_depth_response_2mm.png",
-                "E1_depth_response_4mm.png",
-            }
-            self.assertEqual(expected_figures, {path.name for path in (root / "figures").iterdir()})
+    def run_row(self, mode, phantom, profile, x=0, y=0):
+        return profile
 
-        for column, value, message in (
-            ("slit_group", "P002", "slit_group must equal profile P001"),
-            ("slit_label", "S1", "slit_label must be one of"),
-        ):
-            with self.subTest(column=column), tempfile.TemporaryDirectory() as tmp:
-                context = FakeContext(Path(tmp))
-                context.profiles["P001"].loc[0, column] = value
-                with self.assertRaisesRegex(ValueError, message):
-                    analysis.run_e1(context)
+    def valid_events(self, row):
+        return self.profiles[row].copy()
 
-    def test_e1_roi_requires_existing_label_and_closed_boundaries(self):
-        regions = analysis.acceptance_regions_for_profile("P002")
-        first = regions[0]
-        frame = pd.DataFrame({
-            "det_x": [first.x_min_mm, first.x_max_mm, first.x_min_mm, first.x_min_mm - .01],
-            "det_y": [first.y_min_mm, first.y_max_mm, 0, 0],
-            "slit_label": [first.slit_id, first.slit_id, "S3", first.slit_id],
-        })
-        self.assertEqual([True, True, False, False], analysis.e1_roi_mask(frame, first).tolist())
+    def valid_event_path(self, row):
+        return self.results_root / f"events/valid/{row}/events_valid.csv"
 
-    def test_e1_scatter_validation_and_peak_tie_rule(self):
-        frame = pd.DataFrame({"scatter_count_total": [0, 1, 3]})
-        self.assertEqual([0, 1, 3], analysis.e1_scatter_counts(frame).tolist())
-        for invalid in (-1, 1.5, np.nan):
-            with self.subTest(invalid=invalid):
-                with self.assertRaisesRegex(ValueError, "finite non-negative integers"):
-                    analysis.e1_scatter_counts(pd.DataFrame({"scatter_count_total": [invalid]}))
-        self.assertEqual(
-            1.0,
-            analysis.e1_peak_depth(np.array([1., 3., 5.]), np.array([4, 4, 1])),
+    def valid_metadata(self, row):
+        x_range = [20, 127] if row == "P001" else [11, 101]
+        return SimpleNamespace(
+            scan_mode="center",
+            phantom_id="P0",
+            profile_id=row,
+            head_offset_x_mm=0,
+            head_offset_y_mm=0,
+            metadata_path=Path(f"/valid/{row}/metadata.yaml"),
+            raw={
+                "detector": {
+                    "actual_x_range_mm": x_range,
+                    "actual_y_range_mm": [-100, 100],
+                }
+            },
         )
 
-    def test_e1_valid_reader_rejects_missing_and_nonnumeric_columns(self):
+
+class ArticleV2E1AnalysisTests(unittest.TestCase):
+    def test_depth_and_spatial_view_contracts(self):
+        self.assertEqual((0.0, 220.0), analysis.E1_DEPTH_RANGE_MM)
+        self.assertEqual(2.0, analysis.E1_DEPTH_BIN_WIDTH_MM)
+        self.assertEqual(110, len(analysis.depth_edges()) - 1)
+        self.assertTrue(np.allclose(np.diff(analysis.depth_edges()), 2.0))
+        self.assertTrue(
+            np.allclose(
+                analysis.padded_quantile_range(np.array([0.0, 10.0]), (0.0, 1.0)),
+                (-0.3, 10.3),
+            )
+        )
+        self.assertEqual((0.005, 0.995), analysis.validate_quantile((0.005, 0.995)))
+        with self.assertRaisesRegex(ValueError, "0 <= LOW"):
+            analysis.validate_quantile((0.9, 0.1))
+        with self.assertRaisesRegex(ValueError, "LOW < HIGH"):
+            analysis.validate_limit("x", (1.0, 1.0))
+
+    def test_e1_three_figure_contract_and_statistics(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            context = analysis.AnalysisContext(root, root, root / "out", pd.DataFrame(), {})
-            row = SimpleNamespace(valid_file="events_valid.csv")
-            pd.DataFrame({"det_x": [1]}).to_csv(root / row.valid_file, index=False)
-            with self.assertRaisesRegex(ValueError, "missing required E1 columns"):
-                context.valid_events(row)
-            pd.DataFrame({
-                "det_x": ["bad"], "det_y": [0], "scatter_count_total": [1],
-                "first_scatter_z": [1], "slit_group": ["P001"], "slit_label": ["S2"],
-            }).to_csv(root / row.valid_file, index=False)
-            context._valid_cache.clear()
-            with self.assertRaises(ValueError):
-                context.valid_events(row)
+            context = FakeE1Context(root)
+            console = StringIO()
+            with redirect_stdout(console):
+                summary = analysis.run_e1(
+                    context,
+                    spatial_xlim=(0.0, 5.0),
+                    spatial_ylim=(-5.0, 0.0),
+                    spatial_zlim=(0.0, 100.0),
+                )
+            analysis.write_report(root, summary, [])
+            acceptance = analysis.validate_generated_outputs(root, summary)
+            self.assertEqual("pass", acceptance["overall_status"])
+            self.assertEqual(18, summary["all_valid_event_count"])
+            self.assertEqual({slit: 3 for slit in analysis.SLIT_IDS}, summary["roi_total_counts"])
+            self.assertTrue(
+                all(np.isclose(value, 1.0) for value in summary["profile_normalized_sums"].values())
+            )
+            self.assertEqual(
+                {"P002": ["S1", "S3", "S5"], "P001": ["S2", "S4", "S6"]},
+                summary["acquisition_groups"],
+            )
+            for profile_id in ("P002", "P001"):
+                self.assertEqual(
+                    [0.0, 5.0], summary["spatial_view_ranges_mm"][profile_id]["x_mm"]
+                )
+                self.assertEqual(
+                    [-5.0, 0.0], summary["spatial_view_ranges_mm"][profile_id]["y_mm"]
+                )
+                self.assertEqual(
+                    [0.0, 100.0], summary["spatial_view_ranges_mm"][profile_id]["z_mm"]
+                )
+                self.assertEqual(9, summary["spatial_profile_event_counts"][profile_id])
+                self.assertTrue(
+                    all(
+                        value == 9
+                        for value in summary["spatial_point_counts"][profile_id].values()
+                    )
+                )
+            self.assertIn("outside displayed view", console.getvalue())
+            self.assertFalse((root / "tables").exists())
+            self.assertEqual(
+                set(analysis.FIGURE_NAMES),
+                {path.name for path in (root / "figures").iterdir()},
+            )
+            self.assertFalse(any(path.suffix == ".pdf" for path in root.rglob("*")))
 
-    def test_event_classes_partition_total(self):
+    def test_e1_f3_uses_independent_group_quantile_ranges(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            context = FakeE1Context(root)
+            with redirect_stdout(StringIO()):
+                summary = analysis.run_e1(context)
+            ranges = summary["spatial_view_ranges_mm"]
+            self.assertNotEqual(ranges["P002"]["z_mm"], ranges["P001"]["z_mm"])
+            self.assertEqual(
+                {"P002": 9, "P001": 9}, summary["spatial_profile_event_counts"]
+            )
+            self.assertEqual(
+                {"first_xz", "last_xz", "first_yz", "last_yz"},
+                set(summary["spatial_outside_view_counts"]["P002"]),
+            )
+
+    def test_roi_requires_recorded_label_and_closed_boundaries(self):
+        first = analysis.acceptance_regions_for_profile("P002")[0]
+        frame = pd.DataFrame(
+            {
+                "det_x": [first.x_min_mm, first.x_max_mm, first.x_min_mm, first.x_min_mm - 0.01],
+                "det_y": [first.y_min_mm, first.y_max_mm, 0, 0],
+                "slit_label": [first.slit_id, first.slit_id, "S3", first.slit_id],
+            }
+        )
+        self.assertEqual(
+            [True, True, False, False], analysis.e1_roi_mask(frame, first).tolist()
+        )
+
+    def test_scatter_validation_and_classes(self):
         frame = pd.DataFrame({"scatter_count_total": [0, 1, 2, 5]})
         self.assertEqual(3, int(analysis.class_mask(frame, "total").sum()))
         self.assertEqual(1, int(analysis.class_mask(frame, "k1").sum()))
         self.assertEqual(2, int(analysis.class_mask(frame, "ms").sum()))
+        for invalid in (-1, 1.5, np.nan):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ValueError, "finite non-negative integers"):
+                    analysis.scatter_counts(pd.DataFrame({"scatter_count_total": [invalid]}))
 
     def test_output_protection_and_auxiliary_preservation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             existing = root / "E1"
             (existing / "roi_sensitivity").mkdir(parents=True)
+            (existing / "archive").mkdir()
+            (existing / "tables").mkdir()
             (existing / "roi_sensitivity/metrics.csv").write_text("x\n1\n", encoding="utf-8")
-            with self.assertRaises(FileExistsError):
-                analysis.main(["--results-root", str(root), "--output-dir", str(existing)])
-
+            (existing / "archive/old.pdf").write_bytes(b"old")
+            (existing / "tables/obsolete.csv").write_text("old\n", encoding="utf-8")
             staging = root / "staging"
             staging.mkdir()
             (staging / "report.md").write_text("new", encoding="utf-8")
             analysis.publish(staging, existing, overwrite=True)
             self.assertEqual("new", (existing / "report.md").read_text(encoding="utf-8"))
             self.assertTrue((existing / "roi_sensitivity/metrics.csv").is_file())
+            self.assertTrue((existing / "archive/old.pdf").is_file())
+            self.assertFalse((existing / "tables").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

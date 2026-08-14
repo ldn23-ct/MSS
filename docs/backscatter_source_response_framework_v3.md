@@ -1,10 +1,10 @@
-# 源项响应框架下的 X 射线背散射信号机制（V3）
+# 源项响应框架下的 X 射线背散射信号机制（V3.1）
 
 ## 0. 文档定位与本次修订
 
-本文档在 `backscatter_source_response_framework_v2.md` 基础上修订，用于统一后续理论表述、事件级 Monte Carlo 分析和实验结果解释。
+本文档在 `backscatter_source_response_framework_v3.md` 基础上修订，用于统一后续理论表述、事件级 Monte Carlo 分析和实验结果解释。
 
-V3 保留 V2 的核心物理分解：
+V3.1 保留 V3 的核心物理分解：
 
 \[
 \text{primary pencil beam}
@@ -29,6 +29,7 @@ D_k,
 4. 明确 grid 条件下的 target source 采用**缺陷三维几何区域**定义，而不是仅按目标深度层定义；
 5. 保持理论中的 \(q_j\) 为 primary-driven source term，同时使事件统计口径与当前 Geant4 实际实现一致；
 6. 继续区分“数据直接支持的结论”与“由结果提出的机制解释”，不尝试用现有数据严格分离 \(\Delta q\) 与 \(\Delta K\)。
+7. 收敛 E2 的定量分析指标：E2-B 保留整体计数相对变化；E2-D 以 source-region 相对计数变化和区域内 total variation distance 为核心，source-region fraction 仅作为可选组成指标，深度质心不再作为常规指标。
 
 本文档聚焦理论和框架边界，不规定具体绘图格式、文件名和数据处理脚本。执行层细节由实验指导文档统一规定。
 
@@ -531,7 +532,8 @@ s\in\{total,k1,ms\}.
 该层用于回答：
 
 - 缺陷对应 target region 的 detected source-response 是否发生明显变化；
-- front、target、behind 的变化是否具有不同形态；
+- front、target、behind 的整体计数变化是否具有不同幅度或方向；
+- 去除区域整体计数差异后，各区域内部的 depth-source shape 是否发生明显变化；
 - k1 与 ms 是否表现出相似或不同的 source redistribution。
 
 E2 可直接支持“target-source ms 对局部结构变化产生可测响应”，但不能独立证明 \(\Delta q\) 在定量上主导 \(\Delta K\)。
@@ -554,11 +556,23 @@ E3 仍属于 ideal / oracle level analysis，不等同于已经提出实际可�
 
 # 9. E2 中的定量分析指标
 
-E2 的图像优先保留原始计数。分布形态和 source redistribution 通过指标计算。
+E2 的定量分析只保留与当前科学问题直接对应的指标，并按照分析层级使用。核心上区分两类变化：
 
-## 9.1 总计数相对变化
+\[
+\text{count-amplitude change}
+\]
 
-对散射类别 \(s\)：
+与
+
+\[
+\text{within-region shape change}.
+\]
+
+前者描述某一统计范围内的 detected contribution 整体增加或减少多少；后者描述去除整体幅值差异后，各 depth bins 之间的相对关系是否发生改变。
+
+## 9.1 E2-B：整体计数相对变化
+
+对 center pose 下的匹配组合，定义
 
 \[
 C^{(s)}
@@ -567,12 +581,14 @@ C^{(s)}
 N_D^{(s)}-N_0^{(s)}
 }{
 N_0^{(s)}
-}.
+},
+\qquad
+s\in\{total,k1,ms\}.
 \]
 
-该指标表征对应类别的整体计数响应。
+该指标用于 E2-B，表征整个匹配狭缝内对应散射类别的整体计数响应。进入 front / target / behind 分解后，不再用该全局指标替代区域级比较。
 
-## 9.2 Source-region 相对变化
+## 9.2 E2-D：Source-region count response
 
 对
 
@@ -592,11 +608,70 @@ N_{r,0}^{(s)}
 }.
 \]
 
-该指标表征不同 first-scatter source regions 对缺陷的相对响应。
+该指标表征不同 first-scatter source regions 的整体 detected contribution 对缺陷的相对响应，用于回答各区域主要发生了多大的计数幅值变化。
 
-## 9.3 Source-region fraction
+## 9.3 E2-D：Within-region total variation distance
 
-定义
+为区分区域整体幅值变化与区域内部形态变化，对 baseline 与 defect histogram 在每个 source region 内分别归一化。
+
+对于 \(z_i\in r\)，定义
+
+\[
+p_{0,r}^{(s)}(z_i)
+=
+\frac{
+H_0^{(s)}(z_i)
+}{
+\sum_{j\in r}H_0^{(s)}(z_j)
+},
+\]
+
+\[
+p_{D,r}^{(s)}(z_i)
+=
+\frac{
+H_D^{(s)}(z_i)
+}{
+\sum_{j\in r}H_D^{(s)}(z_j)
+}.
+\]
+
+进一步定义区域内 total variation distance
+
+\[
+D_{\mathrm{TV},r}^{(s)}
+=
+\frac{1}{2}
+\sum_{i\in r}
+\left|
+p_{D,r}^{(s)}(z_i)
+-
+p_{0,r}^{(s)}(z_i)
+\right|.
+\]
+
+其范围为
+
+\[
+0\le D_{\mathrm{TV},r}^{(s)}\le1.
+\]
+
+如果某一区域的 defect histogram 主要是 baseline histogram 的整体幅值缩放，即
+
+\[
+H_D^{(s)}(z_i)
+\approx
+\alpha_r^{(s)}H_0^{(s)}(z_i),
+\qquad z_i\in r,
+\]
+
+则区域内归一化后两者形态接近，\(D_{\mathrm{TV},r}^{(s)}\) 接近 0。随着区域内部 bin-to-bin 相对关系发生更明显变化，\(D_{\mathrm{TV},r}^{(s)}\) 增大。
+
+因此，\(D_{\mathrm{TV},r}^{(s)}\) 只用于描述**区域内部形态差异**，不替代原始计数或 \(C_r^{(s)}\) 所描述的幅值变化。
+
+## 9.4 Optional source-region fraction
+
+当需要讨论 front / target / behind 在全部 detected contribution 中的组成变化时，可定义
 
 \[
 f_r^{(s)}
@@ -608,75 +683,20 @@ N^{(s)}
 }.
 \]
 
-比较 P0 与缺陷模体的 \(f_F,f_T,f_B\)，可描述 detected source contribution 在不同深度区域之间的相对重分布。
+比较 P0 与缺陷模体的 \(f_F,f_T,f_B\)，可描述 source-region composition 的相对重分布。该指标属于可选补充量，不作为 E2-D 的常规核心指标。
 
-## 9.4 深度分布质心
+## 9.5 指标层级与统计边界
 
-将原始 histogram 仅在指标计算阶段归一化：
+E2 的核心指标按层级统一为：
 
-\[
-p^{(s)}(z_i)
-=
-\frac{
-H^{(s)}(z_i)
-}{
-\sum_i H^{(s)}(z_i)
-}.
-\]
+- E2-B：\(C^{(s)}\)，描述整个匹配狭缝的整体计数响应；
+- E2-D：\(C_r^{(s)}\)，描述 front / target / behind 的区域计数响应；
+- E2-D：\(D_{\mathrm{TV},r}^{(s)}\)，描述去除区域幅值差异后的内部形态响应；
+- 可选：\(f_r^{(s)}\)，仅在需要讨论 source-region composition 时使用。
 
-定义
+深度质心 \(\Delta\mu_z^{(s)}\) 不再作为常规指标。它只对整体深度平移敏感，而 E2 当前关注的是区域内是否保持近似比例缩放或出现更一般的 bin-to-bin 形态改变。
 
-\[
-\mu_z^{(s)}
-=
-\sum_i z_i p^{(s)}(z_i),
-\]
-
-并比较
-
-\[
-\Delta\mu_z^{(s)}
-=
-\mu_{z,D}^{(s)}
--
-\mu_{z,0}^{(s)}.
-\]
-
-该指标用于描述 first-scatter source-response 分布整体向浅层或深层的偏移。
-
-## 9.5 Total variation distance
-
-为定量表征 baseline 与缺陷模体的分布形态差异，可定义
-
-\[
-D_{\mathrm{TV}}^{(s)}
-=
-\frac{1}{2}
-\sum_i
-\left|
-p_D^{(s)}(z_i)
--
-p_0^{(s)}(z_i)
-\right|.
-\]
-
-其范围为
-
-\[
-0\le D_{\mathrm{TV}}^{(s)}\le1.
-\]
-
-该指标仅用于比较**分布形态**，不替代原始计数差异。
-
-E2 的核心指标优先采用：
-
-- \(C^{(s)}\)：整体计数变化；
-- \(C_r^{(s)}\)：区域计数变化；
-- \(f_r^{(s)}\)：source-region composition；
-- \(\Delta\mu_z^{(s)}\)：分布位置变化；
-- \(D_{\mathrm{TV}}^{(s)}\)：分布形态差异。
-
-不需要为了形式化额外引入大量重叠系数或复杂响应核指标。
+\(D_{\mathrm{TV},r}^{(s)}\) 不设置统一经验阈值。有限 Monte Carlo histories 会产生非零的样本形态差异，因此较小的 \(D_{\mathrm{TV},r}^{(s)}\) 应结合对应区域的计数统计与 Monte Carlo 涨落水平解释；必要时可通过独立重复运行或计数重采样估计其波动范围。
 
 ---
 
@@ -694,7 +714,7 @@ E2 的核心指标优先采用：
 - center pose 下 total、k1 与 ms 均可定量比较其结构响应；
 - representative depth-source profile 的变化可在 first-scatter coordinate 上与缺陷深度联系；
 - target-source ms contribution 对局部结构变化具有可测响应；
-- front / target / behind 的 detected source-response 可表现不同的计数变化和重分布特征。
+- front / target / behind 的 detected source-response 可分别表现区域计数幅值变化和区域内部形态变化；其中后者需在区域内归一化后评价。
 
 ## 10.3 当前仍不能严格声称
 

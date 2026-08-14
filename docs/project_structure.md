@@ -14,7 +14,7 @@
 | `docs/archive/v1/` | 第一轮历史资料 | 仅用于了解旧 PMMA、macro 和旧 CSV 实现，不作为当前代码依据。 |
 | `docs/archive/v2/` | 项目 v2 正式归档基线 | 记录已完成 Geant4 核心及冻结 article v1 的规格、决策、架构、实施和验收。 |
 | `docs/project_structure.md` | 跨版本导航与 v2 交接摘要 | 新任务和新接手人员的第一阅读入口。 |
-| `docs/articlev2_analysis/` | Article V2 实验数据处理规范 | E1 已实现，E2/E3 为待实现接口。 |
+| `docs/articlev2_analysis/` | Article V2 实验后处理规范 | E1 已完成；E2 已实现且当前 grid 为 partial；E3 待设计。 |
 | 根级其他预研文档及配套资产 | 预研或实验设计 | 是否进入正式主线由相应状态说明和 `articlev2_analysis/` 导航决定。 |
 
 建议阅读顺序：
@@ -47,7 +47,7 @@ MSS / Geant4
    └── metadata.yaml
    │
    ▼
-显式 Python Monte Carlo 自动化、基础数据处理与 E1 后处理
+显式 Python Monte Carlo 自动化、基础数据处理与 E1/E2 后处理
 ```
 
 Geant4 核心只负责事件级 Monte Carlo 数据。位姿级统计、扫描级统计、batch 合并、图表和报告不由 `MSS` 自动生成。
@@ -90,7 +90,7 @@ Article v1 曾形成完整实验链路，但活跃脚本、专属队列逻辑和
 | 生成配置 | `config/generated/` | 由实验生成器产生，不作为手工规格源，通常不提交。 |
 | Monte Carlo 自动化 | `scripts/monte_carlo/` | Articlev2 配置生成、共享队列、恢复与分片。 |
 | 基础数据处理 | `scripts/data_processing/` | 有效事件、slit 边界/标签和数据资格审计。 |
-| 实验后处理 | `scripts/postprocessing/` | E1 正式实现、E2/E3 接口预留和旧 schema 源码快照。 |
+| 实验后处理 | `scripts/postprocessing/` | E1/E2 正式实现、E3 接口预留和旧 schema 源码快照。 |
 | 测试 | `tests/` | 核心契约及三个活跃 Python 层的回归。 |
 | 运行产物 | `results/` | raw/valid 事件、数据处理、队列状态、日志和 E1–E3 后处理输出，不属于源码。 |
 | 文档 | `docs/` | 跨版本导航、历史归档和未启动预研草案。 |
@@ -187,7 +187,7 @@ Article v1 曾形成完整实验链路，但活跃脚本、专属队列逻辑和
 Article V2 当前的权威数据路径是
 `results/articlev2/events/valid/**/events_valid.csv`。它由 `events/raw/**/events.csv` 可重复生成；冻结边界位于
 `results/articlev2/data_processing/slit_channels/slit_channel_boundaries.json`。E1 直接消费
-`slit_group/slit_label` schema，输出位于 `results/articlev2/postprocessing/E1/`；E2/E3 尚无可执行实现。
+`slit_group/slit_label` schema。E1 输出位于 `results/articlev2/postprocessing/E1/`；E2 输出位于 `postprocessing/E2/`，当前因缺少 P002 grid 条件而标记为 partial；E3 尚无可执行实现。
 
 工作区中可能存在为未来研究准备的额外 geometry、profile 或 generated config。除非未来正式文档明确纳入，它们不属于项目 v2 交付物。
 
@@ -222,9 +222,10 @@ cases:
 
 | 路径 | 职责 |
 |---|---|
-| `scripts/postprocessing/e1/run.py` | 当前唯一正式实验入口，生成 E1 figures、tables、report、manifest 和 acceptance。 |
+| `scripts/postprocessing/e1/run.py` | 生成 E1 三张正式 PNG；F3 按 P002/P001 acquisition groups 形成 2×2 overlay。 |
 | `scripts/postprocessing/e1/analyze_roi_sensitivity.py` | E1 detector ROI sensitivity 辅助分析。 |
-| `scripts/postprocessing/e2/`, `e3/` | 待实现接口；必须消费 `events/valid` 中的 `slit_label`。 |
+| `scripts/postprocessing/e2/run.py` | 默认生成 E2 四张 PNG、两张 CSV；支持多 case/class、函数级自定义 bin width 和显式 partial grid 预览。 |
+| `scripts/postprocessing/e3/` | 后续 source-truth imaging utility 接口，尚未实现。 |
 | `scripts/postprocessing/_archive/` | 不可执行、无回归支持的旧 schema 源码快照。 |
 
 ## 8. 测试与宏文件导航
@@ -237,7 +238,8 @@ cases:
 | `tests/test_data_cleaning.py` | 有效深度过滤、字段删除、边界复用、标签、metadata 和 manifest。 |
 | `tests/test_slit_channels.py` | 三峰/谷算法、稳定性、profile 标签、grid offset 和 diagnostics。 |
 | `tests/test_data_audit.py` | raw/valid 配对、计数守恒、schema/标签和 boundary hash。 |
-| `tests/test_e1_analysis.py` | E1 ROI、分箱、计数、输出、验收和覆盖保护。 |
+| `tests/test_e1_analysis.py` | E1 acquisition groups、ROI、quantile/manual view、计数、输出和覆盖保护。 |
+| `tests/test_e2_analysis.py` | E2 case 解析、bin-wise response、region/DTV、动态输出、grid partial/strict 和原子覆盖。 |
 | `tests/test_e1_roi_sensitivity.py` | E1 ROI sensitivity 指标、图表和原子输出。 |
 | `macros/vis.mac` | 当前 `--ui` 可视化命令。 |
 | `macros/run.mac`, `macros/run_mt.mac` | 第一轮 legacy macro 参考，不是 v2 batch 主入口。 |
