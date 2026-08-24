@@ -70,6 +70,19 @@ class FakeE2Context:
         self.assert_one(rows)
         return rows.iloc[0]
 
+    def summary_row(self, phantom, profile, summary_source):
+        if summary_source == "center":
+            return self.center_row(phantom, profile)
+        if summary_source != "grid-zero":
+            raise ValueError("invalid synthetic summary source")
+        rows = self.condition_rows("grid", phantom, profile)
+        rows = rows[
+            np.isclose(rows.head_offset_x_mm.astype(float), 0)
+            & np.isclose(rows.head_offset_y_mm.astype(float), 0)
+        ]
+        self.assert_one(rows)
+        return rows.iloc[0]
+
     @staticmethod
     def assert_one(rows):
         if len(rows) != 1:
@@ -210,6 +223,72 @@ class ArticleV2E2AnalysisTests(unittest.TestCase):
                 np.array([1]), np.array([1]), min_baseline_count=0
             )
 
+    def test_poisson_resampling_is_deterministic_and_preserves_partitions(self):
+        case = analysis.E2Case("P0", "P4", "S4", "total")
+        frame = pd.DataFrame(
+            {
+                "scatter_count_total": [1, 1, 2, 2, 2, 1],
+                "first_scatter_z": [5.0, 56.0, 58.0, 70.0, 90.0, 200.0],
+            }
+        )
+        frames = {"baseline": frame, "defect": frame.copy()}
+        first = analysis.build_pair_resample(
+            frames, case, np.random.default_rng(17), resample_count=120
+        )
+        second = analysis.build_pair_resample(
+            frames, case, np.random.default_rng(17), resample_count=120
+        )
+        self.assertTrue(np.array_equal(first.sampled, second.sampled))
+        _, sampled_total = analysis.pair_class_counts(first, "total")
+        _, sampled_k1 = analysis.pair_class_counts(first, "k1")
+        _, sampled_ms = analysis.pair_class_counts(first, "ms")
+        self.assertTrue(np.array_equal(sampled_total, sampled_k1 + sampled_ms))
+        rows = analysis.source_fraction_rows(first)
+        table = pd.DataFrame(rows)
+        sums = table.groupby(
+            ["condition_role", "scatter_class"], sort=False
+        ).fraction.sum()
+        self.assertTrue(np.allclose(sums, 1.0))
+        values = analysis.sampled_ratio(
+            np.array([1, 2, 3]), np.array([1, 0, 2]), relative_change_value=False
+        )
+        self.assertEqual(2, analysis.finite_interval(values, "ratio")[2])
+        low, high, count = analysis.finite_interval(
+            np.array([np.nan, np.nan]), "undefined", allow_empty=True
+        )
+        self.assertTrue(np.isnan(low) and np.isnan(high))
+        self.assertEqual(0, count)
+
+    def test_empty_defect_region_reports_undefined_dtv_without_fabrication(self):
+        baseline = pd.DataFrame(
+            {
+                "scatter_count_total": [1, 2, 1, 2, 1, 2],
+                "first_scatter_z": [10.0, 10.0, 60.0, 60.0, 100.0, 100.0],
+            }
+        )
+        defect = pd.DataFrame(
+            {
+                "scatter_count_total": [1, 2, 1, 1, 2],
+                "first_scatter_z": [10.0, 10.0, 60.0, 100.0, 100.0],
+            }
+        )
+        case = analysis.E2Case("P0", "P4", "S4", "total")
+        pair = analysis.build_pair_resample(
+            {"baseline": baseline, "defect": defect},
+            case,
+            np.random.default_rng(9),
+            resample_count=50,
+        )
+        table = pd.DataFrame(
+            analysis.source_region_rows(pair, analysis.DEFAULT_DEPTH_BIN_WIDTH_MM)
+        )
+        target_ms = table[
+            table.scatter_class.eq("ms") & table.region.eq("Target")
+        ].iloc[0]
+        self.assertEqual(-1.0, target_ms.C_r)
+        self.assertTrue(np.isnan(target_ms.D_TV_r))
+        self.assertEqual(0, target_ms.D_TV_r_n_effective)
+
     def test_grid_readiness_partial_and_full(self):
         partial = FakeE2Context(Path("/tmp/fake"), (("P0", "P001"), ("P2", "P001")))
         readiness = analysis.grid_readiness(partial)
@@ -225,7 +304,9 @@ class ArticleV2E2AnalysisTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             context = FakeE2Context(root, (("P0", "P001"), ("P2", "P001")))
-            summary = analysis.run_e2(context, allow_partial_grid=True)
+            summary = analysis.run_e2(
+                context, allow_partial_grid=True, resample_count=120
+            )
             self.assertEqual("partial", summary["publication_status"])
             analysis.write_report(root, summary, [])
             acceptance = analysis.validate_generated_outputs(root, summary)
@@ -234,12 +315,52 @@ class ArticleV2E2AnalysisTests(unittest.TestCase):
             self.assertEqual(set(summary["expected_table_names"]), {path.name for path in (root / "tables").iterdir()})
             center = pd.read_csv(root / "tables" / analysis.T1_TABLE_NAME)
             regions = pd.read_csv(root / "tables" / analysis.t2_table_name(analysis.DEFAULT_CASE))
+            fractions = pd.read_csv(root / "tables" / analysis.T3_TABLE_NAME)
             self.assertEqual(analysis.T1_COLUMNS, tuple(center.columns))
             self.assertEqual(analysis.T2_COLUMNS, tuple(regions.columns))
-            self.assertEqual((6, 9), (len(center), len(regions)))
-            self.assertEqual((4, 2), (len(summary["expected_figure_names"]), len(summary["expected_table_names"])))
-            self.assertTrue(summary["case_results"][0]["f4_dtv_matches_t2"])
+            self.assertEqual(analysis.T3_COLUMNS, tuple(fractions.columns))
+            self.assertEqual((18, 9, 108), (len(center), len(regions), len(fractions)))
+            self.assertEqual((3, 3), (len(summary["expected_figure_names"]), len(summary["expected_table_names"])))
+            self.assertTrue(center.C_n_effective.between(1, 120).all())
+            self.assertTrue(regions.C_r_n_effective.between(1, 120).all())
+            self.assertTrue(regions.D_TV_r_n_effective.between(1, 120).all())
+            self.assertTrue(fractions.fraction_n_effective.between(1, 120).all())
+            self.assertFalse(any("E2-F4" in path.name for path in (root / "figures").iterdir()))
             self.assertFalse(any(path.suffix == ".pdf" for path in root.rglob("*")))
+
+    def test_grid_zero_summary_uses_source_specific_names_and_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            context = FakeE2Context(root, analysis.expected_grid_conditions())
+            summary = analysis.run_e2(
+                context,
+                allow_partial_grid=False,
+                summary_source="grid-zero",
+                resample_count=80,
+            )
+            self.assertEqual("grid-zero", summary["summary_source"])
+            self.assertIn(
+                analysis.ZERO_POSE_T1_TABLE_NAME, summary["expected_table_names"]
+            )
+            self.assertIn(
+                analysis.ZERO_POSE_T3_TABLE_NAME, summary["expected_table_names"]
+            )
+            self.assertNotIn(analysis.T1_TABLE_NAME, summary["expected_table_names"])
+            acceptance = analysis.validate_generated_outputs(root, summary)
+            self.assertEqual("pass", acceptance["overall_status"])
+
+    def test_summary_source_validation_and_missing_zero_pose(self):
+        with self.assertRaisesRegex(ValueError, "summary_source"):
+            analysis.summary_table_names("invalid")
+        context = analysis.AnalysisContext(
+            Path("/tmp/fake"),
+            Path("/tmp/fake/audit"),
+            Path("/tmp/fake/output"),
+            inventory_rows((("P0", "P001"),)),
+            {},
+        )
+        with self.assertRaisesRegex(ValueError, "zero-pose grid"):
+            context.summary_row("P4", "P001", "grid-zero")
 
     def test_multi_case_outputs_are_distinct_and_t2_is_deduplicated(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -256,10 +377,11 @@ class ArticleV2E2AnalysisTests(unittest.TestCase):
                 cases=cases,
                 min_baseline_count=2,
                 depth_bin_width_mm=2.5,
+                resample_count=120,
             )
             self.assertEqual(2.5, summary["depth_bin_width_mm"])
-            self.assertEqual(10, len(summary["expected_figure_names"]))
-            self.assertEqual(3, len(summary["expected_table_names"]))
+            self.assertEqual(7, len(summary["expected_figure_names"]))
+            self.assertEqual(4, len(summary["expected_table_names"]))
             self.assertEqual(len(cases), len(summary["case_results"]))
             self.assertEqual(
                 set(summary["expected_figure_names"]),
@@ -273,7 +395,7 @@ class ArticleV2E2AnalysisTests(unittest.TestCase):
                 1,
                 sum("P0-S4_vs_P4-S4_source_region" in name for name in summary["expected_table_names"]),
             )
-            self.assertTrue(all(item["f4_dtv_matches_t2"] for item in summary["case_results"]))
+            self.assertFalse(any("E2-F4" in name for name in summary["expected_figure_names"]))
 
     def test_strict_pipeline_rejects_missing_grid_before_publication(self):
         with tempfile.TemporaryDirectory() as tmp:

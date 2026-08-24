@@ -16,6 +16,8 @@ results/<campaign>/
     └── E3/
 ```
 
+本次统一分析使用 `results/articlev3_merged/`。其中 `events/raw/` 是指向 `articlev2`、`articlev3_grid_p001_add80m` 和 `articlev3_grid_p002_100m` 原始层的相对符号链接索引；`events/valid/` 是清洗后按 phantom/profile/pose 实际合并的数据；`data_processing/merge/` 与 `data_processing/audit/` 保存来源、seed、历史数和行数守恒记录。三个原 campaign 均保持不变。
+
 事件数据与实验 figures/tables 必须分开保存。E1–E3 的正式图表只能写入各自的 `postprocessing/Ex/`；数据清洗诊断保留在 `data_processing/`。
 
 目录迁移的文件数、字节数和聚合 SHA-256 核对记录保存在 campaign 的 `data_processing/results_migration_integrity.yaml`；常规 audit 覆盖不会删除该记录。

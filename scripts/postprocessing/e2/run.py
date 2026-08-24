@@ -34,7 +34,6 @@ from scripts.data_processing.experiment_contract import (
     CENTER_PHANTOM_IDS,
     DEFECT_CENTER_Z_MM,
     GRID_OFFSETS_MM,
-    SLIT_DESIGN_DEPTH_MM,
     matched_slit,
     target_z_range,
 )
@@ -45,24 +44,62 @@ REGIONS = ("Front", "Target", "Behind")
 SLIT_IDS = tuple(f"S{index}" for index in range(1, 7))
 DEPTH_RANGE_MM = (0.0, 220.0)
 DEFAULT_DEPTH_BIN_WIDTH_MM = 2.0
+RESAMPLE_COUNT = 5000
+DEFAULT_RESAMPLE_SEED = 20260814
 BASELINE_COLOR = "#0072B2"
 DEFECT_COLOR = "#D55E00"
 CLASS_COLORS = {"total": "#333333", "k1": "#0072B2", "ms": "#D55E00"}
 GRID_FIGURE_NAME = "E2-F1_matched_grid_total_counts.png"
 T1_TABLE_NAME = "E2-T1_center_raw_count_decomposition.csv"
+T3_TABLE_NAME = "E2-T3_center_source_region_fractions.csv"
+ZERO_POSE_T1_TABLE_NAME = "E2-T1_zero_pose_raw_count_decomposition.csv"
+ZERO_POSE_T3_TABLE_NAME = "E2-T3_zero_pose_source_region_fractions.csv"
+SUMMARY_SOURCES = ("center", "grid-zero")
 T1_COLUMNS = (
+    "defect_phantom",
+    "slit",
     "depth_mm",
-    "N0_total",
-    "ND_total",
-    "C_total",
-    "N0_k1",
-    "ND_k1",
-    "C_k1",
-    "N0_ms",
-    "ND_ms",
-    "C_ms",
+    "scatter_class",
+    "N0",
+    "ND",
+    "C",
+    "C_ci_low",
+    "C_ci_high",
+    "C_n_effective",
 )
-T2_COLUMNS = ("scatter_class", "region", "N_r0", "N_rD", "C_r", "D_TV_r")
+T2_COLUMNS = (
+    "baseline_phantom",
+    "defect_phantom",
+    "slit",
+    "target_depth_mm",
+    "scatter_class",
+    "region",
+    "N_r0",
+    "N_rD",
+    "C_r",
+    "C_r_ci_low",
+    "C_r_ci_high",
+    "C_r_n_effective",
+    "D_TV_r",
+    "D_TV_r_ci_low",
+    "D_TV_r_ci_high",
+    "D_TV_r_n_effective",
+)
+T3_COLUMNS = (
+    "defect_phantom",
+    "slit",
+    "target_depth_mm",
+    "condition_role",
+    "condition_phantom",
+    "scatter_class",
+    "region",
+    "N_region",
+    "N_total",
+    "fraction",
+    "fraction_ci_low",
+    "fraction_ci_high",
+    "fraction_n_effective",
+)
 EVENT_COLUMNS = (
     "det_x",
     "det_y",
@@ -148,7 +185,6 @@ def figure_names(cases: tuple[E2Case, ...]) -> tuple[str, ...]:
             (
                 f"E2-F2_{case.selection_slug}_binwise_relative_response.png",
                 f"E2-F3_{case.selection_slug}_raw_depth_counts.png",
-                f"E2-F4_{case.selection_slug}_source_region_decomposition.png",
             )
         )
     return tuple(names)
@@ -158,10 +194,25 @@ def t2_table_name(case: E2Case) -> str:
     return f"E2-T2_{case.comparison_slug}_source_region_quantitative.csv"
 
 
-def table_names(cases: tuple[E2Case, ...]) -> tuple[str, ...]:
+def summary_table_names(summary_source: str) -> tuple[str, str]:
+    if summary_source == "center":
+        return T1_TABLE_NAME, T3_TABLE_NAME
+    if summary_source == "grid-zero":
+        return ZERO_POSE_T1_TABLE_NAME, ZERO_POSE_T3_TABLE_NAME
+    raise ValueError(f"summary_source must be one of {SUMMARY_SOURCES}: {summary_source!r}")
+
+
+def table_names(
+    cases: tuple[E2Case, ...], summary_source: str = "center"
+) -> tuple[str, ...]:
     comparisons = dict.fromkeys(case.comparison_slug for case in cases)
     lookup = {case.comparison_slug: case for case in cases}
-    return (T1_TABLE_NAME, *(t2_table_name(lookup[key]) for key in comparisons))
+    t1_name, t3_name = summary_table_names(summary_source)
+    return (
+        t1_name,
+        t3_name,
+        *(t2_table_name(lookup[key]) for key in comparisons),
+    )
 
 
 @dataclass
@@ -192,6 +243,28 @@ class AnalysisContext:
             raise ValueError(f"expected one center run for {(phantom, profile)}, found {len(rows)}")
         if rows.iloc[0]["status"] != "valid":
             raise ValueError(f"audit inventory marks center run invalid: {(phantom, profile)}")
+        return rows.iloc[0]
+
+    def summary_row(self, phantom: str, profile: str, summary_source: str) -> pd.Series:
+        if summary_source == "center":
+            return self.center_row(phantom, profile)
+        if summary_source != "grid-zero":
+            raise ValueError(
+                f"summary_source must be one of {SUMMARY_SOURCES}: {summary_source!r}"
+            )
+        rows = self.condition_rows("grid", phantom, profile)
+        rows = rows[
+            np.isclose(rows.head_offset_x_mm.astype(float), 0)
+            & np.isclose(rows.head_offset_y_mm.astype(float), 0)
+        ]
+        if len(rows) != 1:
+            raise ValueError(
+                f"expected one zero-pose grid run for {(phantom, profile)}, found {len(rows)}"
+            )
+        if rows.iloc[0]["status"] != "valid":
+            raise ValueError(
+                f"audit inventory marks zero-pose grid run invalid: {(phantom, profile)}"
+            )
         return rows.iloc[0]
 
     def valid_event_path(self, row: pd.Series) -> Path:
@@ -457,6 +530,295 @@ def binwise_relative_response(
     return response
 
 
+@dataclass(frozen=True)
+class PairResample:
+    case: E2Case
+    atom_edges: np.ndarray
+    observed: np.ndarray
+    sampled: np.ndarray
+    resample_count: int
+
+
+def finite_interval(
+    values: np.ndarray, label: str, *, allow_empty: bool = False
+) -> tuple[float, float, int]:
+    finite = np.asarray(values, dtype=float)
+    finite = finite[np.isfinite(finite)]
+    if not finite.size:
+        if allow_empty:
+            return math.nan, math.nan, 0
+        raise ValueError(f"no valid Poisson resamples for {label}")
+    low, high = np.percentile(finite, (2.5, 97.5))
+    return float(low), float(high), int(finite.size)
+
+
+def sampled_ratio(
+    numerator: np.ndarray,
+    denominator: np.ndarray,
+    *,
+    relative_change_value: bool,
+) -> np.ndarray:
+    top = np.asarray(numerator, dtype=float)
+    bottom = np.asarray(denominator, dtype=float)
+    if top.shape != bottom.shape:
+        raise ValueError("sampled numerator and denominator shapes must match")
+    result = np.full(top.shape, np.nan, dtype=float)
+    valid = np.isfinite(top) & np.isfinite(bottom) & (bottom > 0)
+    if relative_change_value:
+        result[valid] = (top[valid] - bottom[valid]) / bottom[valid]
+    else:
+        result[valid] = top[valid] / bottom[valid]
+    return result
+
+
+def _class_index(scatter_class: str) -> int | None:
+    if scatter_class == "k1":
+        return 0
+    if scatter_class == "ms":
+        return 1
+    if scatter_class == "total":
+        return None
+    raise ValueError(f"unknown scatter class: {scatter_class}")
+
+
+def pair_class_counts(pair: PairResample, scatter_class: str) -> tuple[np.ndarray, np.ndarray]:
+    index = _class_index(scatter_class)
+    if index is None:
+        return pair.observed.sum(axis=1), pair.sampled.sum(axis=2)
+    return pair.observed[:, index, :], pair.sampled[:, :, index, :]
+
+
+def _atomic_edges(
+    target_range: tuple[float, float],
+    depth_bin_width_mm: float,
+) -> np.ndarray:
+    parts = [depth_edges(depth_bin_width_mm)]
+    parts.extend(
+        region_edges(region, target_range, depth_bin_width_mm) for region in REGIONS
+    )
+    return np.unique(np.concatenate(parts))
+
+
+def build_pair_resample(
+    frames: dict[str, pd.DataFrame],
+    case: E2Case,
+    rng: np.random.Generator,
+    *,
+    resample_count: int = RESAMPLE_COUNT,
+    depth_bin_width_mm: float = DEFAULT_DEPTH_BIN_WIDTH_MM,
+) -> PairResample:
+    if resample_count <= 0:
+        raise ValueError("resample_count must be positive")
+    target_range = case_target_range(case)
+    atom_edges = _atomic_edges(target_range, depth_bin_width_mm)
+    observed = np.zeros((2, 2, len(atom_edges) - 1), dtype=np.int64)
+    for condition_index, condition in enumerate(("baseline", "defect")):
+        frame = frames[condition]
+        for class_index, scatter_class in enumerate(("k1", "ms")):
+            depths = frame.loc[
+                class_mask(frame, scatter_class), "first_scatter_z"
+            ].to_numpy(dtype=float)
+            counts, _ = np.histogram(depths, bins=atom_edges)
+            if int(counts.sum()) != len(depths):
+                raise AssertionError(f"{case.comparison_slug} atomic histogram loses events")
+            observed[condition_index, class_index] = counts
+    sampled = rng.poisson(observed, size=(resample_count, *observed.shape))
+    if not np.array_equal(sampled.sum(axis=2), sampled[:, :, 0, :] + sampled[:, :, 1, :]):
+        raise AssertionError("E2 sampled total does not equal k1 + ms")
+    return PairResample(case, atom_edges, observed, sampled, resample_count)
+
+
+def _region_atom_mask(pair: PairResample, region: str) -> np.ndarray:
+    centers = 0.5 * (pair.atom_edges[:-1] + pair.atom_edges[1:])
+    return region_mask(centers, region, case_target_range(pair.case))
+
+
+def _aggregate_region_bins(
+    counts: np.ndarray,
+    pair: PairResample,
+    region: str,
+    depth_bin_width_mm: float,
+) -> np.ndarray:
+    region_values = region_edges(region, case_target_range(pair.case), depth_bin_width_mm)
+    atom_mask = _region_atom_mask(pair, region)
+    atom_centers = 0.5 * (pair.atom_edges[:-1] + pair.atom_edges[1:])
+    selected_centers = atom_centers[atom_mask]
+    indices = np.searchsorted(region_values, selected_centers, side="right") - 1
+    indices = np.minimum(indices, len(region_values) - 2)
+    selected = np.asarray(counts)[..., atom_mask]
+    output = np.zeros((*selected.shape[:-1], len(region_values) - 1), dtype=selected.dtype)
+    for index in range(len(region_values) - 1):
+        output[..., index] = selected[..., indices == index].sum(axis=-1)
+    return output
+
+
+def sampled_dtv(baseline_bins: np.ndarray, defect_bins: np.ndarray) -> np.ndarray:
+    baseline = np.asarray(baseline_bins, dtype=float)
+    defect = np.asarray(defect_bins, dtype=float)
+    if baseline.shape != defect.shape or baseline.ndim != 2:
+        raise ValueError("sampled DTV inputs must have matching (sample, bin) shapes")
+    baseline_total = baseline.sum(axis=1)
+    defect_total = defect.sum(axis=1)
+    result = np.full(len(baseline), np.nan, dtype=float)
+    valid = (baseline_total > 0) & (defect_total > 0)
+    if np.any(valid):
+        p0 = baseline[valid] / baseline_total[valid, None]
+        pd = defect[valid] / defect_total[valid, None]
+        result[valid] = 0.5 * np.abs(pd - p0).sum(axis=1)
+    return result
+
+
+def center_response_rows(pair: PairResample) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for scatter_class in CLASSES:
+        observed, sampled = pair_class_counts(pair, scatter_class)
+        n0, nd = (int(observed[index].sum()) for index in (0, 1))
+        point = relative_change(nd, n0, f"{pair.case.comparison_slug}-{scatter_class}")
+        samples = sampled_ratio(
+            sampled[:, 1, :].sum(axis=1),
+            sampled[:, 0, :].sum(axis=1),
+            relative_change_value=True,
+        )
+        low, high, n_effective = finite_interval(
+            samples, f"{pair.case.comparison_slug}-{scatter_class}-C"
+        )
+        rows.append(
+            {
+                "defect_phantom": pair.case.defect_phantom,
+                "slit": pair.case.slit,
+                "depth_mm": float(DEFECT_CENTER_Z_MM[pair.case.defect_phantom]),
+                "scatter_class": scatter_class,
+                "N0": n0,
+                "ND": nd,
+                "C": point,
+                "C_ci_low": low,
+                "C_ci_high": high,
+                "C_n_effective": n_effective,
+            }
+        )
+    return rows
+
+
+def source_fraction_rows(pair: PairResample) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for scatter_class in CLASSES:
+        observed, sampled = pair_class_counts(pair, scatter_class)
+        for condition_index, (role, phantom) in enumerate(
+            (("baseline", pair.case.baseline_phantom), ("defect", pair.case.defect_phantom))
+        ):
+            total = int(observed[condition_index].sum())
+            if total <= 0:
+                raise ValueError(f"zero total count for {pair.case.comparison_slug}-{role}-{scatter_class}")
+            sampled_total = sampled[:, condition_index, :].sum(axis=1)
+            fractions: list[float] = []
+            for region in REGIONS:
+                atom_mask = _region_atom_mask(pair, region)
+                region_count = int(observed[condition_index, atom_mask].sum())
+                fraction = region_count / total
+                fractions.append(fraction)
+                samples = sampled_ratio(
+                    sampled[:, condition_index, atom_mask].sum(axis=1),
+                    sampled_total,
+                    relative_change_value=False,
+                )
+                low, high, n_effective = finite_interval(
+                    samples,
+                    f"{pair.case.comparison_slug}-{role}-{scatter_class}-{region}-fraction",
+                )
+                rows.append(
+                    {
+                        "defect_phantom": pair.case.defect_phantom,
+                        "slit": pair.case.slit,
+                        "target_depth_mm": float(DEFECT_CENTER_Z_MM[pair.case.defect_phantom]),
+                        "condition_role": role,
+                        "condition_phantom": phantom,
+                        "scatter_class": scatter_class,
+                        "region": region,
+                        "N_region": region_count,
+                        "N_total": total,
+                        "fraction": fraction,
+                        "fraction_ci_low": low,
+                        "fraction_ci_high": high,
+                        "fraction_n_effective": n_effective,
+                    }
+                )
+            if not math.isclose(sum(fractions), 1.0, rel_tol=0, abs_tol=1e-12):
+                raise AssertionError("E2 source-region fractions do not close to one")
+    return rows
+
+
+def source_region_rows(
+    pair: PairResample,
+    depth_bin_width_mm: float,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for scatter_class in CLASSES:
+        observed, sampled = pair_class_counts(pair, scatter_class)
+        for region in REGIONS:
+            atom_mask = _region_atom_mask(pair, region)
+            n0 = int(observed[0, atom_mask].sum())
+            nd = int(observed[1, atom_mask].sum())
+            c_point = relative_change(
+                nd, n0, f"{pair.case.comparison_slug}-{scatter_class}-{region}"
+            )
+            c_samples = sampled_ratio(
+                sampled[:, 1, atom_mask].sum(axis=1),
+                sampled[:, 0, atom_mask].sum(axis=1),
+                relative_change_value=True,
+            )
+            c_low, c_high, c_n = finite_interval(
+                c_samples, f"{pair.case.comparison_slug}-{scatter_class}-{region}-C"
+            )
+            point_bins_0 = _aggregate_region_bins(
+                observed[0], pair, region, depth_bin_width_mm
+            )
+            point_bins_d = _aggregate_region_bins(
+                observed[1], pair, region, depth_bin_width_mm
+            )
+            if point_bins_0.sum() <= 0 or point_bins_d.sum() <= 0:
+                dtv_point = math.nan
+            else:
+                dtv_point = float(
+                    0.5
+                    * np.abs(
+                        point_bins_d / point_bins_d.sum() - point_bins_0 / point_bins_0.sum()
+                    ).sum()
+                )
+            sampled_bins_0 = _aggregate_region_bins(
+                sampled[:, 0], pair, region, depth_bin_width_mm
+            )
+            sampled_bins_d = _aggregate_region_bins(
+                sampled[:, 1], pair, region, depth_bin_width_mm
+            )
+            dtv_samples = sampled_dtv(sampled_bins_0, sampled_bins_d)
+            dtv_low, dtv_high, dtv_n = finite_interval(
+                dtv_samples,
+                f"{pair.case.comparison_slug}-{scatter_class}-{region}-DTV",
+                allow_empty=True,
+            )
+            rows.append(
+                {
+                    "baseline_phantom": pair.case.baseline_phantom,
+                    "defect_phantom": pair.case.defect_phantom,
+                    "slit": pair.case.slit,
+                    "target_depth_mm": float(DEFECT_CENTER_Z_MM[pair.case.defect_phantom]),
+                    "scatter_class": scatter_class,
+                    "region": region,
+                    "N_r0": n0,
+                    "N_rD": nd,
+                    "C_r": c_point,
+                    "C_r_ci_low": c_low,
+                    "C_r_ci_high": c_high,
+                    "C_r_n_effective": c_n,
+                    "D_TV_r": dtv_point,
+                    "D_TV_r_ci_low": dtv_low,
+                    "D_TV_r_ci_high": dtv_high,
+                    "D_TV_r_n_effective": dtv_n,
+                }
+            )
+    return rows
+
+
 def grid_edges() -> np.ndarray:
     offsets = np.asarray(GRID_OFFSETS_MM, dtype=float)
     half_step = (offsets[1] - offsets[0]) / 2
@@ -622,51 +984,20 @@ def _plot_grid_figure(
     return grid_ranges
 
 
-def _center_analysis(ctx: AnalysisContext) -> pd.DataFrame:
-    rows: list[dict[str, Any]] = []
-    for index in range(1, 7):
-        slit_id = f"S{index}"
-        phantom_id = f"P{index}"
-        profile_id = SLIT_PROFILE[slit_id]
-        baseline = selected_events(
-            ctx, ctx.center_row("P0", profile_id), slit_id, cache_center=True
-        )
-        defect = selected_events(
-            ctx, ctx.center_row(phantom_id, profile_id), slit_id, cache_center=True
-        )
-        if (baseline.first_scatter_z < DEPTH_RANGE_MM[0]).any() or (
-            baseline.first_scatter_z > DEPTH_RANGE_MM[1]
-        ).any():
-            raise ValueError(f"P0-{slit_id} contains depth outside 0-220 mm")
-        if (defect.first_scatter_z < DEPTH_RANGE_MM[0]).any() or (
-            defect.first_scatter_z > DEPTH_RANGE_MM[1]
-        ).any():
-            raise ValueError(f"{phantom_id}-{slit_id} contains depth outside 0-220 mm")
-        baseline_counts = count_classes(baseline)
-        defect_counts = count_classes(defect)
-        row: dict[str, Any] = {"depth_mm": SLIT_DESIGN_DEPTH_MM[slit_id]}
-        for category in CLASSES:
-            row[f"N0_{category}"] = baseline_counts[category]
-            row[f"ND_{category}"] = defect_counts[category]
-            row[f"C_{category}"] = relative_change(
-                defect_counts[category], baseline_counts[category], f"{phantom_id}-{slit_id}-{category}"
-            )
-        rows.append(row)
-    return pd.DataFrame(rows, columns=T1_COLUMNS)
-
-
-def _load_case_frames(ctx: AnalysisContext, case: E2Case) -> dict[str, pd.DataFrame]:
+def _load_case_frames(
+    ctx: AnalysisContext, case: E2Case, summary_source: str = "center"
+) -> dict[str, pd.DataFrame]:
     profile_id = SLIT_PROFILE[case.slit]
     frames = {
         "baseline": selected_events(
             ctx,
-            ctx.center_row(case.baseline_phantom, profile_id),
+            ctx.summary_row(case.baseline_phantom, profile_id, summary_source),
             case.slit,
             cache_center=True,
         ),
         "defect": selected_events(
             ctx,
-            ctx.center_row(case.defect_phantom, profile_id),
+            ctx.summary_row(case.defect_phantom, profile_id, summary_source),
             case.slit,
             cache_center=True,
         ),
@@ -771,127 +1102,6 @@ def _plot_case_f3(
     _save_png(fig, figures / name)
 
 
-def _region_analysis(
-    frames: dict[str, pd.DataFrame],
-    case: E2Case,
-    depth_bin_width_mm: float = DEFAULT_DEPTH_BIN_WIDTH_MM,
-) -> tuple[pd.DataFrame, dict[str, dict[str, dict[str, np.ndarray]]]]:
-    output_rows: list[dict[str, Any]] = []
-    details: dict[str, dict[str, dict[str, np.ndarray]]] = {}
-    target_range = case_target_range(case)
-    for category in CLASSES:
-        details[category] = {}
-        baseline_all = frames["baseline"].loc[class_mask(frames["baseline"], category)]
-        defect_all = frames["defect"].loc[class_mask(frames["defect"], category)]
-        for region in REGIONS:
-            baseline_depths = baseline_all.loc[
-                region_mask(baseline_all.first_scatter_z, region, target_range),
-                "first_scatter_z",
-            ].to_numpy(dtype=float)
-            defect_depths = defect_all.loc[
-                region_mask(defect_all.first_scatter_z, region, target_range),
-                "first_scatter_z",
-            ].to_numpy(dtype=float)
-            baseline_count = len(baseline_depths)
-            defect_count = len(defect_depths)
-            label = f"{case.comparison_slug}-{category}-{region}"
-            edges, baseline_bins, defect_bins, contributions = within_region_tv_contributions(
-                baseline_depths,
-                defect_depths,
-                region,
-                label,
-                target_range,
-                depth_bin_width_mm,
-            )
-            details[category][region] = {
-                "edges": edges,
-                "baseline_counts": baseline_bins,
-                "defect_counts": defect_bins,
-                "tv_contributions": contributions,
-            }
-            output_rows.append(
-                {
-                    "scatter_class": category,
-                    "region": region,
-                    "N_r0": baseline_count,
-                    "N_rD": defect_count,
-                    "C_r": relative_change(defect_count, baseline_count, label),
-                    "D_TV_r": float(contributions.sum()),
-                }
-            )
-    return pd.DataFrame(output_rows, columns=T2_COLUMNS), details
-
-
-def _annotate_source_regions(
-    axes: np.ndarray,
-    target_range: tuple[float, float],
-) -> None:
-    boundaries = (DEPTH_RANGE_MM[0], *target_range, DEPTH_RANGE_MM[1])
-    for axis in axes:
-        axis.axvspan(*target_range, color="#BDBDBD", alpha=0.18, zorder=0)
-        for boundary in target_range:
-            axis.axvline(boundary, color="#555555", linestyle="--", linewidth=0.9)
-        for region, low, high in zip(REGIONS, boundaries[:-1], boundaries[1:], strict=True):
-            axis.text(
-                (low + high) / 2,
-                0.975,
-                region,
-                transform=axis.get_xaxis_transform(),
-                ha="center",
-                va="top",
-                fontsize=9,
-                bbox={"facecolor": "white", "edgecolor": "none", "alpha": 0.72, "pad": 1},
-            )
-
-
-def _plot_case_f4(
-    case: E2Case,
-    details: dict[str, dict[str, dict[str, np.ndarray]]],
-    figures: Path,
-    min_baseline_count: int | None,
-) -> dict[str, float | int]:
-    fig, axes = plt.subplots(2, 1, figsize=(10.5, 9.2), sharex=True, constrained_layout=True)
-    masked_bin_count = 0
-    tv_sums: dict[str, float] = {}
-    for region in REGIONS:
-        values = details[case.scatter_class][region]
-        response = binwise_relative_response(
-            values["defect_counts"],
-            values["baseline_counts"],
-            min_baseline_count=min_baseline_count,
-        )
-        masked_bin_count += int(np.isnan(response).sum())
-        axes[0].stairs(
-            100.0 * response,
-            values["edges"],
-            color=CLASS_COLORS[case.scatter_class],
-            linewidth=1.45,
-        )
-        axes[1].stairs(
-            values["tv_contributions"],
-            values["edges"],
-            color=CLASS_COLORS[case.scatter_class],
-            linewidth=1.45,
-        )
-        tv_sums[region] = float(values["tv_contributions"].sum())
-    _annotate_source_regions(axes, case_target_range(case))
-    axes[0].axhline(0, color="#222222", linestyle="--", linewidth=1.0)
-    axes[0].set(
-        ylabel="Bin-wise count response (%)",
-        title="(a) Count-amplitude response by depth bin",
-    )
-    axes[1].set(
-        xlim=DEPTH_RANGE_MM,
-        xlabel="First-scatter depth z (mm)",
-        ylabel=r"Per-bin $D_{TV,r}^{(s)}$ contribution",
-        title="(b) Within-region shape-difference contribution",
-    )
-    fig.suptitle(f"E2-F4  {case.comparison_label} — {case.scatter_class}")
-    name = f"E2-F4_{case.selection_slug}_source_region_decomposition.png"
-    _save_png(fig, figures / name)
-    return {"masked_bin_count": masked_bin_count, **{f"D_TV_{key}": value for key, value in tv_sums.items()}}
-
-
 def run_e2(
     ctx: AnalysisContext,
     *,
@@ -899,8 +1109,12 @@ def run_e2(
     cases: tuple[E2Case, ...] | list[E2Case] | None = None,
     min_baseline_count: int | None = None,
     depth_bin_width_mm: float = DEFAULT_DEPTH_BIN_WIDTH_MM,
+    resample_seed: int = DEFAULT_RESAMPLE_SEED,
+    resample_count: int = RESAMPLE_COUNT,
+    summary_source: str = "center",
 ) -> dict[str, Any]:
     selected_cases = normalize_cases(cases)
+    t1_name, t3_name = summary_table_names(summary_source)
     depth_bin_width_mm = validate_depth_bin_width(depth_bin_width_mm)
     if min_baseline_count is not None and min_baseline_count < 1:
         raise ValueError("min_baseline_count must be a positive integer")
@@ -908,6 +1122,7 @@ def run_e2(
     tables = ctx.output_root / "tables"
     figures.mkdir(parents=True, exist_ok=True)
     tables.mkdir(parents=True, exist_ok=True)
+    rng = np.random.default_rng(resample_seed)
 
     readiness = grid_readiness(ctx)
     if not readiness["complete"] and not allow_partial_grid:
@@ -919,27 +1134,57 @@ def run_e2(
         raise ValueError("partial E2-F1 requires at least one complete baseline/defect grid pair")
 
     grid_ranges = _plot_grid_figure(ctx, readiness, figures)
-    center_table = _center_analysis(ctx)
-    center_table.to_csv(tables / T1_TABLE_NAME, index=False)
+    selected_comparisons = {
+        case.comparison_slug: case for case in selected_cases
+    }
+    pair_cache: dict[str, PairResample] = {}
+    frame_cache: dict[str, dict[str, pd.DataFrame]] = {}
+    center_rows: list[dict[str, Any]] = []
+    fraction_rows: list[dict[str, Any]] = []
+    for index in range(1, 7):
+        global_case = E2Case("P0", f"P{index}", f"S{index}", "total")
+        frames = _load_case_frames(ctx, global_case, summary_source)
+        pair = build_pair_resample(
+            frames,
+            global_case,
+            rng,
+            resample_count=resample_count,
+            depth_bin_width_mm=depth_bin_width_mm,
+        )
+        center_rows.extend(center_response_rows(pair))
+        fraction_rows.extend(source_fraction_rows(pair))
+        if global_case.comparison_slug in selected_comparisons:
+            pair_cache[global_case.comparison_slug] = pair
+            frame_cache[global_case.comparison_slug] = frames
 
-    comparison_cache: dict[
-        str,
-        tuple[
-            dict[str, pd.DataFrame],
-            pd.DataFrame,
-            dict[str, dict[str, dict[str, np.ndarray]]],
-        ],
-    ] = {}
+    center_table = pd.DataFrame(center_rows, columns=T1_COLUMNS)
+    fraction_table = pd.DataFrame(fraction_rows, columns=T3_COLUMNS)
+    center_table.to_csv(tables / t1_name, index=False)
+    fraction_table.to_csv(tables / t3_name, index=False)
+
+    region_tables: dict[str, pd.DataFrame] = {}
+    for comparison_slug, case in selected_comparisons.items():
+        if comparison_slug not in pair_cache:
+            frames = _load_case_frames(ctx, case, summary_source)
+            frame_cache[comparison_slug] = frames
+            pair_cache[comparison_slug] = build_pair_resample(
+                frames,
+                case,
+                rng,
+                resample_count=resample_count,
+                depth_bin_width_mm=depth_bin_width_mm,
+            )
+        region_table = pd.DataFrame(
+            source_region_rows(pair_cache[comparison_slug], depth_bin_width_mm),
+            columns=T2_COLUMNS,
+        )
+        region_table.to_csv(tables / t2_table_name(case), index=False)
+        region_tables[comparison_slug] = region_table
+
     case_results: list[dict[str, Any]] = []
     for case in selected_cases:
-        if case.comparison_slug not in comparison_cache:
-            frames = _load_case_frames(ctx, case)
-            region_table, region_details = _region_analysis(
-                frames, case, depth_bin_width_mm
-            )
-            region_table.to_csv(tables / t2_table_name(case), index=False)
-            comparison_cache[case.comparison_slug] = (frames, region_table, region_details)
-        frames, region_table, region_details = comparison_cache[case.comparison_slug]
+        frames = frame_cache[case.comparison_slug]
+        region_table = region_tables[case.comparison_slug]
         depth_bin_edges, histograms = _case_depth_histograms(
             frames, case, depth_bin_width_mm
         )
@@ -947,22 +1192,10 @@ def run_e2(
             case, histograms, depth_bin_edges, figures, min_baseline_count
         )
         _plot_case_f3(case, histograms, depth_bin_edges, figures)
-        f4_metrics = _plot_case_f4(
-            case, region_details, figures, min_baseline_count
-        )
         selected_region_rows = (
             region_table[region_table.scatter_class == case.scatter_class]
             .set_index("region")
             .loc[list(REGIONS)]
-        )
-        tv_consistent = all(
-            math.isclose(
-                float(selected_region_rows.loc[region, "D_TV_r"]),
-                float(f4_metrics[f"D_TV_{region}"]),
-                rel_tol=0,
-                abs_tol=1e-12,
-            )
-            for region in REGIONS
         )
         case_results.append(
             {
@@ -974,18 +1207,28 @@ def run_e2(
                     for condition, counts in histograms.items()
                 },
                 "f2_masked_bin_count": f2_masked,
-                "f4_masked_bin_count": int(f4_metrics["masked_bin_count"]),
-                "f4_dtv_sums": {
-                    region: float(f4_metrics[f"D_TV_{region}"]) for region in REGIONS
+                "source_region_metrics": {
+                    region: {
+                        "C_r": float(selected_region_rows.loc[region, "C_r"]),
+                        "D_TV_r": (
+                            None
+                            if pd.isna(selected_region_rows.loc[region, "D_TV_r"])
+                            else float(selected_region_rows.loc[region, "D_TV_r"])
+                        ),
+                    }
+                    for region in REGIONS
                 },
-                "f4_dtv_matches_t2": tv_consistent,
             }
         )
 
-    if not np.allclose(
-        center_table.N0_total, center_table.N0_k1 + center_table.N0_ms
-    ) or not np.allclose(center_table.ND_total, center_table.ND_k1 + center_table.ND_ms):
-        raise AssertionError("E2 center table violates total = k1 + ms")
+    for _, group in center_table.groupby(["defect_phantom", "slit"], sort=False):
+        indexed = group.set_index("scatter_class")
+        if int(indexed.loc["total", "N0"]) != int(indexed.loc["k1", "N0"]) + int(
+            indexed.loc["ms", "N0"]
+        ) or int(indexed.loc["total", "ND"]) != int(indexed.loc["k1", "ND"]) + int(
+            indexed.loc["ms", "ND"]
+        ):
+            raise AssertionError("E2 center table violates total = k1 + ms")
     return {
         "publication_status": "complete" if readiness["complete"] else "partial",
         "allow_partial_grid": allow_partial_grid,
@@ -998,8 +1241,12 @@ def run_e2(
         "case_results": case_results,
         "min_baseline_count": min_baseline_count,
         "depth_bin_width_mm": depth_bin_width_mm,
+        "resample_seed": int(resample_seed),
+        "resample_count": int(resample_count),
+        "summary_source": summary_source,
+        "summary_table_names": [t1_name, t3_name],
         "expected_figure_names": list(figure_names(selected_cases)),
-        "expected_table_names": list(table_names(selected_cases)),
+        "expected_table_names": list(table_names(selected_cases, summary_source)),
     }
 
 
@@ -1014,11 +1261,13 @@ def write_report(root: Path, summary: dict[str, Any], warnings: list[str]) -> No
         f"- Missing grid pairs: {', '.join(summary['missing_grid_pairs']) or 'none'}",
         f"- Missing grid poses: {summary['missing_grid_pose_count']}",
         f"- Selected cases: {summary['selected_cases']}",
+        f"- Single-pose summary source: {summary['summary_source']}",
         f"- Depth bin width: {summary['depth_bin_width_mm']} mm",
         f"- Minimum baseline bin count: {summary['min_baseline_count']}",
-        "- E2-F2/F3/F4 are depth-bin resolved and contain one selected scatter class per file.",
+        f"- Poisson resampling: {summary['resample_count']} draws, seed {summary['resample_seed']}.",
+        "- E2-F2/F3 are depth-bin resolved and contain one selected scatter class per file.",
         "- Zero or explicitly under-threshold baseline bins are gaps, never fabricated zeros.",
-        "- Figures are PNG only; E2-T1 is global and E2-T2 is emitted once per unique case.",
+        "- Figures are PNG only; E2-T1/T3 are global and E2-T2 is emitted once per unique case.",
     ]
     if status == "partial":
         lines.extend(
@@ -1039,23 +1288,77 @@ def validate_generated_outputs(root: Path, summary: dict[str, Any]) -> dict[str,
     tables = {path.name for path in (root / "tables").iterdir() if path.is_file()}
     expected_figures = set(summary["expected_figure_names"])
     expected_tables = set(summary["expected_table_names"])
-    center = pd.read_csv(root / "tables" / T1_TABLE_NAME)
-    center_partition = bool(
-        len(center) == 6
-        and tuple(center.columns) == T1_COLUMNS
-        and np.allclose(center.N0_total, center.N0_k1 + center.N0_ms)
-        and np.allclose(center.ND_total, center.ND_k1 + center.ND_ms)
-    )
+    t1_name, t3_name = summary["summary_table_names"]
+    center = pd.read_csv(root / "tables" / t1_name)
+    center_partition = len(center) == 18 and tuple(center.columns) == T1_COLUMNS
+    if center_partition:
+        center_partition = bool(
+            set(center.scatter_class) == set(CLASSES)
+            and center.groupby(["defect_phantom", "slit"]).ngroups == 6
+            and np.isfinite(
+                center[["C", "C_ci_low", "C_ci_high"]].to_numpy(dtype=float)
+            ).all()
+            and center.C_n_effective.between(1, summary["resample_count"]).all()
+        )
+        for _, group in center.groupby(["defect_phantom", "slit"], sort=False):
+            indexed = group.set_index("scatter_class")
+            center_partition = center_partition and bool(
+                indexed.loc["total", "N0"]
+                == indexed.loc["k1", "N0"] + indexed.loc["ms", "N0"]
+                and indexed.loc["total", "ND"]
+                == indexed.loc["k1", "ND"] + indexed.loc["ms", "ND"]
+            )
+
+    fractions = pd.read_csv(root / "tables" / t3_name)
+    fraction_contract = len(fractions) == 108 and tuple(fractions.columns) == T3_COLUMNS
+    if fraction_contract:
+        grouped_fractions = fractions.groupby(
+            ["defect_phantom", "slit", "condition_role", "scatter_class"], sort=False
+        )
+        fraction_contract = bool(
+            grouped_fractions.ngroups == 36
+            and set(fractions.condition_role) == {"baseline", "defect"}
+            and set(fractions.region) == set(REGIONS)
+            and np.allclose(grouped_fractions.fraction.sum().to_numpy(dtype=float), 1.0)
+            and np.allclose(
+                grouped_fractions.N_region.sum().to_numpy(dtype=float),
+                grouped_fractions.N_total.first().to_numpy(dtype=float),
+            )
+            and fractions.fraction.between(0, 1, inclusive="both").all()
+            and fractions.fraction_n_effective.between(1, summary["resample_count"]).all()
+        )
     region_contract = True
-    for table_name in sorted(expected_tables.difference({T1_TABLE_NAME})):
+    for table_name in sorted(expected_tables.difference({t1_name, t3_name})):
         regions = pd.read_csv(root / "tables" / table_name)
+        dtv_defined = (
+            regions.D_TV_r.notna()
+            & regions.D_TV_r_ci_low.notna()
+            & regions.D_TV_r_ci_high.notna()
+            & regions.D_TV_r_n_effective.between(1, summary["resample_count"])
+        )
+        dtv_undefined = (
+            regions.D_TV_r.isna()
+            & regions.D_TV_r_ci_low.isna()
+            & regions.D_TV_r_ci_high.isna()
+            & regions.D_TV_r_n_effective.eq(0)
+        )
         region_contract = region_contract and bool(
             len(regions) == 9
             and tuple(regions.columns) == T2_COLUMNS
             and set(regions.scatter_class) == set(CLASSES)
             and set(regions.region) == set(REGIONS)
-            and regions.D_TV_r.between(0, 1, inclusive="both").all()
-            and np.isfinite(regions[["C_r", "D_TV_r"]].to_numpy(dtype=float)).all()
+            and (dtv_defined | dtv_undefined).all()
+            and regions.loc[dtv_defined, "D_TV_r"].between(0, 1, inclusive="both").all()
+            and np.isfinite(
+                regions[
+                    [
+                        "C_r",
+                        "C_r_ci_low",
+                        "C_r_ci_high",
+                    ]
+                ].to_numpy(dtype=float)
+            ).all()
+            and regions.C_r_n_effective.between(1, summary["resample_count"]).all()
         )
     no_pdf = not any(path.suffix.lower() == ".pdf" for path in root.rglob("*"))
     functional_checks = {
@@ -1063,10 +1366,9 @@ def validate_generated_outputs(root: Path, summary: dict[str, Any]) -> dict[str,
         "E2_table_contract": tables == expected_tables,
         "E2_png_only": no_pdf,
         "E2_center_accounting": center_partition,
+        "E2_source_fraction_contract": fraction_contract,
         "E2_region_metrics": region_contract,
-        "E2_f4_contributions_match_t2": all(
-            item["f4_dtv_matches_t2"] for item in summary["case_results"]
-        ),
+        "E2_no_source_region_figures": not any("E2-F4" in name for name in figures),
         "E2_partial_has_complete_pair": bool(summary["complete_grid_pairs"]),
     }
     checks: dict[str, Any] = {
@@ -1139,7 +1441,16 @@ def write_manifest(
             "depth_range_mm": list(DEPTH_RANGE_MM),
             "depth_bin_width_mm": summary["depth_bin_width_mm"],
             "selected_cases": summary["selected_cases"],
+            "summary_source": summary["summary_source"],
             "min_baseline_count": summary["min_baseline_count"],
+            "poisson_resampling": {
+                "draw_count": summary["resample_count"],
+                "seed": summary["resample_seed"],
+                "interval_percentiles": [2.5, 97.5],
+                "invalid_denominator_rule": "exclude for the affected metric and report n_effective",
+                "undefined_point_DTV_rule": "store NA and n_effective=0 when either observed regional histogram is empty",
+                "total_reconstruction": "same-draw k1 + ms",
+            },
             "zero_baseline_bin_rule": "NaN and unplotted",
             "target_intervals_mm": {
                 item["comparison_slug"]: list(item["target_interval_mm"])
@@ -1180,6 +1491,8 @@ def run_analysis(
     cases: tuple[E2Case, ...] | list[E2Case] | None = None,
     min_baseline_count: int | None = None,
     depth_bin_width_mm: float = DEFAULT_DEPTH_BIN_WIDTH_MM,
+    resample_seed: int = DEFAULT_RESAMPLE_SEED,
+    summary_source: str = "center",
 ) -> None:
     audit, inventory = validate_audit(audit_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1190,6 +1503,9 @@ def run_analysis(
         cases=cases,
         min_baseline_count=min_baseline_count,
         depth_bin_width_mm=depth_bin_width_mm,
+        resample_seed=resample_seed,
+        resample_count=RESAMPLE_COUNT,
+        summary_source=summary_source,
     )
     write_report(output_dir, summary, context.warnings)
     validate_generated_outputs(output_dir, summary)
@@ -1235,6 +1551,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="mask response bins with fewer baseline counts; default masks only zero",
     )
     parser.add_argument("--allow-partial-grid", action="store_true")
+    parser.add_argument(
+        "--summary-source",
+        choices=SUMMARY_SOURCES,
+        default="center",
+        help="single-pose source for E2-T1/T3 and selected depth/source-region cases",
+    )
+    parser.add_argument("--resample-seed", type=int, default=DEFAULT_RESAMPLE_SEED)
     parser.add_argument("--overwrite", action="store_true")
     return parser.parse_args(argv)
 
@@ -1264,6 +1587,8 @@ def main(argv: list[str] | None = None) -> int:
             allow_partial_grid=args.allow_partial_grid,
             cases=args.cases,
             min_baseline_count=args.min_baseline_count,
+            resample_seed=args.resample_seed,
+            summary_source=args.summary_source,
         )
         publish(staging, output_dir, args.overwrite)
     except Exception:

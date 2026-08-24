@@ -1,6 +1,6 @@
 # MSS
 
-`MSS` 是一个 Geant4 gamma 背散射 Monte Carlo 仿真项目。项目保留稳定的车辆 ROI 事件级仿真核心，并以 articlev2 作为当前唯一活跃的数据处理与实验后处理链路。
+`MSS` 是一个 Geant4 gamma 背散射 Monte Carlo 仿真项目。项目保留稳定的车辆 ROI 事件级仿真核心，并以 articlev2 原始 campaign 和 `articlev3_merged` 统一分析层作为当前活跃的数据处理与实验后处理链路。
 
 Geant4 核心只生成事件级数据，不实现 pose-level summary、scan-level summary、统计图、图像重建或真实探测器响应；显式 Python 后处理层负责清洗、审计与论文图表。
 
@@ -13,7 +13,7 @@ Geant4 核心只生成事件级数据，不实现 pose-level summary、scan-leve
 | Geant4 仿真核心 | 固定车辆 ROI、移动成像头、事件追踪与 `events.csv + metadata.yaml` | 稳定基础，供后续实验复用 |
 | Monte Carlo 自动化 | manifest、逐 pose 配置、队列执行、状态恢复与分片 | `scripts/monte_carlo/` |
 | 基础数据处理 | 有效深度筛选、slit 标签、边界校准和数据审计 | `scripts/data_processing/` |
-| 实验后处理 | E1 正式分析；E2 已实现且当前 grid 为 partial；E3 待设计 | `scripts/postprocessing/` |
+| 实验后处理 | E1/E2 与 E3 主网格分析已完成；E3 slab 参考为唯一待补数据项 | `scripts/postprocessing/` |
 
 主要文档入口：
 

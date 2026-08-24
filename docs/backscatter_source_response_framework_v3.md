@@ -1,740 +1,452 @@
-# 源项响应框架下的 X 射线背散射信号机制（V3.1）
+# 源项—响应框架下的X射线背散射信号机制（修订版）
 
-## 0. 文档定位与本次修订
+## 0. 文档定位与统一口径
 
-本文档在 `backscatter_source_response_framework_v3.md` 基础上修订，用于统一后续理论表述、事件级 Monte Carlo 分析和实验结果解释。
-
-V3.1 保留 V3 的核心物理分解：
+本文档用于统一论文Methods、仿真实验设计和结果解释中的物理变量、事件分类、首次散射源区定义及证据边界。其核心过程表示为
 
 \[
-\text{primary pencil beam}
+\text{入射窄束}
 \rightarrow
 q_j
 \rightarrow
 \gamma
 \rightarrow
-D_k,
+S_k/D_k,
 \]
 
-其中 \(q_j\) 表示由初级束驱动的首次散射源项，\(\gamma\) 表示首次散射之后的传播与再次相互作用历史，\(D_k\) 表示第 \(k\) 个狭缝/探测通道。
+其中，\(q_j\)表示在给定入射光子历史数下，位置单元\(j\)形成首次散射源项的期望数量；\(\gamma\)表示首次散射后的传播与再次相互作用历史；\(S_k/D_k\)表示第\(k\)个接收狭缝及其对应的理想虚拟探测区域。
 
-本次修订主要完成以下调整：
+当前统一口径如下：
 
-1. 将原 E1–E6 的证据链压缩为三个实验层级：
-   - **E1：均匀模体下的系统响应基线与散射空间特征；**
-   - **E2：局部缺陷的可观测响应及首次散射源区机制分解；**
-   - **E3：基于 source truth 的成像作用/理想基准。**
-2. 将 first-scatter / last-scatter 空间对比并入 E1，不再作为独立实验；
-3. 将原缺陷深度匹配、target-source MS 响应和 front/target/behind 分解合并到 E2；
-4. 明确 grid 条件下的 target source 采用**缺陷三维几何区域**定义，而不是仅按目标深度层定义；
-5. 保持理论中的 \(q_j\) 为 primary-driven source term，同时使事件统计口径与当前 Geant4 实际实现一致；
-6. 继续区分“数据直接支持的结论”与“由结果提出的机制解释”，不尝试用现有数据严格分离 \(\Delta q\) 与 \(\Delta K\)。
-7. 收敛 E2 的定量分析指标：E2-B 保留整体计数相对变化；E2-D 以 source-region 相对计数变化和区域内 total variation distance 为核心，source-region fraction 仅作为可选组成指标，深度质心不再作为常规指标。
+1. E1–E3是论文中的三项实验，实际仿真中的运行拆分不改变论文口径。``````````````````````````````````````````````````````````````````````````
+2. 两套多狭缝接收准直配置分别包含S1/S3/S5和S2/S4/S6，结果按狭缝编号统一分析为S1–S6，不将两套配置的计数直接相加。
+3. E1的S1–S6深度响应使用`total`事件，并逐狭缝独立归一化；首次与末次散射位置分析使用覆盖两套准直配置的正式E1记录。
+4. `total/k1/ms`以及F/T/B属于数据分析定义，不属于仿真架构本身。
+5. 事件统计以满足探测条件的\(\gamma\)光子轨迹为对象，不按光子的产生来源另设论文事件类别。
+6. E2使用5000次Poisson重采样给出点估计量的95%区间。
+7. E3是基于蒙特卡罗首次散射真值的理想比较，不预设任一事件选择策略为最优策略。
+8. 均匀前层参考仅用于检验前方源区贡献的可估计性，不作为独立散射校正算法。
 
-本文档聚焦理论和框架边界，不规定具体绘图格式、文件名和数据处理脚本。执行层细节由实验指导文档统一规定。
+本文档规定理论解释和统计口径，不规定脚本路径、文件名、图幅排版或数据导出格式。
 
 ---
 
 # 1. 基本物理图景
 
-在窄束/准笔形束照射条件下，初级光子在形成首次散射源项之前主要沿入射束路径传播，因此首次散射源项在空间上受到初级束照射区域的约束。
-
-设初级束路径上的空间位置由索引 \(j\) 表示，则位置 \(j\) 可视为一个潜在的首次散射源项位置。首次散射发生之后，光子可能直接经准直结构进入探测器，也可能继续发生后续相互作用。对一个已经在 \(j\) 处形成的首次散射源项，其后续传播历史可概念性表示为
+在窄束照射条件下，光子沿入射方向进入模体，并在传播路径上形成首次散射。首次散射发生以后，光子可能直接经接收准直结构到达探测面，也可能继续发生Compton散射或Rayleigh散射后被记录。对位置单元\(j\)处形成的首次散射源项，其后续路径可概念性表示为
 
 \[
 \gamma:
-j\rightarrow i_2\rightarrow i_3\rightarrow\cdots\rightarrow i_n\rightarrow D_k.
+j\rightarrow i_2\rightarrow i_3\rightarrow\cdots\rightarrow i_n
+\rightarrow S_k/D_k.
 \]
 
-因此，完整探测过程分为两层：
+完整过程由两个相互关联的部分构成：
 
 \[
-\text{source formation}
+\text{首次散射源形成}
 \rightarrow
-\text{post-first-scatter transport}.
+\text{首次散射后的条件输运与准直接受}.
 \]
 
-其中：
-
-- \(q_j\) 描述首次散射源项的形成；
-- \(\gamma\) 描述首次散射后的传播、再次散射、衰减和准直接受；
-- \(D_k\) 表示第 \(k\) 个探测通道。
-
-这一分解的核心作用是把“首次散射发生在哪里”与“首次散射之后如何到达探测器”区分开。
+这一分解用于区分“首次散射发生在哪里”与“该散射贡献如何到达某一接收通道”。两部分在局部材料改变后均可能发生变化，因此探测到的首次散射深度分布是源项与后续输运共同作用后的响应分布。
 
 ---
 
-# 2. Primary-driven 首次散射源项
+# 2. 首次散射源项与条件输运响应
 
-定义 \(q_j\) 为单位入射历史下，初级光子在位置 \(j\) 形成首次散射源项的强度。概念上可写为
+## 2.1 首次散射源项
 
-\[
-q_j\propto \Phi_j\,\Sigma_{\mathrm{scat},j},
-\]
-
-其中：
-
-- \(\Phi_j\) 为到达位置 \(j\) 的初级光子通量；
-- \(\Sigma_{\mathrm{scat},j}\) 为与首次散射形成相关的局部宏观相互作用量。
-
-对于 PMMA–空气缺陷，当初级束路径上的局部 PMMA 被空气替代时，目标区域的首次散射形成能力会发生明显变化，因此从物理上可预期
+在固定入射光子历史数\(N_{\mathrm{inc}}\)下，定义\(q_j\)为位置单元\(j\)形成首次散射源项的期望数量。概念上可写为
 
 \[
-q_j^{D}<q_j^{0},
-\qquad j\in D,
+q_j\propto \Phi_j\Sigma_{\mathrm{scat},j},
 \]
 
-其中上标 \(0\) 表示均匀 PMMA，上标 \(D\) 表示含空气缺陷的模体。
+其中，\(\Phi_j\)表示在同一入射历史数条件下到达位置单元\(j\)的入射光子注量或期望数量，\(\Sigma_{\mathrm{scat},j}\)表示与局部散射形成有关的宏观相互作用量。
 
-需要区分理论变量与 Monte Carlo 可观测量：
+当PMMA中的局部区域被空气替代时，入射束路径上的材料组成和衰减条件改变，目标深度范围形成首次散射源项的能力也随之改变。\(q_j\)是理论模型变量；当前分析并未独立统计所有入射历史在各位置形成的裸首次散射源项，因此不能用被探测事件的首次散射直方图直接代替\(q_j\)。
 
-> 当前数据并未独立统计“所有入射 primary gamma 在每个位置形成的裸首次散射源项”，因此 \(q_j\) 不是当前实验直接观测的量。
+## 2.2 条件路径集合
 
-本文中的 \(q_j\) 用于建立理论结构，不以 detected first-scatter histogram 直接替代。
-
----
-
-# 3. 条件输运响应
-
-## 3.1 路径集合
-
-对已经在 \(j\) 处形成的首次散射源项，设其最终可被第 \(k\) 个通道探测的路径集合为
+对已经在位置单元\(j\)形成的首次散射源项，设最终可由第\(k\)个狭缝对应探测区域记录的路径集合为
 
 \[
 \Gamma_{j,k}.
 \]
 
-对任一路径 \(\gamma\)，定义路径权重
+对任一路径\(\gamma\)，定义路径权重\(w_k(\gamma\mid j)\)，综合表示该路径在首次散射后继续传播、发生后续相互作用、通过接收准直结构并到达探测面的统计权重。
 
-\[
-w_k(\gamma|j),
-\]
+## 2.3 单次与多重散射条件响应
 
-其综合表示首次散射以后该路径发生并最终被第 \(k\) 个通道记录的统计权重。
-
-## 3.2 单次与多重散射响应
-
-将探测路径按散射阶次分为单次散射类和多重散射类。相应的条件响应写为
+按当前\(\gamma\)光子轨迹的散射次数，将路径集合分为单次散射和多重散射两类：
 
 \[
 K_k^{(1)}(j)
 =
 \sum_{\gamma\in\Gamma_{j,k}^{(1)}}
-w_k(\gamma|j),
+w_k(\gamma\mid j),
 \]
 
 \[
 K_k^{(m)}(j)
 =
 \sum_{\gamma\in\Gamma_{j,k}^{(m)}}
-w_k(\gamma|j).
+w_k(\gamma\mid j).
 \]
 
-这里的 \(K_k^{(m)}(j)\) 表示：给定首次散射源项位置 \(j\) 后，对所有后续多重散射输运历史进行统计边缘化后的综合响应。
-
-它不是：
-
-- 某个单一后续散射体素的响应；
-- 各后续体素独立贡献的简单线性求和；
-- 可由 last-scatter distribution 单独恢复的完整路径概率。
+\(K_k^{(m)}(j)\)是在给定首次散射源项位置后，对所有满足条件的多重散射输运历史边缘化得到的综合响应。它不等同于某个后续散射体素的独立响应，也不能由末次散射位置分布单独恢复。
 
 ---
 
-# 4. 探测计数与实际 Monte Carlo 可观测量
+# 3. 理论计数模型与蒙特卡罗可观测量
 
-## 4.1 理论计数模型
+## 3.1 理论模型描述的主要贡献
 
-在 primary-driven source-response 框架下，第 \(k\) 个通道的主要探测贡献写为
+第\(k\)个通道的主要期望探测贡献写为
 
 \[
-N_k^{\mathrm{prim}}
+N_{k,\mathrm{model}}
 =
-\sum_j
-q_j
+\sum_j q_j
 \left[
-K_k^{(1)}(j)
-+
-K_k^{(m)}(j)
+K_k^{(1)}(j)+K_k^{(m)}(j)
 \right].
 \]
 
-考虑当前实现中保留的少量 secondary gamma、Rayleigh 相关事件及其他未独立分离的小贡献，可将实际探测计数概念性写为
+该式用于描述首次散射源形成与后续条件输运之间的关系，不作为当前Geant4全部有效探测记录的穷尽性生成模型。论文中的实际计数和图像均由仿真记录直接统计，不额外设置未被独立估计的修正项。
+
+相应的模型贡献可写为
 
 \[
-N_k
-=
-N_k^{\mathrm{prim}}
-+
-\varepsilon_k,
+R_k^{(1)}(j)=q_jK_k^{(1)}(j),
+\qquad
+R_k^{(m)}(j)=q_jK_k^{(m)}(j).
 \]
 
-其中 \(\varepsilon_k\) 表示当前论文不单独建模的附加探测贡献。
+因此，对被探测事件按首次散射位置构建的直方图应解释为探测系统加权后的首次散射源—响应分布，而非裸源项分布。
 
-该项用于保持理论与当前实现之间的边界：
+## 3.2 原始事件记录
 
-- 理论中的 \(q_j\) 仍描述由 primary gamma 驱动的首次散射源；
-- secondary gamma 不额外建立独立源项理论；
-- Rayleigh 与 secondary gamma 在当前统计中保留，但不改变本文的主要 source-response 分解。
-
-## 4.2 当前事件级统计对象
-
-当前执行层以 **detected gamma track / detected gamma hit** 为计数对象。
-
-对每条最终满足探测条件的 gamma track：
-
-- 每条 track 只记录第一次有效探测面穿越；
-- primary 与 secondary gamma 均可形成 detected hit；
-- 每条 gamma track 独立维护自身的散射历史；
-- secondary gamma 的散射次数从其产生时重新计数，不继承 parent track；
-- 散射阶次定义为
+对于满足探测判定的每条\(\gamma\)光子轨迹，记录其对应狭缝编号、探测面位置、Compton散射次数、Rayleigh散射次数、首次散射位置和末次散射位置。散射总次数定义为
 
 \[
-n_s
-=
-n_{\mathrm{Compton}}
-+
-n_{\mathrm{Rayleigh}}.
+n_s=n_C+n_R.
 \]
 
-因此：
+首次散射位置
+
+\[
+\mathbf r_1=(x_1,y_1,z_1)
+\]
+
+用于确定被探测事件的首次散射源坐标；末次散射位置
+
+\[
+\mathbf r_L=(x_L,y_L,z_L)
+\]
+
+用于表征光子进入探测面之前最后一次记录到的散射位置。对于仅发生一次散射的事件，\(\mathbf r_1=\mathbf r_L\)。
+
+## 3.3 首次与末次散射的物理职责
+
+首次散射位置用于建立深度响应和首次散射源区分类。末次散射位置仅用于描述首次散射后的空间扩展。对于多重散射事件，末次散射分布通常比首次散射分布更分散，但它只表示路径末端的统计特征，不等同于完整的多重散射路径密度。
+
+局部材料变化引起的被探测计数变化同时包含首次散射源形成和后续输运响应的变化。现有数据用于表征各首次散射源区对最终探测计数的贡献及其变化，不对两类作用进行独立反演。
+
+---
+
+# 4. 数据分析定义
+
+## 4.1 散射次数分解
+
+根据\(n_s\)定义三个数据标签：
 
 \[
 k1:\ n_s=1,
-\]
-
-\[
+\qquad
 ms:\ n_s\ge2,
-\]
-
-\[
+\qquad
 total:\ n_s\ge1.
 \]
 
-`first_scatter` 与 `last_scatter` 均表示**当前 detected gamma track 自身**首次和末次 Compton 或 Rayleigh 相互作用位置。
-
-当前实现中的散射历史记录不限于 PMMA–空气模体内部，因此执行层的 first/last scatter histogram 应按当前记录口径解释，不应重新表述为“仅模体内 primary-Compton 历史”。
-
-## 4.3 Detected source-response profile
-
-对最终被探测事件按首次散射位置统计得到的分布，本质上是经探测系统响应加权后的贡献，而不是裸源项 \(q_j\)。
-
-在忽略小附加项的理论表达下，可写为
+其中`k1`与`ms`互斥，`total`由二者组成：
 
 \[
-R_k^{(1)}(j)
-=
-q_jK_k^{(1)}(j),
+N_k^{total}=N_k^{k1}+N_k^{ms}.
+\]
+
+上述标签只承担数据分类功能，不改变Geant4中的物理输运过程。
+
+## 4.2 首次散射源区分解
+
+对缺陷中心深度为\(z_c\)、轴向厚度为\(10\ \mathrm{mm}\)的条件，依据首次散射深度\(z_1\)定义
+
+\[
+\Omega_F=\{\mathbf r_1\mid z_1<z_c-5\ \mathrm{mm}\},
 \]
 
 \[
-R_k^{(m)}(j)
-=
-q_jK_k^{(m)}(j).
-\]
-
-实际 Monte Carlo histogram 更准确地理解为以上 primary-driven contribution 与少量附加事件共同构成的 **detected first-scatter source-response profile**。
-
-因此可以直接讨论：
-
-- 某一 first-scatter source region 对最终探测计数的贡献；
-- 不同模体间该贡献的变化；
-- k1 与 ms 在 first-scatter coordinate 上的分布差异。
-
-不能仅凭该分布直接定量分离 \(q_j\) 与 \(K_k(j)\) 的变化。
-
----
-
-# 5. First scatter 与 post-first-scatter 非局域输运
-
-首次散射位置与后续散射位置在本框架中承担不同作用。
-
-## 5.1 First scatter
-
-\[
-\mathbf r_{\mathrm{first}}
-=
-(x_{\mathrm{first}},
-y_{\mathrm{first}},
-z_{\mathrm{first}})
-\]
-
-用于定义 detected event 的 source coordinate。
-
-对于 primary-driven 事件，首次散射源形成受初级束照射区域限制，因此其空间分布应主要集中在束流经过的区域附近。
-
-## 5.2 Last scatter
-
-\[
-\mathbf r_{\mathrm{last}}
-=
-(x_{\mathrm{last}},
-y_{\mathrm{last}},
-z_{\mathrm{last}})
-\]
-
-表示当前 detected gamma track 在进入探测器之前记录到的末次散射位置。
-
-对 ms 事件，\(\mathbf r_{\mathrm{last}}\) 可以扩展到比 \(\mathbf r_{\mathrm{first}}\) 更大的空间范围，因此 first/last scatter 的空间对比可用于说明：
-
-> 给定局部 first-scatter source 后，后续多重散射输运具有明显的空间非局域特征。
-
-但当前数据没有保存全部中间散射点，因此 last-scatter distribution 只能描述**后续输运空间扩展的末端统计特征**，不能等同于完整 path density。
-
----
-
-# 6. 局部结构扰动的严格表达
-
-设均匀模体状态为 \(M_0\)，含缺陷模体状态为 \(M_D\)。对象结构变化既可能改变首次散射源项，也可能改变后续路径集合与路径权重：
-
-\[
-q_j^0
-\rightarrow
-q_j^D
-=
-q_j^0+\Delta q_j,
+\Omega_T=\{\mathbf r_1\mid z_c-5\ \mathrm{mm}\le z_1<z_c+5\ \mathrm{mm}\},
 \]
 
 \[
-K_k^0(j)
-\rightarrow
-K_k^D(j)
-=
-K_k^0(j)+\Delta K_k(j).
+\Omega_B=\{\mathbf r_1\mid z_1\ge z_c+5\ \mathrm{mm}\}.
 \]
 
-令
+F、T和B分别表示目标深度范围前方、目标深度范围内及目标深度范围后方的首次散射源区。`target`指目标的深度范围，不指空气缺陷的三维体积，也不使用首次散射的横向坐标作为分类条件。均匀模体P0与对应缺陷模体采用相同的源区边界。
+
+在grid扫描中，射束横向位置随扫描点改变，但源区分类仍仅依据\(z_1\)。图像中的缺陷ROI位于\(x-y\)扫描平面，仅用于图像质量评价，不参与F/T/B分类。
+
+## 4.3 六个互斥基础类别
+
+将首次散射源区与散射次数组合，得到
 
 \[
-K_k(j)
-=
-K_k^{(1)}(j)+K_k^{(m)}(j),
-\]
-
-则 primary-driven 探测计数变化为
-
-\[
-\Delta N_k
-=
-\sum_j
-\left[
-q_j^DK_k^D(j)
--
-q_j^0K_k^0(j)
-\right].
-\]
-
-展开得到
-
-\[
-\Delta N_k
-=
-\sum_j\Delta q_jK_k^0(j)
-+
-\sum_jq_j^0\Delta K_k(j)
-+
-\sum_j\Delta q_j\Delta K_k(j).
-\]
-
-三项分别对应：
-
-1. source-term perturbation；
-2. transport-response perturbation；
-3. source–transport coupling。
-
-当前数据不能严格将三项独立分离，因此 E2 中观察到的 target-source response 变化可以支持“局部结构改变了该源区的 detected contribution”，但不能独立证明变化完全由 \(\Delta q\) 导致。
-
----
-
-# 7. Source-region 定义
-
-## 7.1 Center pose：front / target / behind
-
-对于 center pose 下的代表缺陷 \(P_n\)，其缺陷中心深度为 \(z_c\)，轴向厚度为 \(10\ \mathrm{mm}\)。
-
-定义
-
-\[
-\Omega_T
-=
-[z_c-5\ \mathrm{mm},\,
-z_c+5\ \mathrm{mm}),
-\]
-
-\[
-\Omega_F
-=
-\{
-z_{\mathrm{first}}
-<
-z_c-5\ \mathrm{mm}
-\},
-\]
-
-\[
-\Omega_B
-=
-\{
-z_{\mathrm{first}}
-\ge
-z_c+5\ \mathrm{mm}
-\}.
-\]
-
-center pose 中，front / target / behind 始终按照 first-scatter depth 定义，与 last scatter 无关。
-
-对于 P4：
-
-\[
-\Omega_T
-=
-[55,65)\ \mathrm{mm}.
-\]
-
-这一分区服务于 E2 的机制分析，用于比较缺陷前方、缺陷区域和缺陷后方 detected source-response 的变化。
-
-## 7.2 Grid：target 定义为缺陷三维体积
-
-grid 扫描时，射束横向位置随 pose 改变，因此“目标深度层”与“真实缺陷区域”不再等价。
-
-对中心位置为 \((x_c,y_c,z_c)\)、尺寸为 \(10\times10\times10\ \mathrm{mm^3}\) 的标准缺陷，定义三维缺陷体积
-
-\[
-V_D
-=
-[x_c-5,x_c+5)
+\{\Omega_F,\Omega_T,\Omega_B\}
 \times
-[y_c-5,y_c+5)
-\times
-[z_c-5,z_c+5).
+\{k1,ms\}
 \]
 
-grid 条件下若需要使用 source truth，则定义
-
-\[
-\text{target-source event}
-\iff
-\mathbf r_{\mathrm{first}}\in V_D.
-\]
-
-因此：
-
-- center 的 \(\Omega_T\) 是一维 depth-source region；
-- grid 的 \(V_D\) 是三维 defect-volume source region。
-
-两者在中心照射时可近似对应，但在横向扫描 pose 下不应混用。
+形成的六个互斥基础类别。区域`total`计数以及E3中的M0–M5图像均由这些基础类别组合得到。该结构在重采样中用于保持各派生图像和指标之间的计数关系。
 
 ---
 
-# 8. 三实验框架
+# 5. 三项实验的统一框架
 
-## E1：均匀模体系统响应基线与散射空间特征
+## 5.1 E1：均匀模体系统响应基线与散射空间特征
 
-E1 使用 P0 作为统一 baseline，从探测端出发建立系统响应的基本物理图景。
+E1使用均匀PMMA模体P0建立系统基线。两套多狭缝接收准直配置分别覆盖S1/S3/S5和S2/S4/S6；结果按狭缝编号统一组织为S1–S6。
 
-逻辑顺序为：
+E1依次分析：
+
+1. S1–S6在探测面形成的空间接受区域；
+2. S1–S6对应的首次散射深度响应；
+3. 首次与末次散射位置的空间分布差异。
+
+S1–S6深度响应仅使用`total`事件，并对每个狭缝的深度直方图独立归一化，以比较响应深度范围。该归一化不用于跨狭缝比较绝对计数。E1不增加峰值位置、半高宽或通道重叠等指标。
+
+首次与末次散射位置分析使用正式E1探测记录，比较\(x-z\)和\(y-z\)分布，用于说明首次散射源位置的空间约束以及首次散射后输运的空间扩展。
+
+## 5.2 E2：局部缺陷的可观测响应与首次散射源区机制
+
+E2按照以下顺序组织：
 
 \[
-\text{detector-plane observable separation}
+\text{匹配grid总计数图像}
 \rightarrow
-\text{first-scatter depth selectivity}
+\text{中心位置的total/k1/ms计数}
 \rightarrow
-\text{first/last scatter spatial characteristics}.
+\text{P4--S4代表性深度分布}
+\rightarrow
+\text{F/T/B分解}.
 \]
 
-E1 主要回答：
+### 5.2.1 缺陷可观测性
 
-1. 多狭缝系统在探测端是否形成可区分的接受区域；
-2. 不同狭缝所接收事件是否具有不同的 detected first-scatter depth distribution；
-3. first-scatter source 的空间约束与 ms 后续输运的空间扩展是否同时存在。
+P1–P6分别与S1–S6匹配，在\(9\times9\)扫描网格上使用`total`计数构建二维响应图；P0–S1至P0–S6作为相应基线。该层只确定局部低密度结构是否在匹配通道形成可观测响应。
 
-E1 不涉及缺陷响应，不承担局部结构机制证明。
+### 5.2.2 中心位置的散射次数分解
+
+在中心扫描位置比较P0–Sn与Pn–Sn的`total`、`k1`和`ms`计数，描述整体计数变化及其散射次数组成。`total`始终由同一统计范围内的`k1`和`ms`相加得到。
+
+### 5.2.3 代表性首次散射深度响应
+
+为进一步表征计数变化与首次散射深度之间的关系，选取位于深度序列中部的P4–S4作为代表性条件，并与P0–S4比较。在该代表性条件下，分别构建`total`、`k1`和`ms`的首次散射深度直方图。主图保留原始计数；用于形态比较的归一化在对应区域内部独立进行。
+
+该机制分析适用于P4–S4代表性条件，不自动推广为P1–P6全部深度的F/T/B机制结论。P1–P6承担整体深度趋势分析。
+
+### 5.2.4 F/T/B区域分解
+
+对P0–S4和P4–S4，按照\(\Omega_F/\Omega_T/\Omega_B\)统计`k1`和`ms`计数，并由二者得到区域`total`。该分析同时比较区域整体计数变化和区域内深度分布形态变化。
+
+E2可以说明首次散射位于目标深度范围的多重散射事件对局部材料变化产生可测响应；该表述不等同于断言所有目标深度范围`ms`事件均能改善图像。
+
+## 5.3 E3：基于蒙特卡罗首次散射真值的成像作用比较
+
+E3使用grid条件下的蒙特卡罗首次散射真值，比较不同事件选择策略对二维缺陷图像的作用。目标深度事件仍由\(z_1\in\Omega_T\)定义，不使用缺陷横向位置筛选事件。
+
+E3构建六种图像：
+
+| 编号 | 事件组成 | 分析作用 |
+|---|---|---|
+| M0 | 全部`total`事件 | 原始计数图像与计数基准 |
+| M1 | 全部`k1`事件 | 完全去除`ms`的散射次数选择策略 |
+| M2 | \(\Omega_T\)中的`k1`事件 | 目标深度`k1`基准 |
+| M3 | \(\Omega_T\)中的`ms`事件 | 检验目标深度`ms`能否独立形成缺陷响应 |
+| M4 | \(\Omega_T\)中的`k1+ms`事件 | 基于首次散射真值的目标深度事件选择 |
+| M5 | \(\Omega_T\cup\Omega_B\)中的`k1+ms`事件 | 仅去除前方源区事件的影响 |
+
+M2与M4的差异只来自目标深度范围内的`ms`，用于隔离该分量的增量作用。M1与M4同时包含“去除非目标深度`k1`”和“加入目标深度`ms`”两项变化，只能评价两种完整事件选择策略的差异，不能单独归因于`ms`。M0与M5用于隔离去除前方源区事件的作用。M3单独表征目标深度`ms`的二维响应能力。
+
+M0–M5均为基于蒙特卡罗真值的理想比较图像，其中任一图像均不预设为最优策略。
 
 ---
 
-## E2：局部缺陷的可观测响应与 source-region mechanism
+# 6. E2定量指标与不确定度
 
-E2 是本文主要的结构响应与机制解释实验。
+## 6.1 整体相对计数变化
 
-其证据链为：
+对中心位置的散射类别\(s\in\{total,k1,ms\}\)，定义
 
 \[
-\text{grid total-count image}
-\rightarrow
-\text{center total/k1/ms count change}
-\rightarrow
-\text{representative depth-source redistribution}
-\rightarrow
-\text{front/target/behind decomposition}.
+C^{(s)}=
+\frac{N_D^{(s)}-N_0^{(s)}}{N_0^{(s)}}.
 \]
 
-### 第一层：缺陷可观测性
+该指标描述匹配狭缝全部首次散射深度范围内的整体计数响应。
 
-对 P1–P6 与对应 S1–S6 进行匹配 grid 扫描，首先仅使用 total detected count 构建探测响应图。
+## 6.2 源区相对计数变化
 
-这一层回答：
-
-> 局部低密度结构能否直接在探测端 total-count image 中形成可观测响应。
-
-### 第二层：散射阶次计数分解
-
-对 center pose，比较 P0–Sn 与 Pn–Sn 下的
+对\(r\in\{F,T,B\}\)，定义
 
 \[
-N^{total},
+C_r^{(s)}=
+\frac{N_{r,D}^{(s)}-N_{r,0}^{(s)}}{N_{r,0}^{(s)}}.
+\]
+
+该指标描述指定首次散射源区的计数幅值变化，不能由全局\(C^{(s)}\)替代。
+
+## 6.3 区域内总变差距离
+
+对同一区域内的基线与缺陷深度直方图分别归一化：
+
+\[
+p_{0,r}^{(s)}(z_i)=
+\frac{H_0^{(s)}(z_i)}{\sum_{j\in r}H_0^{(s)}(z_j)},
 \qquad
-N^{k1},
-\qquad
-N^{ms}.
-\]
-
-这一层回答：
-
-> total count 的结构响应由哪些散射阶次共同构成，以及 k1 与 ms 是否均发生变化。
-
-### 第三层：代表性 depth-source response
-
-选择代表性组合 P4–S4，并与 P0–S4 比较 detected first-scatter depth histogram。
-
-主图保留原始计数，不用归一化图替代实际计数响应。
-
-对
-
-\[
-s\in\{total,k1,ms\}
-\]
-
-分别分析
-
-\[
-H_0^{(s)}(z)
-\quad\text{与}\quad
-H_D^{(s)}(z).
-\]
-
-图像用于直接展示不同深度位置的计数差异；分布形态变化由后续指标计算完成。
-
-### 第四层：front / target / behind 分解
-
-对 P0–S4 与 P4–S4，按照 \(\Omega_F/\Omega_T/\Omega_B\) 对 first-scatter source region 进行积分分解。
-
-比较
-
-\[
-N_F^{(s)},
-\quad
-N_T^{(s)},
-\quad
-N_B^{(s)},
-\qquad
-s\in\{total,k1,ms\}.
-\]
-
-该层用于回答：
-
-- 缺陷对应 target region 的 detected source-response 是否发生明显变化；
-- front、target、behind 的整体计数变化是否具有不同幅度或方向；
-- 去除区域整体计数差异后，各区域内部的 depth-source shape 是否发生明显变化；
-- k1 与 ms 是否表现出相似或不同的 source redistribution。
-
-E2 可直接支持“target-source ms 对局部结构变化产生可测响应”，但不能独立证明 \(\Delta q\) 在定量上主导 \(\Delta K\)。
-
----
-
-## E3：基于 source truth 的成像作用与理想基准
-
-E3 用于评价 source-region information 的成像价值，而不是再次证明 source-response framework 本身。
-
-其总体问题为：
-
-> 当不同 source-region 的 detected contributions 能够通过 Monte Carlo truth 被理想识别时，保留或去除不同类别的 ms 对最终二维图像有何影响。
-
-grid 条件下，target source 应按照缺陷三维体积 \(V_D\) 定义。
-
-E3 仍属于 ideal / oracle level analysis，不等同于已经提出实际可部署的输运校正算法。其具体执行方案与图表设计在后续实验阶段另行补充。
-
----
-
-# 9. E2 中的定量分析指标
-
-E2 的定量分析只保留与当前科学问题直接对应的指标，并按照分析层级使用。核心上区分两类变化：
-
-\[
-\text{count-amplitude change}
-\]
-
-与
-
-\[
-\text{within-region shape change}.
-\]
-
-前者描述某一统计范围内的 detected contribution 整体增加或减少多少；后者描述去除整体幅值差异后，各 depth bins 之间的相对关系是否发生改变。
-
-## 9.1 E2-B：整体计数相对变化
-
-对 center pose 下的匹配组合，定义
-
-\[
-C^{(s)}
-=
-\frac{
-N_D^{(s)}-N_0^{(s)}
-}{
-N_0^{(s)}
-},
-\qquad
-s\in\{total,k1,ms\}.
-\]
-
-该指标用于 E2-B，表征整个匹配狭缝内对应散射类别的整体计数响应。进入 front / target / behind 分解后，不再用该全局指标替代区域级比较。
-
-## 9.2 E2-D：Source-region count response
-
-对
-
-\[
-r\in\{F,T,B\}
+p_{D,r}^{(s)}(z_i)=
+\frac{H_D^{(s)}(z_i)}{\sum_{j\in r}H_D^{(s)}(z_j)}.
 \]
 
 定义
 
 \[
-C_r^{(s)}
-=
-\frac{
-N_{r,D}^{(s)}-N_{r,0}^{(s)}
-}{
-N_{r,0}^{(s)}
-}.
-\]
-
-该指标表征不同 first-scatter source regions 的整体 detected contribution 对缺陷的相对响应，用于回答各区域主要发生了多大的计数幅值变化。
-
-## 9.3 E2-D：Within-region total variation distance
-
-为区分区域整体幅值变化与区域内部形态变化，对 baseline 与 defect histogram 在每个 source region 内分别归一化。
-
-对于 \(z_i\in r\)，定义
-
-\[
-p_{0,r}^{(s)}(z_i)
-=
-\frac{
-H_0^{(s)}(z_i)
-}{
-\sum_{j\in r}H_0^{(s)}(z_j)
-},
-\]
-
-\[
-p_{D,r}^{(s)}(z_i)
-=
-\frac{
-H_D^{(s)}(z_i)
-}{
-\sum_{j\in r}H_D^{(s)}(z_j)
-}.
-\]
-
-进一步定义区域内 total variation distance
-
-\[
-D_{\mathrm{TV},r}^{(s)}
-=
-\frac{1}{2}
-\sum_{i\in r}
-\left|
-p_{D,r}^{(s)}(z_i)
--
-p_{0,r}^{(s)}(z_i)
-\right|.
-\]
-
-其范围为
-
-\[
+D_{\mathrm{TV},r}^{(s)}=
+\frac{1}{2}\sum_{i\in r}
+\left|p_{D,r}^{(s)}(z_i)-p_{0,r}^{(s)}(z_i)\right|,
+\qquad
 0\le D_{\mathrm{TV},r}^{(s)}\le1.
 \]
 
-如果某一区域的 defect histogram 主要是 baseline histogram 的整体幅值缩放，即
+\(D_{\mathrm{TV},r}^{(s)}\)描述去除区域整体幅值差异后的分布形态变化。区域计数幅值由\(C_r^{(s)}\)表征，两类指标不能相互替代。
 
-\[
-H_D^{(s)}(z_i)
-\approx
-\alpha_r^{(s)}H_0^{(s)}(z_i),
-\qquad z_i\in r,
-\]
+## 6.4 Poisson重采样
 
-则区域内归一化后两者形态接近，\(D_{\mathrm{TV},r}^{(s)}\) 接近 0。随着区域内部 bin-to-bin 相对关系发生更明显变化，\(D_{\mathrm{TV},r}^{(s)}\) 增大。
+E2采用5000次Poisson重采样估计95%区间：
 
-因此，\(D_{\mathrm{TV},r}^{(s)}\) 只用于描述**区域内部形态差异**，不替代原始计数或 \(C_r^{(s)}\) 所描述的幅值变化。
+1. 对均匀模体与缺陷模体中互斥的`k1`和`ms`分箱计数分别采样；
+2. `total`由同一次抽样中的`k1+ms`得到，保持\(total=k1+ms\)；
+3. F/T/B分析对六个互斥基础类别及其深度分箱采样；
+4. 每次抽样重新计算\(C^{(s)}\)、\(C_r^{(s)}\)和\(D_{\mathrm{TV},r}^{(s)}\)；
+5. 以2.5%和97.5%分位数给出95%区间。
 
-## 9.4 Optional source-region fraction
+当相对变化的基线分母为0，或区域内归一化所需的计数和为0时，该次抽样对相应指标无效。结果应同时报告有效抽样数。
 
-当需要讨论 front / target / behind 在全部 detected contribution 中的组成变化时，可定义
-
-\[
-f_r^{(s)}
-=
-\frac{
-N_r^{(s)}
-}{
-N^{(s)}
-}.
-\]
-
-比较 P0 与缺陷模体的 \(f_F,f_T,f_B\)，可描述 source-region composition 的相对重分布。该指标属于可选补充量，不作为 E2-D 的常规核心指标。
-
-## 9.5 指标层级与统计边界
-
-E2 的核心指标按层级统一为：
-
-- E2-B：\(C^{(s)}\)，描述整个匹配狭缝的整体计数响应；
-- E2-D：\(C_r^{(s)}\)，描述 front / target / behind 的区域计数响应；
-- E2-D：\(D_{\mathrm{TV},r}^{(s)}\)，描述去除区域幅值差异后的内部形态响应；
-- 可选：\(f_r^{(s)}\)，仅在需要讨论 source-region composition 时使用。
-
-深度质心 \(\Delta\mu_z^{(s)}\) 不再作为常规指标。它只对整体深度平移敏感，而 E2 当前关注的是区域内是否保持近似比例缩放或出现更一般的 bin-to-bin 形态改变。
-
-\(D_{\mathrm{TV},r}^{(s)}\) 不设置统一经验阈值。有限 Monte Carlo histories 会产生非零的样本形态差异，因此较小的 \(D_{\mathrm{TV},r}^{(s)}\) 应结合对应区域的计数统计与 Monte Carlo 涨落水平解释；必要时可通过独立重复运行或计数重采样估计其波动范围。
+源区占比\(f_r^{(s)}=N_r^{(s)}/N^{(s)}\)仅作为需要时的补充组成指标，不列为E2的常规核心指标。
 
 ---
 
-# 10. 当前数据能够支持的结论层级
+# 7. E3图像评价与不确定度
 
-## 10.1 E1 可支持
+## 7.1 图像ROI
 
-- 不同狭缝在探测端形成可区分的接受区域；
-- 不同狭缝的 detected first-scatter depth profiles 具有不同主要响应深度；
-- ms 事件的 first-scatter locations 受束流范围约束，而 last-scatter locations 表现出更大的空间扩展。
+固定ROI划分如下：
 
-## 10.2 E2 可支持
+| 区域 | 扫描位置条件 | 像素数 | 用途 |
+|---|---|---:|---|
+| 缺陷ROI | \(|\Delta x|\le5\ \mathrm{mm},\ |\Delta y|\le5\ \mathrm{mm}\) | 25 | 缺陷区域均值 |
+| 间隔区 | \(\max(|\Delta x|,|\Delta y|)=7.5\ \mathrm{mm}\) | 24 | 分隔缺陷与背景，不参与指标 |
+| 背景ROI | \(\max(|\Delta x|,|\Delta y|)=10\ \mathrm{mm}\) | 32 | 背景均值与标准差 |
 
-- 匹配狭缝的 total-count grid image 能对局部缺陷形成可观测响应；
-- center pose 下 total、k1 与 ms 均可定量比较其结构响应；
-- representative depth-source profile 的变化可在 first-scatter coordinate 上与缺陷深度联系；
-- target-source ms contribution 对局部结构变化具有可测响应；
-- front / target / behind 的 detected source-response 可分别表现区域计数幅值变化和区域内部形态变化；其中后者需在区域内归一化后评价。
+## 7.2 CNR与计数保留率
 
-## 10.3 当前仍不能严格声称
+对图像策略\(g\)，定义
 
-- detected first-scatter histogram 等价于裸 \(q_j\)；
-- 结构响应完全由 \(\Delta q\) 导致；
-- \(K_k^{(m)}(j)\) 在缺陷前后保持不变；
-- last-scatter distribution 等价于完整多重散射 path density；
-- 所有 non-target ms 都是噪声；
-- target-source ms 在实际成像中一定提供正净收益。
+\[
+\mathrm{CNR}_g=
+\frac{|\mu_{D,g}-\mu_{B,g}|}{\sigma_{B,g}},
+\]
 
-最后一项由 E3 的应用级 ideal benchmark 进一步评价。
+其中\(\mu_{D,g}\)和\(\mu_{B,g}\)分别为缺陷ROI与背景ROI的平均计数，\(\sigma_{B,g}\)为背景ROI计数的标准差。
+
+计数保留率定义为
+
+\[
+\eta_g=\frac{N_g}{N_{M0}},
+\]
+
+其中\(N_g\)为全部扫描位置上的图像计数和。CNR和计数保留率联合评价事件选择策略。
+
+对指标\(X\)的相对变化可写为
+
+\[
+G_X(A\rightarrow B)=\frac{X_B-X_A}{X_A}.
+\]
+
+M2\(\rightarrow\)M4用于评价加入目标深度`ms`后的CNR和计数变化；M1\(\rightarrow\)M4用于完整策略比较，不承担`ms`的单因素归因。
+
+## 7.3 E3重采样
+
+E3以六个互斥基础类别
+
+\[
+\{\Omega_F,\Omega_T,\Omega_B\}
+\times
+\{k1,ms\}
+\]
+
+为Poisson重采样单元。每次抽样先对六类像素计数采样，再由同一组抽样结果组合M0–M5，重新计算CNR、计数保留率和相对变化。该过程重复5000次，并以2.5%和97.5%分位数给出95%区间。
+
+当\(\sigma_B=0\)、作为相对变化分母的参照CNR为0、参照计数为0或其他指标分母为0时，该次抽样对相应指标无效。结果报告各指标的有效抽样数。
+
+## 7.4 前方源区辅助比较
+
+M0与M5比较用于评价去除\(\Omega_F\)事件的理想作用。对P4条件，可使用厚度为\(z_c-5\ \mathrm{mm}=55\ \mathrm{mm}\)的均匀PMMA前层参考估计浅层贡献，并按入射历史数归一化后作差。该比较只评价缺陷前方散射贡献的可估计性及其与真值去除的近似程度，不作为独立散射校正算法，也不假定均匀前层图像与完整模体的前方源区贡献严格可加。
 
 ---
 
-# 11. 三实验总体证据链
+# 8. 各实验的证据边界
+
+## 8.1 E1可支持
+
+- S1–S6在探测面形成可区分的接受区域；
+- S1–S6的`total`首次散射深度响应具有不同的主要响应范围；
+- 首次与末次散射位置分布的差异表征首次散射后的空间扩展。
+
+## 8.2 E2可支持
+
+- 匹配狭缝的总计数图像对不同深度的局部空气缺陷产生可观测响应；
+- 中心位置的`k1`与`ms`计数变化可分别量化；
+- 在P4–S4代表性条件下，F/T/B首次散射源区表现出可分别统计的计数幅值和区域内形态变化；
+- 首次散射位于目标深度范围的`ms`贡献对局部材料改变产生可测响应。
+
+## 8.3 E3可支持
+
+在相应结果成立时，E3可说明：
+
+- M0–M5具有不同的CNR—计数组合；
+- 目标深度`ms`能否独立形成缺陷响应；
+- 在目标深度`k1`中加入目标深度`ms`后的增量作用；
+- 首次散射源区事件选择与传统`k1-only`策略之间的总体差异；
+- 去除前方源区事件以及前层参考作差的辅助效果。
+
+## 8.4 当前分析不直接支持
+
+- 被探测事件的首次散射直方图等价于裸源项\(q_j\)；
+- 局部结构引起的计数变化仅由首次散射源形成变化导致；
+- 末次散射位置分布等价于完整多重散射路径密度；
+- 所有非目标深度`ms`均为无效事件；
+- 所有目标深度`ms`在全部缺陷深度和成像条件下均带来正收益；
+- 蒙特卡罗首次散射真值可以在实际测量中无误差获得；
+- 均匀前层参考严格等于完整模体的前方源区贡献。
+
+---
+
+# 9. 三项实验的证据链
 
 \[
-\boxed{
-E1:\ \text{system baseline and transport characteristics}
-}
+\boxed{E1:\ \text{系统基线与输运空间特征}}
 \]
 
 \[
@@ -742,9 +454,7 @@ E1:\ \text{system baseline and transport characteristics}
 \]
 
 \[
-\boxed{
-E2:\ \text{defect observability and source-region mechanism}
-}
+\boxed{E2:\ \text{缺陷可观测响应与首次散射源区机制}}
 \]
 
 \[
@@ -752,42 +462,22 @@ E2:\ \text{defect observability and source-region mechanism}
 \]
 
 \[
-\boxed{
-E3:\ \text{source-conditioned imaging utility benchmark}
-}
+\boxed{E3:\ \text{蒙特卡罗首次散射真值层面的成像作用比较}}
 \]
 
-其中：
-
-- E1 建立系统和事件空间基础；
-- E2 完成本文主要缺陷响应与机制证据；
-- E3 评价 source-region information 的潜在成像价值。
-
-论文最稳健的核心物理主张仍为：
-
-> X 射线背散射中的多重散射具有非局域后续输运特征，但其 detected contribution 仍可按照首次散射源区进行分析；首次散射来源位于目标区域的多重散射分量能够对局部结构变化产生可测响应。
+E1提供通道与深度响应基础，E2建立缺陷计数变化及代表性首次散射源区证据，E3评价不同事件选择策略的二维成像作用。论文中的物理主张应限定在相应实验和统计区间所覆盖的条件内。
 
 ---
 
-# 12. 理论与执行层的职责边界
+# 10. 理论框架与执行文档的职责
 
-本文档只规定：
+本文档统一以下内容：
 
-- 理论变量；
-- 可观测量的物理含义；
-- source-region 定义；
-- 三实验的证据层级；
-- 指标的物理用途；
-- 结论强度边界。
+- 首次散射源项和条件输运响应的物理含义；
+- 原始事件记录与派生分类的关系；
+- `total/k1/ms`和F/T/B定义；
+- E1–E3的证据层级；
+- E2、E3指标及不确定度口径；
+- 结果解释的强度边界。
 
-具体内容如：
-
-- 需要读取哪些数据文件；
-- histogram bin；
-- 图的 panel 数量；
-- 坐标范围；
-- 表格列；
-- 文件命名；
-- 数据质量检查；
-
-统一放入实验执行指导文档，不在 framework 中重复展开。
+数据路径、文件名、直方图输出格式、绘图面板、脚本接口及数据质量检查由E1–E3执行文档规定，不在本框架中重复。

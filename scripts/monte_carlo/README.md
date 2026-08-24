@@ -5,6 +5,7 @@
 | 脚本 | 职责 | 输入文件/schema | 输出目录/文件 | 主要参数 | 失败条件 | 示例命令 |
 |---|---|---|---|---|---|---|
 | `generate_source_response_experiment_configs.py` | 展开 source-response center/grid 单 pose 配置及 manifest | `article_base.yaml`、P0–P9 geometry、P001/P002 profile | `config/generated/<campaign>/`；结果路径为 `results/<campaign>/events/raw/` | `--campaign-id`、`--n-primary-per-pose`、`--threads`、`--base-seed`、`--grid-only`、`--grid-condition`、`--overwrite` | geometry/profile 缺失、参数非法、grid 条件非法/重复、目标非空且未允许覆盖 | `python3 -m scripts.monte_carlo.generate_source_response_experiment_configs` |
+| `generate_front_slab_reference_configs.py` | 展开 P4 55 mm 均匀 PMMA 前层参考的 81 个单 pose 配置 | `article_base.yaml`、`P4_front_slab_55mm.yaml`、P001 profile | `config/generated/articlev3_p4_front_slab_55mm_100m/` 与独立 raw campaign | `--campaign-id`、`--n-primary-per-pose`、`--threads`、`--base-seed`、`--overwrite` | slab geometry、profile、参数或覆盖策略非法 | `python3 -m scripts.monte_carlo.generate_front_slab_reference_configs` |
 | `run_experiment_queue.py` | 串行执行 manifest，支持 dry-run、恢复、分片、范围和日志 | `source_response_simulation_campaign` manifest、`build/MSS` | raw event run、queue state/lock/log | `--dry-run`、`--state-file`、`--start-index`、`--end-index`、`--limit`、`--shard-*` | binary/manifest 缺失、live lock、输出不完整、large-run guard | `python3 -m scripts.monte_carlo.run_experiment_queue --manifest config/generated/articlev2/manifest.yaml --binary build/MSS --dry-run` |
 
 常用命令：
@@ -18,6 +19,9 @@ python3 -m scripts.monte_carlo.run_experiment_queue \
 ```
 
 article v1 的配置生成、batch merge、raw cleanup 和实验编号过滤接口已移除。
+
+P4 55 mm slab 参考批次的远端 8 worker × 6 threads 正式运行手册见
+[`docs/articlev2_analysis/E3_slab_remote_run.md`](../../docs/articlev2_analysis/E3_slab_remote_run.md)。该批次只生成 raw 数据，不改写主 `articlev3_merged` 数据层。
 
 ## 命令中的变量与参数
 

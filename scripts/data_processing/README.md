@@ -10,6 +10,7 @@
 | `estimate_slit_boundaries.py` | 独立校准 P001/P002 零位姿边界 | `events/raw/center/P0/{P001,P002}` | `data_processing/slit_channels/` 下 JSON、CSV、PNG | `--results-root`、`--output-dir`、`--overwrite` | baseline 不唯一或边界校验失败 | `python -m scripts.data_processing.estimate_slit_boundaries --results-root results/articlev2` |
 | `clean_events.py` | 过滤无效深度、删除 legacy 字段、追加 `slit_group/slit_label` | raw `events.csv` + metadata + boundary JSON | `events/valid/` 下 CSV、summary、manifest | `--results-root`、`--input-root`、`--output-root`、`--overwrite` | raw schema、边界、metadata 或覆盖策略非法 | `python -m scripts.data_processing.clean_events --results-root results/articlev2` |
 | `audit_experiment_data.py` | 校验配对、行守恒、标签、seed、条件完整性和 boundary hash | raw/valid events、metadata、boundary、生成 manifest | `data_processing/audit/` 下 YAML、CSV、Markdown | `--results-root`、`--output-dir`、`--generated-manifest`、`--overwrite` | 必需条件缺失或数据合同错误 | `python -m scripts.data_processing.audit_experiment_data --results-root results/articlev2` |
+| `prepare_articlev3_merged.py` | 校验并原子合并 articlev2、P001 80M 补充和 P002 100M 补充 campaign | 三个 campaign 的 raw events/metadata | `articlev3_merged/events/raw|valid` 与合并/审计记录 | `--repo-root`、`--output-root`、`--boundary-config`、`--overwrite` | run 数、seed、schema、metadata、网格、历史数或行守恒失败 | `python -m scripts.data_processing.prepare_articlev3_merged --output-root results/articlev3_merged --overwrite` |
 
 ```bash
 python -m scripts.data_processing.clean_events --results-root results/articlev2
@@ -19,3 +20,5 @@ python -m scripts.data_processing.audit_experiment_data \
 ```
 
 所有会替换完整输出层的命令默认拒绝覆盖；确认重建时显式传 `--overwrite`。
+
+Article V3 合并入口要求 989 个 source run，输出 665 个 valid condition/pose（17 center + 648 grid）。`events/raw/` 只保存指向三个原 campaign 的相对符号链接；`events/valid/` 保存流式清洗后实际合并的数据。P001 grid 必须由 20M+80M 构成，P002 grid 必须为独立 100M，八组 grid 条件均要求完整 9×9 且每 pose 恰好 100M histories。

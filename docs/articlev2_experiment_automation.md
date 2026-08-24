@@ -32,14 +32,14 @@
 - 每个 pose 的原始事件级输出组织；
 - 有效深度事件清洗、固定 S1–S6 channel 标签和数据资格审计；
 - E1 正式三图分析和 ROI 敏感性分析；
-- E2 默认四图两表、显式多 case depth-bin 分析及 partial grid 预览；
-- E3 预留接口和未迁移源码快照的边界。
+- E2 默认三图三表、显式多 case depth-bin 分析及 partial grid 预览；
+- E3 严格六图四表 source-truth imaging 与 front-slab 参考入口。
 
 本文不定义：
 
 - 正式 Monte Carlo 结果的物理解释；
 - 跨 pose CSV 合并；
-- 尚未冻结的 E3 source-truth imaging utility 指标。
+- 正式结果的论文级解释与推广。
 
 所有命令默认从仓库根目录执行。
 
@@ -602,17 +602,19 @@ conda run -n data python -m scripts.postprocessing.e1.analyze_roi_sensitivity \
   --results-root results/articlev2
 ```
 
-E2 默认生成四图两表，并可用重复 `--case BASELINE:DEFECT:SLIT:SCATTER_CLASS` 显式生成多个 depth-bin resolved case；图名携带 case/class，同一比较的 E2-T2 只生成一次。当前 campaign 只有 P2-S2、P4-S4、P6-S6 的完整 grid pair，使用以下命令生成明确标记为 `partial` 的 3×4 预览及默认 P4-S4 total 结果：
+E2 默认生成三图三表，并可用重复 `--case BASELINE:DEFECT:SLIT:SCATTER_CLASS` 显式生成多个 depth-bin resolved case；图名携带 case/class，同一比较的 E2-T2 只生成一次。补充 campaign 经 `prepare_articlev3_merged` 合并后，P1-S1 至 P6-S6 均有完整 9×9 grid；正式单位姿统计读取 grid `(0,0)`：
 
 ```bash
 conda run -n data python -m scripts.postprocessing.e2.run \
-  --results-root results/articlev2 \
+  --results-root results/articlev3_merged \
+  --summary-source grid-zero \
   --case P0:P4:S4:total \
-  --allow-partial-grid \
+  --case P0:P4:S4:k1 \
+  --case P0:P4:S4:ms \
   --overwrite
 ```
 
-`--min-baseline-count` 可显式屏蔽低 baseline-count bins；默认只将零分母设为 NaN。F2/F3/F4 与 E2-T2 的 bin width 由 `run_e2(..., depth_bin_width_mm=...)` 和脚本顶部 2 mm 默认值统一控制，不另设 CLI。缺失的 P0/P1/P3/P5 × P002 grid 共 324 poses 未包含在当前 341-task campaign 中，也不会由后处理补造。完整数据到位后去掉 `--allow-partial-grid` 运行严格验收。E3 仍为待设计接口；`scripts/postprocessing/_archive/` 不是正式入口，也不维护测试。
+`--min-baseline-count` 可显式屏蔽低 baseline-count bins；默认只将零分母设为 NaN。F2/F3 与 E2-T2 的 bin width 由 `run_e2(..., depth_bin_width_mm=...)` 和脚本顶部 2 mm 默认值统一控制，不另设 CLI。E2 核心表固定使用 5000 次 Poisson 重采样并报告 95% 区间和有效样本。E3 `run_core.py` 使用完整 matched grid 发布固定 5 PNG + 3 CSV；严格 `run.py` 还需要独立 55 mm slab，满足后发布固定 6 PNG + 4 CSV。`scripts/postprocessing/_archive/` 不是正式入口，也不维护测试。
 
 ## 15. 测试与验收
 
@@ -622,4 +624,4 @@ conda run -n data python -m scripts.postprocessing.e2.run \
 conda run -n data python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-正式验收还应确认生成器得到 341 个唯一任务、seed 为 1234–1574，审计 `error_count = 0`，E1 acceptance 为 `pass`，且当前 E2 acceptance 为带 324 个缺失 poses 记录的 `partial`。本轮不重新运行昂贵的 Geant4 正式仿真。
+正式验收还应确认原 articlev2 生成器得到 341 个唯一任务、seed 为 1234–1574；合并层核对 989 个 source run、665 个 valid condition/pose、648 个 grid pose、八组条件各 81 pose 和 100M histories/pose。E1/E2 acceptance 应为 `pass`，E3 core 固定为 5 PNG + 3 CSV；本轮不重新运行昂贵的 Geant4 正式仿真。

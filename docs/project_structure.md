@@ -14,7 +14,7 @@
 | `docs/archive/v1/` | 第一轮历史资料 | 仅用于了解旧 PMMA、macro 和旧 CSV 实现，不作为当前代码依据。 |
 | `docs/archive/v2/` | 项目 v2 正式归档基线 | 记录已完成 Geant4 核心及冻结 article v1 的规格、决策、架构、实施和验收。 |
 | `docs/project_structure.md` | 跨版本导航与 v2 交接摘要 | 新任务和新接手人员的第一阅读入口。 |
-| `docs/articlev2_analysis/` | Article V2 实验后处理规范 | E1 已完成；E2 已实现且当前 grid 为 partial；E3 待设计。 |
+| `docs/articlev2_analysis/` | Article V2 实验后处理规范 | 合并数据上的 E1/E2 与 E3 core 已完成；E3 slab 参考待数据。 |
 | 根级其他预研文档及配套资产 | 预研或实验设计 | 是否进入正式主线由相应状态说明和 `articlev2_analysis/` 导航决定。 |
 
 建议阅读顺序：
@@ -184,10 +184,9 @@ Article v1 曾形成完整实验链路，但活跃脚本、专属队列逻辑和
 | `config/generated/` | 生成器输出的 manifest 和逐 case YAML；可重新生成，不是正式规格。 |
 | `results/` | 仿真事件、清洗/审计、队列和实验后处理产物；分层合同见 `results/README.md`。 |
 
-Article V2 当前的权威数据路径是
-`results/articlev2/events/valid/**/events_valid.csv`。它由 `events/raw/**/events.csv` 可重复生成；冻结边界位于
-`results/articlev2/data_processing/slit_channels/slit_channel_boundaries.json`。E1 直接消费
-`slit_group/slit_label` schema。E1 输出位于 `results/articlev2/postprocessing/E1/`；E2 输出位于 `postprocessing/E2/`，当前因缺少 P002 grid 条件而标记为 partial；E3 尚无可执行实现。
+Article V2 原始 campaign 的有效数据路径是
+`results/articlev2/events/valid/**/events_valid.csv`。补充数据不改写该目录，而由
+`scripts/data_processing/prepare_articlev3_merged.py` 汇入 `results/articlev3_merged/`：raw 层使用相对符号链接索引三个 campaign，valid 层保存清洗合并后的事件。E1/E2 与 E3 core 正式输出位于该合并层的 `postprocessing/`；E3 严格入口位于 `scripts/postprocessing/e3/run.py`，55 mm slab 到位后发布固定六图四表。
 
 工作区中可能存在为未来研究准备的额外 geometry、profile 或 generated config。除非未来正式文档明确纳入，它们不属于项目 v2 交付物。
 
