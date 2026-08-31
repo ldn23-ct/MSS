@@ -14,7 +14,7 @@
 | `docs/archive/v1/` | 第一轮历史资料 | 仅用于了解旧 PMMA、macro 和旧 CSV 实现，不作为当前代码依据。 |
 | `docs/archive/v2/` | 项目 v2 正式归档基线 | 记录已完成 Geant4 核心及冻结 article v1 的规格、决策、架构、实施和验收。 |
 | `docs/project_structure.md` | 跨版本导航与 v2 交接摘要 | 新任务和新接手人员的第一阅读入口。 |
-| `docs/articlev2_analysis/` | Article V2 实验后处理规范 | 合并数据上的 E1/E2 与 E3 core 已完成；E3 slab 参考待数据。 |
+| `docs/articlev2_analysis/` | Article V2 实验后处理规范 | 合并数据上的 E1/E2 与包含独立 slab 参考的严格 E3 均已完成。 |
 | 根级其他预研文档及配套资产 | 预研或实验设计 | 是否进入正式主线由相应状态说明和 `articlev2_analysis/` 导航决定。 |
 
 建议阅读顺序：
@@ -72,7 +72,7 @@ Article v1 曾形成完整实验链路，但活跃脚本、专属队列逻辑和
 - 不提供旧脚本路径兼容 wrapper。
 - 历史文档中的命令只用于理解旧实现，不保证可运行。
 
-### 2.4 v2 明确未完成的内容
+### 2.4 v2 结果边界与后续扩展
 
 - 真实探测器材料响应和能量沉积 scoring。
 - Pose-level/scan-level summary 作为 Geant4 自动输出。
@@ -90,7 +90,7 @@ Article v1 曾形成完整实验链路，但活跃脚本、专属队列逻辑和
 | 生成配置 | `config/generated/` | 由实验生成器产生，不作为手工规格源，通常不提交。 |
 | Monte Carlo 自动化 | `scripts/monte_carlo/` | Articlev2 配置生成、共享队列、恢复与分片。 |
 | 基础数据处理 | `scripts/data_processing/` | 有效事件、slit 边界/标签和数据资格审计。 |
-| 实验后处理 | `scripts/postprocessing/` | E1/E2 正式实现、E3 接口预留和旧 schema 源码快照。 |
+| 实验后处理 | `scripts/postprocessing/` | E1/E2/E3 正式实现、数据驱动 Report 生成器和旧 schema 源码快照。 |
 | 测试 | `tests/` | 核心契约及三个活跃 Python 层的回归。 |
 | 运行产物 | `results/` | raw/valid 事件、数据处理、队列状态、日志和 E1–E3 后处理输出，不属于源码。 |
 | 文档 | `docs/` | 跨版本导航、历史归档和未启动预研草案。 |
@@ -186,7 +186,7 @@ Article v1 曾形成完整实验链路，但活跃脚本、专属队列逻辑和
 
 Article V2 原始 campaign 的有效数据路径是
 `results/articlev2/events/valid/**/events_valid.csv`。补充数据不改写该目录，而由
-`scripts/data_processing/prepare_articlev3_merged.py` 汇入 `results/articlev3_merged/`：raw 层使用相对符号链接索引三个 campaign，valid 层保存清洗合并后的事件。E1/E2 与 E3 core 正式输出位于该合并层的 `postprocessing/`；E3 严格入口位于 `scripts/postprocessing/e3/run.py`，55 mm slab 到位后发布固定六图四表。
+`scripts/data_processing/prepare_articlev3_merged.py` 汇入 `results/articlev3_merged/`：raw 层使用相对符号链接索引三个 campaign，valid 层保存清洗合并后的事件。E1/E2 与严格 E3 正式输出位于该合并层的 `postprocessing/`；E3 严格入口从 `results/articlev3_p4_front_slab_55mm_100m/` 独立读取 55 mm slab，并已发布固定六图四表。
 
 工作区中可能存在为未来研究准备的额外 geometry、profile 或 generated config。除非未来正式文档明确纳入，它们不属于项目 v2 交付物。
 

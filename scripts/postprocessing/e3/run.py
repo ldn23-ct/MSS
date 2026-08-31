@@ -45,7 +45,13 @@ RESAMPLE_COUNT = 5000
 DEFAULT_RESAMPLE_SEED = 20260814
 SLAB_THICKNESS_MM = 55.0
 SLAB_REFERENCE_TYPE = "uniform_pmma_front_slab"
+SLAB_MODEL_ID = "P4_front_slab_55mm"
+SLAB_CAMPAIGN_ID = "articlev3_p4_front_slab_55mm_100m"
+SLAB_N_PRIMARY = 100_000_000
+SLAB_SEED_START = 11_000
+SLAB_SEED_END = 11_080
 SLAB_MANIFEST_NAME = "reference_manifest.yaml"
+SUPPLEMENTARY_DIR_NAME = "supplementary"
 BASE_CATEGORIES = ("k1_F", "k1_T", "k1_B", "ms_F", "ms_T", "ms_B")
 METHODS = ("M0", "M1", "M2", "M3", "M4", "M5")
 METHOD_LABELS = {
@@ -525,6 +531,10 @@ def inspect_slab_root(slab_root: Path | None) -> tuple[list[tuple[Path, RunMetad
     manifest_path = slab_root / SLAB_MANIFEST_NAME
     issues: list[str] = []
     expected_geometry = ""
+    expected_model = ""
+    expected_n_primary = 0
+    expected_seed_start = 0
+    expected_seed_end = -1
     if not manifest_path.is_file():
         issues.append(f"slab provenance manifest is missing: {manifest_path}")
     else:
@@ -532,8 +542,12 @@ def inspect_slab_root(slab_root: Path | None) -> tuple[list[tuple[Path, RunMetad
         if not isinstance(value, dict):
             issues.append(f"slab provenance manifest must be a map: {manifest_path}")
         else:
+            if value.get("schema_version") != 1:
+                issues.append("slab provenance schema_version must be 1")
             if value.get("reference_type") != SLAB_REFERENCE_TYPE:
                 issues.append(f"slab reference_type must be {SLAB_REFERENCE_TYPE}")
+            if value.get("campaign_id") != SLAB_CAMPAIGN_ID:
+                issues.append(f"slab campaign_id must be {SLAB_CAMPAIGN_ID}")
             try:
                 thickness = float(value.get("thickness_mm"))
             except (TypeError, ValueError):
@@ -543,6 +557,60 @@ def inspect_slab_root(slab_root: Path | None) -> tuple[list[tuple[Path, RunMetad
             expected_geometry = str(value.get("vehicle_geometry_file", "")).strip()
             if not expected_geometry:
                 issues.append("slab vehicle_geometry_file must be declared")
+            expected_model = str(value.get("vehicle_model_id", "")).strip()
+            if expected_model != SLAB_MODEL_ID:
+                issues.append(f"slab vehicle_model_id must be {SLAB_MODEL_ID}")
+            if value.get("profile_id") != SLIT_PROFILE["S4"]:
+                issues.append(f"slab profile_id must be {SLIT_PROFILE['S4']}")
+            if value.get("slit_id") != "S4":
+                issues.append("slab slit_id must be S4")
+            try:
+                manifest_energy = float(value.get("energy_keV"))
+            except (TypeError, ValueError):
+                manifest_energy = math.nan
+            if not math.isclose(manifest_energy, EXPECTED_ENERGY_KEV):
+                issues.append(f"slab manifest energy_keV must be {EXPECTED_ENERGY_KEV:g}")
+            try:
+                raw_n_primary = value.get("n_primary_per_pose")
+                expected_n_primary = int(raw_n_primary)
+                if float(raw_n_primary) != expected_n_primary:
+                    raise ValueError
+            except (TypeError, ValueError):
+                expected_n_primary = 0
+            if expected_n_primary != SLAB_N_PRIMARY:
+                issues.append(f"slab n_primary_per_pose must be {SLAB_N_PRIMARY}")
+            try:
+                raw_pose_count = value.get("pose_count")
+                pose_count = int(raw_pose_count)
+                if float(raw_pose_count) != pose_count:
+                    raise ValueError
+            except (TypeError, ValueError):
+                pose_count = 0
+            if pose_count != 81:
+                issues.append("slab manifest pose_count must be 81")
+            for axis in ("x", "y"):
+                try:
+                    offsets = tuple(float(item) for item in value.get(f"{axis}_offsets_mm", ()))
+                except (TypeError, ValueError):
+                    offsets = ()
+                if offsets != tuple(float(item) for item in GRID_OFFSETS_MM):
+                    issues.append(f"slab manifest {axis}_offsets_mm must equal the frozen 9-point grid")
+            try:
+                raw_seed_start = value.get("seed_start")
+                raw_seed_end = value.get("seed_end")
+                expected_seed_start = int(raw_seed_start)
+                expected_seed_end = int(raw_seed_end)
+                if (
+                    float(raw_seed_start) != expected_seed_start
+                    or float(raw_seed_end) != expected_seed_end
+                ):
+                    raise ValueError
+            except (TypeError, ValueError):
+                expected_seed_start, expected_seed_end = 0, -1
+            if (expected_seed_start, expected_seed_end) != (SLAB_SEED_START, SLAB_SEED_END):
+                issues.append(
+                    f"slab seed range must be {SLAB_SEED_START}--{SLAB_SEED_END}"
+                )
     runs: list[tuple[Path, RunMetadata]] = []
     for event_path in sorted(slab_root.rglob("events_valid.csv")):
         try:
@@ -568,6 +636,22 @@ def inspect_slab_root(slab_root: Path | None) -> tuple[list[tuple[Path, RunMetad
         geometry_ids = {
             str(item.raw.get("vehicle_geometry_file", "")).strip() for _, item in runs
         }
+        seeds: list[int] = []
+        seed_parse_failed = False
+        for _, item in runs:
+            raw_seed = item.raw.get("random_seed")
+            raw_base_seed = item.raw.get("base_random_seed")
+            try:
+                seed = int(raw_seed)
+                base_seed = int(raw_base_seed)
+                if float(raw_seed) != seed or float(raw_base_seed) != base_seed:
+                    raise ValueError
+            except (TypeError, ValueError):
+                seed_parse_failed = True
+                continue
+            if seed != base_seed:
+                issues.append(f"slab random_seed/base_random_seed mismatch: {item.metadata_path}")
+            seeds.append(seed)
         if profiles != {SLIT_PROFILE["S4"]}:
             issues.append(f"slab grid must use P001 for S4, found {sorted(profiles)}")
         if modes != {"grid"}:
@@ -576,13 +660,25 @@ def inspect_slab_root(slab_root: Path | None) -> tuple[list[tuple[Path, RunMetad
             issues.append(f"slab energy must be {EXPECTED_ENERGY_KEV:g} keV")
         if len(histories) != 1:
             issues.append("slab runs must use one common n_primary")
+        elif histories != {expected_n_primary} or histories != {SLAB_N_PRIMARY}:
+            issues.append(f"slab metadata n_primary must be {SLAB_N_PRIMARY}")
         if len(phantom_ids) != 1:
             issues.append("slab runs must use one common vehicle_model_id")
+        elif phantom_ids != {expected_model} or phantom_ids != {SLAB_MODEL_ID}:
+            issues.append(f"slab metadata vehicle_model_id must be {SLAB_MODEL_ID}")
         if len(geometry_ids) != 1 or not next(iter(geometry_ids), ""):
             issues.append("slab runs must share one non-empty vehicle_geometry_file")
         elif expected_geometry and geometry_ids != {expected_geometry}:
             issues.append(
                 "slab metadata vehicle_geometry_file does not match reference_manifest.yaml"
+            )
+        if seed_parse_failed:
+            issues.append("slab metadata random_seed/base_random_seed must be finite integers")
+        elif len(seeds) != len(set(seeds)):
+            issues.append("slab metadata seeds must be unique")
+        elif set(seeds) != set(range(expected_seed_start, expected_seed_end + 1)):
+            issues.append(
+                f"slab metadata seeds must cover {SLAB_SEED_START}--{SLAB_SEED_END} exactly"
             )
     return runs, issues, len(missing)
 
@@ -1105,9 +1201,22 @@ def write_tables(
 
 
 def validate_outputs(output_dir: Path) -> None:
-    actual = {path.name for path in output_dir.iterdir() if path.is_file()}
-    if actual != set(OUTPUT_NAMES) or any(path.is_dir() for path in output_dir.iterdir()):
-        raise AssertionError(f"E3 output contract mismatch: expected {sorted(OUTPUT_NAMES)}, got {sorted(actual)}")
+    entries = list(output_dir.iterdir())
+    actual = {path.name for path in entries if path.is_file()}
+    unexpected = sorted(
+        path.name
+        for path in entries
+        if path.name not in OUTPUT_NAMES and path.name != SUPPLEMENTARY_DIR_NAME
+    )
+    supplementary = output_dir / SUPPLEMENTARY_DIR_NAME
+    if supplementary.exists() and not supplementary.is_dir():
+        unexpected.append(SUPPLEMENTARY_DIR_NAME)
+    if actual != set(OUTPUT_NAMES) or unexpected:
+        raise AssertionError(
+            f"E3 output contract mismatch: expected formal files {sorted(OUTPUT_NAMES)} "
+            f"and optional {SUPPLEMENTARY_DIR_NAME}/, got files {sorted(actual)} "
+            f"and unexpected entries {sorted(set(unexpected))}"
+        )
     t1 = pd.read_csv(output_dir / TABLE_NAMES[0])
     t2 = pd.read_csv(output_dir / TABLE_NAMES[1])
     t3 = pd.read_csv(output_dir / TABLE_NAMES[2])
@@ -1239,7 +1348,14 @@ def run_analysis(
 def publish(staging: Path, output_dir: Path, overwrite: bool) -> None:
     if output_dir.exists():
         existing = list(output_dir.iterdir())
-        unexpected = sorted(path.name for path in existing if path.name not in OUTPUT_NAMES)
+        unexpected = sorted(
+            path.name
+            for path in existing
+            if path.name not in OUTPUT_NAMES and path.name != SUPPLEMENTARY_DIR_NAME
+        )
+        supplementary = output_dir / SUPPLEMENTARY_DIR_NAME
+        if supplementary.exists() and not supplementary.is_dir():
+            unexpected.append(SUPPLEMENTARY_DIR_NAME)
         if unexpected:
             raise FileExistsError(f"unexpected files block E3 publication: {unexpected}")
         if existing and not overwrite:
@@ -1247,6 +1363,9 @@ def publish(staging: Path, output_dir: Path, overwrite: bool) -> None:
         backup = output_dir.parent / f".{output_dir.name}.backup"
         if backup.exists():
             raise FileExistsError(f"stale E3 backup blocks overwrite: {backup}")
+        if supplementary.is_dir():
+            shutil.copytree(supplementary, staging / SUPPLEMENTARY_DIR_NAME)
+        validate_outputs(staging)
         output_dir.replace(backup)
         try:
             staging.replace(output_dir)

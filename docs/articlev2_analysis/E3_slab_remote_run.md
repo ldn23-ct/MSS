@@ -2,6 +2,8 @@
 
 本手册只在远端 Linux 主机生成 slab raw 数据。主分析数据 `articlev3_merged` 不需要复制到远端；清洗、严格 E3 和 Report 补全在 raw 数据带回当前项目后执行。
 
+> 当前状态（2026-08-31）：本批次 81 个 raw pose 已导入当前项目，清洗与严格 E3 六图四表均已完成。本手册继续作为该 campaign 的复现、分片运行和中断恢复记录。
+
 ## 1. 冻结批次参数
 
 | 项目 | 值 |
@@ -97,4 +99,4 @@ tar -czf articlev3_p4_front_slab_55mm_100m.tar.gz \
 sha256sum articlev3_p4_front_slab_55mm_100m.tar.gz
 ```
 
-回传压缩包及 SHA-256。导入当前项目后，再执行 slit 标签冻结、深度清洗、81-pose provenance 审计、严格 E3 六图四表和 Report 补全；本远端阶段到 raw 数据回传即结束。
+回传压缩包及 SHA-256 后，当前项目中的后续固定流程为 slit 标签冻结、深度清洗、81-pose provenance 审计、严格 E3 六图四表和 Report 重建。本批次已经完成该全流程；远端阶段仍以 raw 数据回传为边界。

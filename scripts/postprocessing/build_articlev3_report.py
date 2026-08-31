@@ -40,7 +40,7 @@ def comparison_value(table: pd.DataFrame, phantom: str, comparison: str) -> pd.S
     return rows.iloc[0]
 
 
-def build_report(results_root: Path) -> str:
+def build_report(results_root: Path, slab_root: Path) -> str:
     e1 = results_root / "postprocessing" / "E1"
     e2 = results_root / "postprocessing" / "E2"
     e3 = results_root / "postprocessing" / "E3"
@@ -53,6 +53,11 @@ def build_report(results_root: Path) -> str:
         e3 / "E3_T1_P4_S4_metrics.csv",
         e3 / "E3_T2_depth_method_metrics.csv",
         e3 / "E3_T3_depth_comparisons.csv",
+        e3 / "E3_T4_front_removal_reference_metrics.csv",
+        e3 / "E3_F6_front_removal_reference.png",
+        slab_root / "reference_manifest.yaml",
+        slab_root / "events" / "valid" / "valid_events_manifest.yaml",
+        slab_root / "events" / "valid" / "valid_events_summary.csv",
     )
     missing = [path for path in required if not path.is_file()]
     if missing:
@@ -68,14 +73,58 @@ def build_report(results_root: Path) -> str:
     p4 = pd.read_csv(required[5])
     methods = pd.read_csv(required[6])
     comparisons = pd.read_csv(required[7])
+    reference = pd.read_csv(required[8])
+    reference_manifest = yaml.safe_load(required[10].read_text(encoding="utf-8"))
+    slab_valid_manifest = yaml.safe_load(required[11].read_text(encoding="utf-8"))
+    slab_valid_summary = pd.read_csv(required[12])
+    if (
+        tuple(reference.image) != ("M0", "M5", "reference_subtracted")
+        or reference.cnr_n_effective.le(0).any()
+    ):
+        raise ValueError("E3-T4 front-removal reference table failed its report contract")
+    if (
+        reference_manifest.get("reference_type") != "uniform_pmma_front_slab"
+        or float(reference_manifest.get("thickness_mm", 0)) != 55.0
+        or reference_manifest.get("vehicle_model_id") != "P4_front_slab_55mm"
+        or reference_manifest.get("campaign_id")
+        != "articlev3_p4_front_slab_55mm_100m"
+        or int(reference_manifest.get("pose_count", 0)) != 81
+        or int(reference_manifest.get("n_primary_per_pose", 0)) != 100_000_000
+        or int(reference_manifest.get("seed_start", 0)) != 11_000
+        or int(reference_manifest.get("seed_end", 0)) != 11_080
+    ):
+        raise ValueError("slab reference manifest failed its report contract")
+    if (
+        int(slab_valid_manifest.get("input_file_count", 0)) != 81
+        or len(slab_valid_summary) != 81
+        or int(slab_valid_summary.rows_read.sum())
+        != int(slab_valid_manifest.get("total_rows_read", -1))
+        or int(slab_valid_summary.rows_kept.sum())
+        != int(slab_valid_manifest.get("total_rows_kept", -1))
+    ):
+        raise ValueError("slab valid-event manifest failed its report contract")
     phantoms = [f"P{i}" for i in range(1, 7)]
     depths = dict(zip(phantoms, (15, 30, 45, 60, 75, 90), strict=True))
+    reference_by_image = reference.set_index("image")
+    slab_rows_read = int(slab_valid_manifest["total_rows_read"])
+    slab_rows_kept = int(slab_valid_manifest["total_rows_kept"])
+    slab_rows_dropped = slab_rows_read - slab_rows_kept
+    slab_rows_dropped_nonfinite = int(
+        slab_valid_manifest["total_rows_dropped_nonfinite_depth"]
+    )
+    slab_rows_dropped_negative = int(
+        slab_valid_manifest["total_rows_dropped_negative_depth"]
+    )
+    slab_image_count = int(
+        reference_by_image.loc["M0", "count_metric"]
+        - reference_by_image.loc["reference_subtracted", "count_metric"]
+    )
 
     base = "../../results/articlev3_merged/postprocessing"
     lines: list[str] = [
         "# PMMA–空气缺陷 X 射线背散射蒙特卡罗实验报告",
         "",
-        "> 数据版本：`results/articlev3_merged`。更新日期：2026-08-24。E1、E2 及 E3 主网格结果已完成；E3 均匀前层参考实验因缺少独立 55 mm PMMA slab 数据而保留为唯一待完成项。",
+        "> 数据版本：`results/articlev3_merged` + `results/articlev3_p4_front_slab_55mm_100m`。更新日期：2026-08-31。E1、E2 与包含 55 mm PMMA 前层参考的严格 E3 均已完成。",
         "",
         "## 1. 实验目的与结论摘要",
         "",
@@ -89,6 +138,7 @@ def build_report(results_root: Path) -> str:
         "- P4–S4 的 T 区 total 从 2152 降至 1，ms 从 811 降至 0；与此同时全深度 total 只下降 19.3%，说明局部目标深度响应会被其他深度来源计数稀释。",
         "- M0 CNR 从 P1 的 47.25 单调降至 P6 的 4.53。M3 在 P6 仍有 CNR 10.29，表明 T 区 ms 事件自身能够形成位置一致的二维响应。",
         "- M4 在六个深度均取得最高点估计 CNR，但只保留 M0 的 51.0% 到 10.0% 计数；CNR 增益必须与计数代价共同报告。",
+        "- P4–S4 中，独立 55 mm slab 作差仍保留中心低响应，但点估计 CNR 为 9.80，低于 M0 的 11.37 和理想 truth 去前层 M5 的 18.26；该参考不能视为 M5 的等价替代。",
         "",
         "上述结论描述统计关系，不将某一首次散射源区直接表述为图像变化的独立因果来源。",
         "",
@@ -101,6 +151,7 @@ def build_report(results_root: Path) -> str:
         "| 入射历史数 | center：20M/run；正式 grid：100M/pose |",
         "| P001 grid 合并 | 旧 20M + 独立补充 80M |",
         "| P002 grid | 独立 100M |",
+        "| 55 mm slab 参考 | 独立 P001/S4，100M/pose，81 pose，seed 11000–11080 |",
         "| PMMA 模体 | 1000×1000×220 mm³ |",
         "| 空气缺陷 | 10×10×10 mm³，横向中心 (0,0) |",
         "| P1–P6 中心深度 | 15、30、45、60、75、90 mm |",
@@ -126,6 +177,8 @@ def build_report(results_root: Path) -> str:
         "- 原始事件 63,521,299 行；深度清洗后保留 58,796,025 行。",
         "- 八组 grid 条件均有 81 pose；全部合并 grid metadata 为 100M histories/pose。",
         "- P001 的每个网格点保存 20M 与 80M 两个来源 seed；P002 保存独立 100M 来源 seed。",
+        f"- 独立 slab campaign 的 81 个 raw pose 共 {slab_rows_read:,} 行；按同一冻结边界和深度规则清洗后保留 {slab_rows_kept:,} 行（{pct(slab_rows_kept / slab_rows_read, 2)}）。",
+        f"- slab 共丢弃 {slab_rows_dropped:,} 行，其中非有限深度 {slab_rows_dropped_nonfinite:,} 行、负深度 {slab_rows_dropped_negative:,} 行；逐文件行数守恒全部通过。",
         "",
         "### 3.2 条件完成情况",
         "",
@@ -137,7 +190,7 @@ def build_report(results_root: Path) -> str:
     lines.extend(
         [
             "",
-            "基础检查全部通过：`total=k1+ms`、`F+T+B=total`、网格坐标无缺失/重复、全部 source seed 唯一，E1/E2 acceptance 均为 `pass`。主实验无缺失或异常 run，也无需重仿真。唯一缺项是第 6.6 节所需的 55 mm 均匀 PMMA slab 参考 81 pose。",
+            "基础检查全部通过：`total=k1+ms`、`F+T+B=total`、网格坐标无缺失/重复、全部 source seed 唯一，E1/E2 acceptance 均为 `pass`。slab 的 81 pose、100M histories/pose、seed 11000–11080、560 keV、P001 和 geometry provenance 均通过严格 E3 预检；当前无缺失或异常 run。",
             "",
             "## 4. E1：均匀模体系统响应基线",
             "",
@@ -344,7 +397,37 @@ def build_report(results_root: Path) -> str:
             "",
             "### 6.6 均匀前层参考辅助比较",
             "",
-            "**状态：未完成。** 当前 `results/` 中没有独立的 P4–S4、55 mm 均匀 PMMA 前层 slab 9×9 数据，因此 E3-F6 和 E3-T4 未生成，也没有用其他数据替代。未来补充 81 pose 后，应使用冻结的严格 E3 入口计算参考作差并更新本节。",
+            f"![E3-F6 front removal reference]({base}/E3/E3_F6_front_removal_reference.png)",
+            "",
+            "P4 与均匀 slab 均为 100M histories/pose，因此参考作差的历史数归一化系数为 `alpha=1`。E3-T4 的计数、图像统计量和重采样区间如下。",
+            "",
+            "| 图像 | 计数指标 | 指标类型 | ROI 均值 | 背景均值 | 背景标准差 | CNR (95% CI) | n effective |",
+            "|---|---:|---|---:|---:|---:|---|---:|",
+        ]
+    )
+    reference_labels = {
+        "M0": "M0 total",
+        "M5": "M5 truth 去除 F 区",
+        "reference_subtracted": "独立 slab 参考作差",
+    }
+    metric_labels = {
+        "raw_count": "raw count",
+        "signed_equivalent_count": "signed-equivalent count",
+    }
+    for image_name in ("M0", "M5", "reference_subtracted"):
+        row = reference_by_image.loc[image_name]
+        lines.append(
+            f"| {reference_labels[image_name]} | {int(row.count_metric):,} | "
+            f"{metric_labels[str(row.count_metric_kind)]} | {num(row.roi_mean)} | "
+            f"{num(row.background_mean)} | {num(row.background_std)} | {num(row.cnr)} "
+            f"({interval(row, 'cnr_ci_low', 'cnr_ci_high')}) | {int(row.cnr_n_effective)} |"
+        )
+    lines.extend(
+        [
+            "",
+            f"独立 slab 图像提供 {slab_image_count:,} 个 S4 接受事件；从 M0 逐像素作差后的总和为 429,432。该值是允许像素出现正负贡献的 signed-equivalent count，不是实际探测事件数，也不定义为 M0 的保留率。",
+            "",
+            "E3-F6 中，slab 作差图仍显示与缺陷位置一致的中心低响应，但点估计 CNR 的顺序为 M5 18.26、M0 11.37、slab 作差 9.80。作差图的背景标准差为 133.47，高于 M0 的 114.09 和 M5 的 68.00，因此它没有复现理想 source-truth 去除 F 区后的图像质量。E3-T4 只给出各图像自身的重采样区间，没有定义配对 CNR 差值或收益区间；这里不据区间重叠作显著性判断。",
             "",
             "## 7. E1–E3 综合证据链",
             "",
@@ -354,6 +437,7 @@ def build_report(results_root: Path) -> str:
             "4. **事件组成：** P0 baseline fT total 从 56.7% 降至 11.8%；缺陷零位姿 T 区事件因空气替代而接近零。",
             "5. **目标深度 ms：** M3 在全部深度形成位置一致的二维响应，深部 P5/P6 点估计 CNR 高于 M0。",
             "6. **策略权衡：** M4 在六个深度具有最高点估计 CNR，但深部只保留约 10% 计数；M5 提高深部 CNR 的同时舍弃大量 F 区事件。",
+            "7. **独立参考边界：** 55 mm slab 作差保留中心缺陷响应，但 CNR 点估计低于 M0，且明显低于 truth M5；本配置不支持把均匀 slab 作差视为理想 F 区去除的等价实现。",
             "",
             "## 8. 核心结果总表",
             "",
@@ -371,7 +455,7 @@ def build_report(results_root: Path) -> str:
             "| 加入 T 区 ms 是否稳定提高 CNR | 仅 P2/P6 的增益 CI 高于 0 | 部分支持 |",
             "| M1→M4 完整策略 | P2–P6 CNR 增益 CI 高于 0，计数减少 | 支持但有代价 |",
             "| 去除 F 区事件 | P2–P6 CNR 增益 CI 高于 0，M5保留率随深度下降 | 支持统计关联 |",
-            "| slab 参考近似 F 区 | 无独立 slab 数据 | 待完成 |",
+            "| slab 参考近似 F 区 | 作差 CNR 9.80，M0 11.37，truth M5 18.26 | 保留响应，但不支持与理想去除等价 |",
             "",
             "## 9. 完成状态与结果边界",
             "",
@@ -381,8 +465,8 @@ def build_report(results_root: Path) -> str:
             "- [x] E2 完整网格、整体响应、F/T/B 占比和 P4 定量分解",
             "- [x] E2 5000 次 Poisson 重采样",
             "- [x] E3 M0–M5、M3、三类策略比较和深度趋势",
-            "- [x] E3 core 5000 次 Poisson 重采样",
-            "- [ ] 55 mm 均匀前层 slab 参考 81 pose、E3-F6 与 E3-T4",
+            "- [x] E3 严格入口 5000 次 Poisson 重采样",
+            "- [x] 55 mm 均匀前层 slab 参考 81 pose、E3-F6 与 E3-T4",
             "",
             "本报告的数值结论限定于 560 keV、当前 PMMA/空气材料、模体尺寸、准直几何、理想探测面和蒙特卡罗首次散射真值。实际系统可实现性、能量/材料推广、source-truth 的可观测近似以及机制归因留待 Discussion。",
             "",
@@ -390,9 +474,10 @@ def build_report(results_root: Path) -> str:
             "",
             f"- E1：[`postprocessing/E1`]({base}/E1/)",
             f"- E2：[`postprocessing/E2`]({base}/E2/)",
-            f"- E3 core：[`postprocessing/E3`]({base}/E3/)",
+            f"- E3 完整六图四表：[`postprocessing/E3`]({base}/E3/)",
             "- 合并审计：`results/articlev3_merged/data_processing/audit/`",
             "- 合并来源与行数：`results/articlev3_merged/data_processing/merge/`",
+            "- slab provenance 与清洗审计：[`reference_manifest.yaml`](../../results/articlev3_p4_front_slab_55mm_100m/reference_manifest.yaml)、[`valid_events_manifest.yaml`](../../results/articlev3_p4_front_slab_55mm_100m/events/valid/valid_events_manifest.yaml)",
             "",
         ]
     )
@@ -403,6 +488,11 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--results-root", type=Path, default=Path("results/articlev3_merged"))
     parser.add_argument(
+        "--slab-root",
+        type=Path,
+        default=Path("results/articlev3_p4_front_slab_55mm_100m"),
+    )
+    parser.add_argument(
         "--output", type=Path, default=Path("docs/articlev2_analysis/Report.md")
     )
     return parser.parse_args()
@@ -410,7 +500,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    text = build_report(args.results_root.resolve())
+    text = build_report(args.results_root.resolve(), args.slab_root.resolve())
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(text, encoding="utf-8")
     print(f"report: {args.output.resolve()}")

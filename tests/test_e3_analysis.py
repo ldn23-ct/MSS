@@ -174,6 +174,71 @@ class ArticleV2E3AnalysisTests(unittest.TestCase):
             _, issues, _ = analysis.inspect_slab_root(root)
             self.assertTrue(any("reference_type" in item for item in issues))
             self.assertTrue(any("thickness_mm" in item for item in issues))
+            self.assertTrue(any("n_primary_per_pose" in item for item in issues))
+            self.assertTrue(any("seed range" in item for item in issues))
+
+    def test_complete_slab_preflight_binds_manifest_to_run_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            geometry = "config/geometry/article_files/P4_front_slab_55mm.yaml"
+            manifest = {
+                "schema_version": 1,
+                "reference_type": analysis.SLAB_REFERENCE_TYPE,
+                "campaign_id": analysis.SLAB_CAMPAIGN_ID,
+                "thickness_mm": analysis.SLAB_THICKNESS_MM,
+                "vehicle_geometry_file": geometry,
+                "vehicle_model_id": analysis.SLAB_MODEL_ID,
+                "profile_id": "P001",
+                "slit_id": "S4",
+                "energy_keV": 560.0,
+                "n_primary_per_pose": analysis.SLAB_N_PRIMARY,
+                "pose_count": 81,
+                "x_offsets_mm": list(GRID_OFFSETS_MM),
+                "y_offsets_mm": list(GRID_OFFSETS_MM),
+                "seed_start": analysis.SLAB_SEED_START,
+                "seed_end": analysis.SLAB_SEED_END,
+            }
+            (root / analysis.SLAB_MANIFEST_NAME).write_text(
+                yaml.safe_dump(manifest), encoding="utf-8"
+            )
+            run_paths = []
+            for index, (x, y) in enumerate(
+                (x, y) for x in GRID_OFFSETS_MM for y in GRID_OFFSETS_MM
+            ):
+                run = root / f"run_{index:02d}"
+                run.mkdir()
+                (run / "events_valid.csv").write_text("det_x\n", encoding="utf-8")
+                metadata = {
+                    "scan_mode": "grid",
+                    "vehicle_model_id": analysis.SLAB_MODEL_ID,
+                    "vehicle_geometry_file": geometry,
+                    "pose_id": f"pose_{index}",
+                    "head_offset_x_mm": float(x),
+                    "head_offset_y_mm": float(y),
+                    "n_primary": analysis.SLAB_N_PRIMARY,
+                    "random_seed": analysis.SLAB_SEED_START + index,
+                    "base_random_seed": analysis.SLAB_SEED_START + index,
+                    "source": {"mono_energy_keV": 560.0},
+                    "collimator": {"profile_id": "P001"},
+                }
+                (run / "metadata.yaml").write_text(
+                    yaml.safe_dump(metadata), encoding="utf-8"
+                )
+                run_paths.append(run)
+
+            runs, issues, missing = analysis.inspect_slab_root(root)
+            self.assertEqual(81, len(runs))
+            self.assertEqual(0, missing)
+            self.assertEqual([], issues)
+
+            duplicate = yaml.safe_load((run_paths[-1] / "metadata.yaml").read_text())
+            duplicate["random_seed"] = analysis.SLAB_SEED_START
+            duplicate["base_random_seed"] = analysis.SLAB_SEED_START
+            (run_paths[-1] / "metadata.yaml").write_text(
+                yaml.safe_dump(duplicate), encoding="utf-8"
+            )
+            _, issues, _ = analysis.inspect_slab_root(root)
+            self.assertTrue(any("seeds must be unique" in item for item in issues))
 
     def test_complete_synthetic_run_generates_exact_six_figures_and_four_tables(self):
         conditions = {
@@ -264,6 +329,46 @@ class ArticleV2E3AnalysisTests(unittest.TestCase):
             with self.assertRaisesRegex(FileExistsError, "unexpected files"):
                 analysis.publish(staging, output, overwrite=True)
             self.assertTrue((output / "notes.txt").is_file())
+
+    def test_formal_validation_and_publication_preserve_supplementary_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            output = root / "E3"
+            conditions = {
+                phantom: analysis.GridCondition(
+                    phantom=phantom,
+                    slit=f"S{index}",
+                    base_counts=synthetic_base(index),
+                    n_primary=20_000_000,
+                    energy_keV=560.0,
+                )
+                for index, phantom in enumerate(DEFECT_CENTER_Z_MM, start=1)
+            }
+            slab = analysis.SlabCondition(
+                image=np.full((9, 9), 500, dtype=np.int64),
+                n_primary=20_000_000,
+                energy_keV=560.0,
+                geometry_id="P4_front_slab_55mm.yaml",
+            )
+            analysis.run_e3(conditions, slab, output, resample_seed=29, resample_count=60)
+            supplementary = output / analysis.SUPPLEMENTARY_DIR_NAME / "owned_analysis"
+            supplementary.mkdir(parents=True)
+            (supplementary / "marker.txt").write_text("preserve", encoding="utf-8")
+            analysis.validate_outputs(output)
+
+            staging = root / "staging"
+            analysis.run_e3(conditions, slab, staging, resample_seed=31, resample_count=60)
+            analysis.publish(staging, output, overwrite=True)
+            self.assertEqual(
+                "preserve",
+                (output / analysis.SUPPLEMENTARY_DIR_NAME / "owned_analysis" / "marker.txt")
+                .read_text(encoding="utf-8"),
+            )
+            analysis.validate_outputs(output)
+
+            (output / "unknown").mkdir()
+            with self.assertRaisesRegex(AssertionError, "unexpected entries"):
+                analysis.validate_outputs(output)
 
 
 if __name__ == "__main__":

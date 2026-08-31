@@ -624,4 +624,4 @@ conda run -n data python -m scripts.postprocessing.e2.run \
 conda run -n data python -m unittest discover -s tests -p 'test_*.py'
 ```
 
-正式验收还应确认原 articlev2 生成器得到 341 个唯一任务、seed 为 1234–1574；合并层核对 989 个 source run、665 个 valid condition/pose、648 个 grid pose、八组条件各 81 pose 和 100M histories/pose。E1/E2 acceptance 应为 `pass`，E3 core 固定为 5 PNG + 3 CSV；本轮不重新运行昂贵的 Geant4 正式仿真。
+正式验收还应确认原 articlev2 生成器得到 341 个唯一任务、seed 为 1234–1574；合并层核对 989 个 source run、665 个 valid condition/pose、648 个 grid pose、八组条件各 81 pose 和 100M histories/pose。独立 55 mm slab 还应核对 81 pose、100M histories/pose 和 seed 11000–11080。E1/E2 acceptance 应为 `pass`，严格 E3 固定为 6 PNG + 4 CSV；已有正式 Geant4 raw 数据不在后处理验收中重跑。

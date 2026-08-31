@@ -13,7 +13,7 @@ Geant4 核心只生成事件级数据，不实现 pose-level summary、scan-leve
 | Geant4 仿真核心 | 固定车辆 ROI、移动成像头、事件追踪与 `events.csv + metadata.yaml` | 稳定基础，供后续实验复用 |
 | Monte Carlo 自动化 | manifest、逐 pose 配置、队列执行、状态恢复与分片 | `scripts/monte_carlo/` |
 | 基础数据处理 | 有效深度筛选、slit 标签、边界校准和数据审计 | `scripts/data_processing/` |
-| 实验后处理 | E1/E2 与 E3 主网格分析已完成；E3 slab 参考为唯一待补数据项 | `scripts/postprocessing/` |
+| 实验后处理 | E1/E2 与包含 55 mm slab 参考的严格 E3 均已完成 | `scripts/postprocessing/` |
 
 主要文档入口：
 

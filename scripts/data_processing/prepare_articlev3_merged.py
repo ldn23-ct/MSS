@@ -573,7 +573,11 @@ def prepare_campaign(
                 "E2": {"status": "ready", "problems": []},
                 "E3": {
                     "status": "main_grid_ready",
-                    "problems": ["55 mm uniform-PMMA front-slab reference grid is not present"],
+                    "problems": [],
+                    "scope_note": (
+                        "the independently managed 55 mm front-slab campaign is validated "
+                        "by the strict E3 preflight, outside this merged-data audit"
+                    ),
                 },
             },
             "overall_status": "pass",
@@ -589,7 +593,7 @@ def prepare_campaign(
             f"- 原始 source run：{audit['counts']['source_raw_run_count']}\n"
             f"- 清洗合并后的 condition/pose：{len(inventory_rows)}\n"
             "- matched grid：P0/P1–P6 全部 9×9 完整，每点 1 亿 histories。\n"
-            "- E3 主 M0–M5 grid 数据完整；55 mm 前层 slab 参考仍缺失。\n",
+            "- E3 主 M0–M5 grid 数据完整；独立 55 mm slab campaign 由严格 E3 入口另行预检。\n",
             encoding="utf-8",
         )
 
