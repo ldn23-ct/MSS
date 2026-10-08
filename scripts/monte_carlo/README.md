@@ -5,7 +5,8 @@
 | 脚本 | 职责 | 输入文件/schema | 输出目录/文件 | 主要参数 | 失败条件 | 示例命令 |
 |---|---|---|---|---|---|---|
 | `generate_source_response_experiment_configs.py` | 展开 source-response center/grid 单 pose 配置及 manifest | `article_base.yaml`、P0–P9 geometry、P001/P002 profile | `config/generated/<campaign>/`；结果路径为 `results/<campaign>/events/raw/` | `--campaign-id`、`--n-primary-per-pose`、`--threads`、`--base-seed`、`--grid-only`、`--grid-condition`、`--overwrite` | geometry/profile 缺失、参数非法、grid 条件非法/重复、目标非空且未允许覆盖 | `python3 -m scripts.monte_carlo.generate_source_response_experiment_configs` |
-| `generate_front_slab_reference_configs.py` | 展开 P4 55 mm 均匀 PMMA 前层参考的 81 个单 pose 配置 | `article_base.yaml`、`P4_front_slab_55mm.yaml`、P001 profile | `config/generated/articlev3_p4_front_slab_55mm_100m/` 与独立 raw campaign | `--campaign-id`、`--n-primary-per-pose`、`--threads`、`--base-seed`、`--overwrite` | slab geometry、profile、参数或覆盖策略非法 | `python3 -m scripts.monte_carlo.generate_front_slab_reference_configs` |
+| `generate_front_slab_reference_configs.py` | 按 slab reference 展开 81 个单 pose 配置，默认保留 P4 55 mm 批次 | base YAML、slab 与 matched phantom geometry、匹配 profile | generated 配置与独立 raw campaign | `--geometry`、`--campaign-id`、`--n-primary-per-pose`、`--threads`、`--base-seed`、`--overwrite` | slab 尺寸与缺陷前缘不符、profile/slit 不匹配、参数或覆盖策略非法 | `python3 -m scripts.monte_carlo.generate_front_slab_reference_configs` |
+| `generate_front_slab_grid_campaigns.py` | 一次生成 P1/P2/P3/P5/P6 前层 slab 的五个独立 campaign | `front_slab_grid_base.yaml`、五份 slab geometry、P001/P002 profile | 五组 generated 目录，共 405 单 pose 配置 | `--output-root`、`--overwrite` | 任一输入非法或目标非空时在生成前拒绝 | `python3 -m scripts.monte_carlo.generate_front_slab_grid_campaigns` |
 | `run_experiment_queue.py` | 串行执行 manifest，支持 dry-run、恢复、分片、范围和日志 | `source_response_simulation_campaign` manifest、`build/MSS` | raw event run、queue state/lock/log | `--dry-run`、`--state-file`、`--start-index`、`--end-index`、`--limit`、`--shard-*` | binary/manifest 缺失、live lock、输出不完整、large-run guard | `python3 -m scripts.monte_carlo.run_experiment_queue --manifest config/generated/articlev2/manifest.yaml --binary build/MSS --dry-run` |
 
 常用命令：
@@ -22,6 +23,10 @@ article v1 的配置生成、batch merge、raw cleanup 和实验编号过滤接�
 
 P4 55 mm slab 参考批次的远端 8 worker × 6 threads 正式运行手册见
 [`docs/articlev2_analysis/E3_slab_remote_run.md`](../../docs/articlev2_analysis/E3_slab_remote_run.md)。该批次只生成 raw 数据，不改写主 `articlev3_merged` 数据层。
+
+P1/P2/P3/P5/P6 slab 补充批次使用独立 P4-matched 基准，固定 560 keV、81 pose/slab、100M primary/pose、7 threads/MSS。远端先单独构建，再运行
+`python3 -m scripts.monte_carlo.generate_front_slab_grid_campaigns`，最后在五个终端各启动一个 worker，共请求 35 个计算线程。五组 dry-run、正式启动和恢复的完整命令见
+[`front_slab_grid_remote_run.md`](../../docs/articlev2_analysis/front_slab_grid_remote_run.md)。本入口不读取当前 `article_base.yaml` 的试验参数，也不自动启动 worker。
 
 ## 命令中的变量与参数
 

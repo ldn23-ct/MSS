@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the dedicated P4 55 mm uniform-PMMA front-slab grid campaign."""
+"""Generate a depth-matched uniform-PMMA front-slab grid campaign."""
 
 from __future__ import annotations
 
@@ -39,11 +39,11 @@ DEFAULT_N_PRIMARY_PER_POSE = 100_000_000
 DEFAULT_THREADS = 6
 DEFAULT_BASE_SEED = 11_000
 REFERENCE_MANIFEST_NAME = "reference_manifest.yaml"
+MATCHED_PHANTOM_IDS = tuple(f"P{index}" for index in range(1, 7))
 
 
 def validate_reference_geometry(path: Path) -> dict[str, Any]:
-    """Validate the exact geometry needed by the frozen E3 slab comparison."""
-    validate_geometry(path, REFERENCE_MODEL_ID)
+    """Validate a uniform slab ending at its matched phantom's defect front."""
     geometry = load_yaml(path)
     metadata = geometry.get("metadata", {})
     reference = metadata.get("reference", {})
@@ -51,39 +51,70 @@ def validate_reference_geometry(path: Path) -> dict[str, Any]:
     components = geometry.get("components", [])
     if not isinstance(reference, dict) or reference.get("type") != REFERENCE_TYPE:
         raise ValueError(f"geometry metadata.reference.type must be {REFERENCE_TYPE}: {path}")
+    phantom_id = reference.get("matched_phantom")
+    if phantom_id not in MATCHED_PHANTOM_IDS:
+        raise ValueError(f"front-slab matched_phantom must be P1-P6: {path}")
     try:
         thickness = float(reference.get("thickness_mm"))
     except (TypeError, ValueError) as error:
         raise ValueError(f"geometry reference thickness must be numeric: {path}") from error
-    if not math.isclose(thickness, REFERENCE_THICKNESS_MM):
-        raise ValueError(f"geometry reference thickness must be 55 mm: {path}")
-    if roi.get("center_mm") != [0.0, 0.0, 27.5]:
-        raise ValueError(f"front-slab roi.center_mm must equal [0, 0, 27.5]: {path}")
-    if roi.get("size_mm") != [1000.0, 1000.0, 55.0]:
-        raise ValueError(f"front-slab roi.size_mm must equal [1000, 1000, 55]: {path}")
-    if roi.get("material") != "G4_PLEXIGLASS":
-        raise ValueError(f"front-slab material must be G4_PLEXIGLASS: {path}")
+    if not math.isfinite(thickness) or thickness <= 0.0:
+        raise ValueError(f"front-slab thickness must be finite and positive: {path}")
+    model_id = f"{phantom_id}_front_slab_{format_number_token(thickness)}mm"
+    validate_geometry(path, model_id)
+    profile_id = "P001" if int(phantom_id[1:]) % 2 == 0 else "P002"
+    slit_id = f"S{phantom_id[1:]}"
+    if reference.get("matched_profile") != profile_id or reference.get("matched_slit") != slit_id:
+        raise ValueError(f"front-slab {phantom_id} must match {profile_id}/{slit_id}: {path}")
+    if reference.get("z_range_mm") != [0.0, thickness]:
+        raise ValueError(f"front-slab reference z_range_mm must equal [0, {thickness}]: {path}")
+    if metadata.get("defect") is not None:
+        raise ValueError(f"front-slab metadata.defect must be null: {path}")
+    center = [0.0, 0.0, thickness / 2.0]
+    size = [1000.0, 1000.0, thickness]
+    bounds = {"x": [-500.0, 500.0], "y": [-500.0, 500.0], "z": [0.0, thickness]}
+    expected_roi = {
+        "center_mm": center,
+        "size_mm": size,
+        "bounds_mm": bounds,
+        "material": "G4_PLEXIGLASS",
+        "region_id": "pmma_bulk",
+    }
+    for field, expected in expected_roi.items():
+        if roi.get(field) != expected:
+            raise ValueError(f"front-slab roi.{field} must equal {expected!r}: {path}")
     if len(components) != 1 or not isinstance(components[0], dict):
         raise ValueError(f"front-slab geometry must contain exactly one component: {path}")
     root = components[0]
     expected_root = {
         "name": "VehicleROI",
         "host": "World",
-        "center_mm": [0.0, 0.0, 27.5],
-        "size_mm": [1000.0, 1000.0, 55.0],
+        "shape": "box",
+        "center_mm": center,
+        "size_mm": size,
         "material": "G4_PLEXIGLASS",
+        "region_id": "pmma_bulk",
         "is_insert": False,
-        "half_size_mm": [500.0, 500.0, 27.5],
+        "half_size_mm": [500.0, 500.0, thickness / 2.0],
+        "aabb_mm": bounds,
+        "placement_center_in_host_mm": center,
     }
     for field, expected in expected_root.items():
         if root.get(field) != expected:
             raise ValueError(
                 f"front-slab root {field} must equal {expected!r}, got {root.get(field)!r}: {path}"
             )
-    if root.get("aabb_mm", {}).get("z") != [0.0, 55.0]:
-        raise ValueError(f"front-slab root must occupy 0 <= z <= 55 mm: {path}")
     if any(bool(item.get("is_insert")) for item in components if isinstance(item, dict)):
         raise ValueError(f"front-slab geometry must not contain an insert: {path}")
+    matched_path = path.with_name(f"{phantom_id}.yaml")
+    defect = validate_geometry(matched_path, phantom_id)["defect"]
+    try:
+        defect_front = float(defect["z_range_mm"][0])
+        computed_front = float(defect["center_mm"][2]) - float(defect["size_mm"][2]) / 2.0
+    except (KeyError, IndexError, TypeError, ValueError) as error:
+        raise ValueError(f"matched phantom must define a defect front: {matched_path}") from error
+    if not math.isclose(defect_front, computed_front) or not math.isclose(thickness, defect_front):
+        raise ValueError(f"front-slab thickness must match {phantom_id} defect front {defect_front} mm: {path}")
     return geometry
 
 
@@ -118,14 +149,22 @@ def generate(
     if n_primary_per_pose <= 0 or threads <= 0 or base_seed < 0:
         raise ValueError("n_primary_per_pose/threads must be positive and base_seed non-negative")
 
-    validate_reference_geometry(geometry_path)
+    geometry = validate_reference_geometry(geometry_path)
+    reference = geometry["metadata"]["reference"]
+    model_id = geometry["metadata"]["model_name"]
+    thickness_mm = float(reference["thickness_mm"])
+    matched_phantom = reference["matched_phantom"]
+    profile_id = reference["matched_profile"]
+    slit_id = reference["matched_slit"]
+    if campaign_id == DEFAULT_CAMPAIGN_ID and model_id != REFERENCE_MODEL_ID:
+        raise ValueError("non-P4 geometry requires a distinct --campaign-id")
     validate_profile_file(profile_file)
     base_config = load_yaml(base_config_path)
     geometry_file_text = repo_relative(repo_root, geometry_path)
     profile_file_text = repo_relative(repo_root, profile_file)
     energy_token = format_number_token(energy_keV)
     output_directory = (
-        f"results/{campaign_id}/events/raw/grid/{REFERENCE_MODEL_ID}/{REFERENCE_PROFILE_ID}"
+        f"results/{campaign_id}/events/raw/grid/{model_id}/{profile_id}"
     )
     points = grid_points()
 
@@ -146,12 +185,12 @@ def generate(
         "base_config": repo_relative(repo_root, base_config_path),
         "reference": {
             "reference_type": REFERENCE_TYPE,
-            "vehicle_model_id": REFERENCE_MODEL_ID,
+            "vehicle_model_id": model_id,
             "vehicle_geometry_file": geometry_file_text,
-            "thickness_mm": REFERENCE_THICKNESS_MM,
-            "matched_phantom": "P4",
-            "profile_id": REFERENCE_PROFILE_ID,
-            "slit_id": REFERENCE_SLIT_ID,
+            "thickness_mm": thickness_mm,
+            "matched_phantom": matched_phantom,
+            "profile_id": profile_id,
+            "slit_id": slit_id,
         },
         "parameters": {
             "energy_keV": float(energy_keV),
@@ -178,14 +217,14 @@ def generate(
             seed = base_seed + pose_index
             pose_id = build_pose_id(x_mm, y_mm)
             case_id = (
-                f"front_slab_reference_grid_{REFERENCE_MODEL_ID}_{REFERENCE_PROFILE_ID}_"
+                f"front_slab_reference_grid_{model_id}_{profile_id}_"
                 f"{pose_id}_E{energy_token}_seed{seed}"
             )
             config_path = (
                 output_dir
                 / "configs"
                 / "grid"
-                / f"{REFERENCE_MODEL_ID}_{REFERENCE_PROFILE_ID}"
+                / f"{model_id}_{profile_id}"
                 / f"{pose_id}.yaml"
             )
             config = build_config(
@@ -193,7 +232,7 @@ def generate(
                 case_id=case_id,
                 geometry_file=geometry_file_text,
                 profile_file=profile_file_text,
-                profile_id=REFERENCE_PROFILE_ID,
+                profile_id=profile_id,
                 head_offset_x_mm=x_mm,
                 head_offset_y_mm=y_mm,
                 energy_keV=energy_keV,
@@ -207,18 +246,18 @@ def generate(
                 {
                     "case_id": case_id,
                     "condition_id": (
-                        f"front_slab_reference_grid_{REFERENCE_MODEL_ID}_"
-                        f"{REFERENCE_PROFILE_ID}_E{energy_token}"
+                        f"front_slab_reference_grid_{model_id}_"
+                        f"{profile_id}_E{energy_token}"
                     ),
                     "config_file": repo_relative(repo_root, config_path),
                     "task_granularity": "one_pose_per_config",
                     "scan_mode": "grid",
-                    "phantom_id": REFERENCE_MODEL_ID,
+                    "phantom_id": model_id,
                     "geometry_file": geometry_file_text,
-                    "profile_id": REFERENCE_PROFILE_ID,
-                    "slit_ids": list(PROFILE_SETTINGS[REFERENCE_PROFILE_ID]["slit_ids"]),
+                    "profile_id": profile_id,
+                    "slit_ids": list(PROFILE_SETTINGS[profile_id]["slit_ids"]),
                     "detector_x_range_zero_mm": list(
-                        PROFILE_SETTINGS[REFERENCE_PROFILE_ID]["detector_x_range_zero_mm"]
+                        PROFILE_SETTINGS[profile_id]["detector_x_range_zero_mm"]
                     ),
                     "energy_keV": float(energy_keV),
                     "pose_index": pose_index,
@@ -248,12 +287,12 @@ def generate(
         reference_manifest = {
             "schema_version": 1,
             "reference_type": REFERENCE_TYPE,
-            "thickness_mm": REFERENCE_THICKNESS_MM,
+            "thickness_mm": thickness_mm,
             "vehicle_geometry_file": geometry_file_text,
-            "vehicle_model_id": REFERENCE_MODEL_ID,
+            "vehicle_model_id": model_id,
             "campaign_id": campaign_id,
-            "profile_id": REFERENCE_PROFILE_ID,
-            "slit_id": REFERENCE_SLIT_ID,
+            "profile_id": profile_id,
+            "slit_id": slit_id,
             "energy_keV": float(energy_keV),
             "n_primary_per_pose": n_primary_per_pose,
             "pose_count": len(points),

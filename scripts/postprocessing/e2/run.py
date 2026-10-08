@@ -50,6 +50,7 @@ BASELINE_COLOR = "#0072B2"
 DEFECT_COLOR = "#D55E00"
 CLASS_COLORS = {"total": "#333333", "k1": "#0072B2", "ms": "#D55E00"}
 GRID_FIGURE_NAME = "E2-F1_matched_grid_total_counts.png"
+SUPPLEMENTARY_DIR_NAME = "supplementary"
 T1_TABLE_NAME = "E2-T1_center_raw_count_decomposition.csv"
 T3_TABLE_NAME = "E2-T3_center_source_region_fractions.csv"
 ZERO_POSE_T1_TABLE_NAME = "E2-T1_zero_pose_raw_count_decomposition.csv"
@@ -141,7 +142,11 @@ class E2Case:
         }
 
 
-DEFAULT_CASE = E2Case("P0", "P4", "S4", "total")
+FORMAL_CASES = tuple(
+    E2Case("P0", f"P{index}", f"S{index}", scatter_class)
+    for index in range(1, 7)
+    for scatter_class in CLASSES
+)
 
 
 def parse_case(value: str) -> E2Case:
@@ -172,13 +177,29 @@ def parse_case(value: str) -> E2Case:
 
 
 def normalize_cases(cases: list[E2Case] | tuple[E2Case, ...] | None) -> tuple[E2Case, ...]:
-    normalized = tuple(cases) if cases else (DEFAULT_CASE,)
+    normalized = tuple(cases) if cases else FORMAL_CASES
     if len(set(normalized)) != len(normalized):
         raise ValueError("duplicate --case selections are not allowed")
     return normalized
 
 
-def figure_names(cases: tuple[E2Case, ...]) -> tuple[str, ...]:
+def grouped_figure_names() -> tuple[str, ...]:
+    names = [GRID_FIGURE_NAME]
+    for scatter_class in CLASSES:
+        names.extend(
+            (
+                f"E2-F2_P1-P6_{scatter_class}_binwise_relative_response.png",
+                f"E2-F3_P1-P6_{scatter_class}_raw_depth_counts.png",
+            )
+        )
+    return tuple(names)
+
+
+def figure_names(
+    cases: tuple[E2Case, ...], *, grouped_depth_panels: bool = False
+) -> tuple[str, ...]:
+    if grouped_depth_panels:
+        return grouped_figure_names()
     names = [GRID_FIGURE_NAME]
     for case in cases:
         names.extend(
@@ -967,19 +988,23 @@ def _plot_grid_figure(
                 aspect="equal",
                 xlim=(edges[0], edges[-1]),
                 ylim=(edges[0], edges[-1]),
-                xticks=GRID_OFFSETS_MM,
-                yticks=GRID_OFFSETS_MM,
+                xticks=GRID_OFFSETS_MM[::2],
+                yticks=GRID_OFFSETS_MM[::2],
                 xlabel="Grid x (mm)",
                 ylabel="Grid y (mm)",
                 title=title,
             )
-            axis.tick_params(labelsize=6)
-        fig.colorbar(meshes[-1], ax=pair_axes, shrink=0.72, pad=0.015, label="Raw total count")
+            axis.tick_params(axis="both", labelsize=10)
+            axis.xaxis.label.set_size(10)
+            axis.yaxis.label.set_size(10)
+            axis.title.set_size(11)
+        colorbar = fig.colorbar(meshes[-1], ax=pair_axes, shrink=0.72, pad=0.015)
+        colorbar.set_label("Raw total count", fontsize=10)
+        colorbar.ax.tick_params(labelsize=10)
         grid_ranges[pair_name] = {
             "minimum": int(minimum),
             "maximum": int(maximum),
         }
-    fig.suptitle("E2-F1  Matched 9×9 grid total-count images")
     _save_png(fig, figures / GRID_FIGURE_NAME)
     return grid_ranges
 
@@ -1102,6 +1127,81 @@ def _plot_case_f3(
     _save_png(fig, figures / name)
 
 
+def _plot_grouped_f2(
+    cases: tuple[E2Case, ...],
+    histogram_cache: dict[E2Case, tuple[np.ndarray, dict[str, np.ndarray]]],
+    figures: Path,
+    min_baseline_count: int | None,
+) -> dict[E2Case, int]:
+    scatter_class = cases[0].scatter_class
+    if len(cases) != 6 or any(case.scatter_class != scatter_class for case in cases):
+        raise ValueError("grouped E2-F2 requires six matched cases of one scatter class")
+    fig, axes = plt.subplots(2, 3, figsize=(16.0, 9.2), sharex=True, constrained_layout=True)
+    masked: dict[E2Case, int] = {}
+    for axis, case in zip(axes.flat, cases, strict=True):
+        edges, histograms = histogram_cache[case]
+        response = binwise_relative_response(
+            histograms["defect"],
+            histograms["baseline"],
+            min_baseline_count=min_baseline_count,
+        )
+        axis.stairs(100.0 * response, edges, color=CLASS_COLORS[scatter_class], linewidth=1.35)
+        axis.axhline(0.0, color="#222222", linestyle="--", linewidth=0.9)
+        axis.axvspan(*case_target_range(case), color="#BDBDBD", alpha=0.28, zorder=0)
+        axis.set(xlim=DEPTH_RANGE_MM, title=f"{case.defect_phantom}–{case.slit}")
+        axis.grid(axis="y", alpha=0.18)
+        masked[case] = int(np.isnan(response).sum())
+    for axis in axes[:, 0]:
+        axis.set_ylabel("Bin-wise relative response (%)")
+    for axis in axes[1, :]:
+        axis.set_xlabel("First-scatter depth z (mm)")
+    fig.suptitle(f"E2-F2  P1–S1 to P6–S6 — {scatter_class}")
+    _save_png(
+        fig,
+        figures / f"E2-F2_P1-P6_{scatter_class}_binwise_relative_response.png",
+    )
+    return masked
+
+
+def _plot_grouped_f3(
+    cases: tuple[E2Case, ...],
+    histogram_cache: dict[E2Case, tuple[np.ndarray, dict[str, np.ndarray]]],
+    figures: Path,
+) -> None:
+    scatter_class = cases[0].scatter_class
+    if len(cases) != 6 or any(case.scatter_class != scatter_class for case in cases):
+        raise ValueError("grouped E2-F3 requires six matched cases of one scatter class")
+    fig, axes = plt.subplots(2, 3, figsize=(16.0, 9.2), sharex=True, constrained_layout=True)
+    for axis, case in zip(axes.flat, cases, strict=True):
+        edges, histograms = histogram_cache[case]
+        axis.stairs(
+            histograms["baseline"], edges, color=BASELINE_COLOR,
+            label=f"P0–{case.slit}", linewidth=1.35,
+        )
+        axis.stairs(
+            histograms["defect"], edges, color=DEFECT_COLOR,
+            label=f"{case.defect_phantom}–{case.slit}", linewidth=1.35,
+        )
+        axis.axvspan(*case_target_range(case), color="#BDBDBD", alpha=0.28, zorder=0)
+        maximum = max(
+            int(histograms["baseline"].max(initial=0)),
+            int(histograms["defect"].max(initial=0)),
+        )
+        axis.set(
+            xlim=DEPTH_RANGE_MM,
+            ylim=(0.0, maximum * 1.08 if maximum else 1.0),
+            title=f"{case.defect_phantom}–{case.slit}",
+        )
+        axis.grid(axis="y", alpha=0.18)
+    axes[0, 0].legend(fontsize=8)
+    for axis in axes[:, 0]:
+        axis.set_ylabel("Raw detected counts")
+    for axis in axes[1, :]:
+        axis.set_xlabel("First-scatter depth z (mm)")
+    fig.suptitle(f"E2-F3  P1–S1 to P6–S6 — {scatter_class}")
+    _save_png(fig, figures / f"E2-F3_P1-P6_{scatter_class}_raw_depth_counts.png")
+
+
 def run_e2(
     ctx: AnalysisContext,
     *,
@@ -1113,6 +1213,7 @@ def run_e2(
     resample_count: int = RESAMPLE_COUNT,
     summary_source: str = "center",
 ) -> dict[str, Any]:
+    grouped_depth_panels = cases is None
     selected_cases = normalize_cases(cases)
     t1_name, t3_name = summary_table_names(summary_source)
     depth_bin_width_mm = validate_depth_bin_width(depth_bin_width_mm)
@@ -1181,17 +1282,36 @@ def run_e2(
         region_table.to_csv(tables / t2_table_name(case), index=False)
         region_tables[comparison_slug] = region_table
 
+    histogram_cache: dict[E2Case, tuple[np.ndarray, dict[str, np.ndarray]]] = {}
+    for case in selected_cases:
+        histogram_cache[case] = _case_depth_histograms(
+            frame_cache[case.comparison_slug], case, depth_bin_width_mm
+        )
+
+    masked_bins: dict[E2Case, int] = {}
+    if grouped_depth_panels:
+        for scatter_class in CLASSES:
+            grouped_cases = tuple(
+                case for case in selected_cases if case.scatter_class == scatter_class
+            )
+            masked_bins.update(
+                _plot_grouped_f2(
+                    grouped_cases, histogram_cache, figures, min_baseline_count
+                )
+            )
+            _plot_grouped_f3(grouped_cases, histogram_cache, figures)
+    else:
+        for case in selected_cases:
+            edges, histograms = histogram_cache[case]
+            masked_bins[case] = _plot_case_f2(
+                case, histograms, edges, figures, min_baseline_count
+            )
+            _plot_case_f3(case, histograms, edges, figures)
+
     case_results: list[dict[str, Any]] = []
     for case in selected_cases:
-        frames = frame_cache[case.comparison_slug]
         region_table = region_tables[case.comparison_slug]
-        depth_bin_edges, histograms = _case_depth_histograms(
-            frames, case, depth_bin_width_mm
-        )
-        f2_masked = _plot_case_f2(
-            case, histograms, depth_bin_edges, figures, min_baseline_count
-        )
-        _plot_case_f3(case, histograms, depth_bin_edges, figures)
+        _, histograms = histogram_cache[case]
         selected_region_rows = (
             region_table[region_table.scatter_class == case.scatter_class]
             .set_index("region")
@@ -1206,7 +1326,7 @@ def run_e2(
                     condition: int(counts.sum())
                     for condition, counts in histograms.items()
                 },
-                "f2_masked_bin_count": f2_masked,
+                "f2_masked_bin_count": masked_bins[case],
                 "source_region_metrics": {
                     region: {
                         "C_r": float(selected_region_rows.loc[region, "C_r"]),
@@ -1244,8 +1364,11 @@ def run_e2(
         "resample_seed": int(resample_seed),
         "resample_count": int(resample_count),
         "summary_source": summary_source,
+        "depth_figure_layout": "P1-P6_2x3" if grouped_depth_panels else "per_case",
         "summary_table_names": [t1_name, t3_name],
-        "expected_figure_names": list(figure_names(selected_cases)),
+        "expected_figure_names": list(
+            figure_names(selected_cases, grouped_depth_panels=grouped_depth_panels)
+        ),
         "expected_table_names": list(table_names(selected_cases, summary_source)),
     }
 
@@ -1265,7 +1388,8 @@ def write_report(root: Path, summary: dict[str, Any], warnings: list[str]) -> No
         f"- Depth bin width: {summary['depth_bin_width_mm']} mm",
         f"- Minimum baseline bin count: {summary['min_baseline_count']}",
         f"- Poisson resampling: {summary['resample_count']} draws, seed {summary['resample_seed']}.",
-        "- E2-F2/F3 are depth-bin resolved and contain one selected scatter class per file.",
+        f"- Depth-figure layout: {summary['depth_figure_layout']}.",
+        "- Formal P1-P6 layout uses one 2×3 panel figure per F2/F3 scatter class.",
         "- Zero or explicitly under-threshold baseline bins are gaps, never fabricated zeros.",
         "- Figures are PNG only; E2-T1/T3 are global and E2-T2 is emitted once per unique case.",
     ]
@@ -1441,6 +1565,7 @@ def write_manifest(
             "depth_range_mm": list(DEPTH_RANGE_MM),
             "depth_bin_width_mm": summary["depth_bin_width_mm"],
             "selected_cases": summary["selected_cases"],
+            "depth_figure_layout": summary["depth_figure_layout"],
             "summary_source": summary["summary_source"],
             "min_baseline_count": summary["min_baseline_count"],
             "poisson_resampling": {
@@ -1521,6 +1646,13 @@ def publish(staging: Path, output_dir: Path, overwrite: bool) -> None:
     backup = output_dir.parent / f".{output_dir.name}.backup"
     if backup.exists():
         raise FileExistsError(f"stale E2 backup blocks overwrite: {backup}")
+    supplementary = output_dir / SUPPLEMENTARY_DIR_NAME
+    if supplementary.exists() and not supplementary.is_dir():
+        raise FileExistsError(
+            f"E2 {SUPPLEMENTARY_DIR_NAME} entry must be a directory: {supplementary}"
+        )
+    if supplementary.is_dir():
+        shutil.copytree(supplementary, staging / SUPPLEMENTARY_DIR_NAME)
     output_dir.replace(backup)
     try:
         staging.replace(output_dir)
@@ -1543,7 +1675,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="append",
         type=parse_case,
         metavar="BASELINE:DEFECT:SLIT:SCATTER_CLASS",
-        help="repeat to generate explicitly selected cases; default: P0:P4:S4:total",
+        help="repeat for diagnostic per-case figures; default is all P1-P6 × total/k1/ms in 2×3 panels",
     )
     parser.add_argument(
         "--min-baseline-count",

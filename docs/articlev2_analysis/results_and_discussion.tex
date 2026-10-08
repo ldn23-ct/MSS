@@ -1,0 +1,259 @@
+\section{结果与讨论}
+\label{sec:results-discussion}
+
+
+\subsection{多狭缝深度响应与散射位置分布}
+\label{sec:results-multislit}
+
+图~\ref{fig:results-multislit-response}(a)展示了均匀 PMMA 模体在中心照射条件下的探测事件分布。S1--S6 对应的事件在虚拟探测平面上形成六个沿横向依次排列且相互可分的带状区域。图中感兴趣区域（ROI）为各狭缝设计深度区间在探测平面上的几何投影，其两端由入射中心线上的两个深度边界点分别经狭缝中心投影确定。模拟事件的带状分布覆盖了相应 ROI，与设计的通道接受位置一致。
+
+探测平面上不同通道的事件可以分离，但同一通道内事件的首次散射深度仍有较宽分布。图~\ref{fig:results-multislit-response}(b)给出了各 ROI 内事件的首次散射深度 $z_1$ 分布，分箱宽度为 $2\,\mathrm{mm}$，并以相应 ROI 内的事件总数归一化。各通道具有可区分的响应峰，峰位由 S1 至 S6 逐步移向深部，与 15--90 mm 的设计深度顺序一致，说明狭缝具有一定的深度选择性。然而，各通道的分布均延伸至相应设计深度区间之外。对于 S4--S6，目标深度前方有明显响应，目标深度事件的相对权重较低。这表明狭缝不具备精准筛选目标深度事件的能力，特别是在目标深度较大时，浅层区域贡献不可忽略。
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.88\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/E1/E1-F1_detector_plane_roi.png}\\
+    \small (a) 探测平面上的通道接受区域
+  \end{minipage}
+
+  \vspace{0.5em}
+  \begin{minipage}{0.88\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/E1/E1-F2_roi_conditioned_total_depth_response.png}\\
+    \small (b) 通道归一化的首次散射深度响应
+  \end{minipage}
+  \caption{多狭缝通道的探测面接受区域与首次散射深度响应。（a）探测平面上的六个通道接受区域；（b）S1--S6 通道内独立归一化的首次散射深度分布。}
+  \label{fig:results-multislit-response}
+\end{figure}
+
+为进一步比较首次散射与后续输运所涉及的空间范围，图~\ref{fig:results-first-last-spatial} 给出了两套狭缝配置下首次与末次康普顿散射位置在 $x$--$z$ 和 $y$--$z$ 平面内的投影。首次散射点在两个投影平面内均沿入射束中心形成随深度延伸的窄带。末次散射点则覆盖更大的横向范围：在 $x$--$z$ 平面内，其分布沿各狭缝对应的接收方向斜向展开；在 $y$--$z$ 平面内，其分布沿 $y$ 方向明显展宽。两类位置分布的差异反映了多重散射事件在首次散射后出现了明显的空间扩散。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{figures/E1/E1-F3_first_last_spatial_comparison.png}
+  \caption{两套狭缝配置下首次与末次康普顿散射位置的空间分布。（a）S1、S3 和 S5 配置的 $x$--$z$ 投影；（b）S1、S3 和 S5 配置的 $y$--$z$ 投影；（c）S2、S4 和 S6 配置的 $x$--$z$ 投影；（d）S2、S4 和 S6 配置的 $y$--$z$ 投影。}
+  \label{fig:results-first-last-spatial}
+\end{figure}
+
+上述结果显示，几何接收通道内包含不同首次散射深度的事件，且多重散射的后续相互作用可延伸至入射束之外。这些位置分布描述了被探测事件的空间范围，但尚不能判断不同来源的事件对局部缺陷如何响应，也不能据此将多重散射事件全部视为无用背景。下一节沿用第~\ref{sec:source-response-model}~节的首次散射来源分类，对比均匀模体和缺陷模体，考察单次散射与多重散射中的计数变化是否集中于共同的首次散射区域，再通过二维扫描图像检验相关事件是否保留横向缺陷信息。
+
+\subsection{深度相关缺陷响应与来源组成变化}
+\label{sec:results-depth-response}
+
+不同深度的缺陷分别使用与其设计深度匹配的接收通道，采用逐点扫描方式对缺陷模体进行二维成像，每个像素对应在该点扫描时虚拟探测面的总计数，即 \texttt{total}。在各匹配通道下与均匀模体进行对照，六个缺陷模体均在扫描中心出现与空气缺陷横向位置一致的低计数区（图~\ref{fig:results-matched-grid}）。这些低计数区表明，局部材料替换为空气引起了对应扫描位置的探测计数下降。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{figures/E2/E2-F1_matched_grid_total_counts.png}
+  \caption{P1--P6 匹配通道的原始二维计数图像。每一行给出相应均匀模体和缺陷模体图像。}
+  \label{fig:results-matched-grid}
+\end{figure}
+
+
+随着 P1--P6 的匹配缺陷中心深度从 15 mm 增至 90 mm，原始图像的中心缺陷响应逐渐减弱，CNR 从 47.25 降至 4.53（表~\ref{tab:results-unfiltered-response}）。考查模体中心照射位置的计数变化情况， \texttt{total} 整体相对计数变化由 $-$55.5\% 变为 $-$12.7\%，即相对于对应均匀模体的计数降幅随匹配深度增加而减小。若按照散射阶次划分，\texttt{k1} 和 \texttt{ms} 的缺陷模体计数同样均低于对应均匀模体，与二维图像的变化趋势一致。虽然二者的下降幅度不同，但结果表明局部空气缺陷引起的计数响应同时存在于单次散射和多重散射事件中。
+
+\begin{table}[H]
+  \centering
+  \scriptsize
+  \caption{原始图像的 CNR 及中心照射位置的相对计数变化}
+  \label{tab:results-unfiltered-response}
+  \begin{tabularx}{\textwidth}{@{}l r X X X X@{}}
+    \toprule
+    \textbf{条件} & \textbf{深度（mm）} & \textbf{CNR} & \textbf{\texttt{total} 变化} & \textbf{\texttt{k1} 变化} & \textbf{\texttt{ms} 变化} \\
+    \midrule
+    P1--S1 & 15 & 47.25 & $-$55.5\% & $-$75.8\% & $-$28.4\% \\
+    P2--S2 & 30 & 35.03 & $-$43.0\% & $-$72.4\% & $-$20.2\% \\
+    P3--S3 & 45 & 18.96 & $-$26.1\% & $-$51.8\% & $-$12.7\% \\
+    P4--S4 & 60 & 11.37 & $-$19.3\% & $-$51.0\% & $-$8.3\% \\
+    P5--S5 & 75 & 7.89 & $-$15.7\% & $-$46.0\% & $-$8.8\% \\
+    P6--S6 & 90 & 4.53 & $-$12.7\% & $-$48.2\% & $-$7.3\% \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+为进一步判断上述响应主要来自哪个深度范围，本文使用首次康普顿散射深度 $z_1$ 作为分类依据，将同一批 \texttt{total}、\texttt{k1} 和 \texttt{ms} 事件分别按定义的边界划入 F、T 和 B 区。图~\ref{fig:results-depth-counts} 显示，在各深度和散射阶次下，缺陷模体均在 T 区出现明显的计数凹陷，而 F 区和 B 区的曲线整体形态与均匀模体较为接近。同属单次散射或多重散射的事件，其首次散射位置仍可能分布在不同深度，因此散射阶次和事件来源描述的是两个不同方面。
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.65\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/E2/fig5_first_scatter_depth_total.png}\\
+    \small (a) \texttt{total}
+  \end{minipage}
+
+  \vspace{0.4em}
+  \begin{minipage}{0.65\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/E2/fig5_first_scatter_depth_k1.png}\\
+    \small (b) \texttt{k1}
+  \end{minipage}
+
+  \vspace{0.4em}
+  \begin{minipage}{0.65\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/E2/fig5_first_scatter_depth_ms.png}\\
+    \small (c) \texttt{ms}
+  \end{minipage}
+  \caption{中心照射时均匀模体与缺陷模体的首次散射深度计数。（a）\texttt{total}；（b）\texttt{k1}；（c）\texttt{ms}。分箱宽度为 $2\,\mathrm{mm}$，阴影表示匹配的 T 区。曲线保留原始计数，各条件使用独立纵轴。}
+  \label{fig:results-depth-counts}
+\end{figure}
+
+\begin{table}[H]
+  \centering
+  \tiny
+  \setlength{\tabcolsep}{2pt}
+  \caption{中心照射下均匀模体与缺陷模体的总计数、整体及 F/T/B 区计数变化、T 区相对计数变化与 T/non-T 贡献比例}
+  \label{tab:results-target-counts}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}l r r r r r r r r r@{}}
+    \toprule
+    & \multicolumn{2}{c}{总计数} & \multicolumn{4}{c}{计数变化} & \multicolumn{3}{c}{百分比（\%）} \\
+    \cmidrule(lr){2-3}\cmidrule(lr){4-7}\cmidrule(l){8-10}
+    \textbf{条件} & $N_0$ & $N_D$ & $\Delta N$ & $\Delta N_F$ & $\Delta N_T$ & $\Delta N_B$ & $C_T$ & $R_T$ & $R_{\mathrm{nonT}}$ \\
+    \midrule
+    \multicolumn{10}{@{}l}{\textbf{A：\texttt{total}}} \\
+    P1--S1 & $17{,}932$ & $7{,}981$ & $-9{,}951$ & $-241$ & $-10{,}148$ & $+438$ & $-99.8229$ & 101.98 & $-1.98$ \\
+    P2--S2 & $18{,}035$ & $10{,}286$ & $-7{,}749$ & $-394$ & $-7{,}932$ & $+577$ & $-99.7987$ & 102.36 & $-2.36$ \\
+    P3--S3 & $16{,}522$ & $12{,}208$ & $-4{,}314$ & $-286$ & $-4{,}380$ & $+352$ & $-99.8404$ & 101.53 & $-1.53$ \\
+    P4--S4 & $10{,}111$ & $8{,}164$ & $-1{,}947$ & $-66$ & $-2{,}151$ & $+270$ & $-99.9535$ & 110.48 & $-10.48$ \\
+    P5--S5 & $6{,}757$ & $5{,}694$ & $-1{,}063$ & $-110$ & $-1{,}086$ & $+133$ & $-99.9080$ & 102.16 & $-2.16$ \\
+    P6--S6 & $4{,}037$ & $3{,}524$ & $-513$ & $-65$ & $-475$ & $+27$ & $-99.7899$ & 92.59 & $+7.41$ \\
+    \midrule
+    \multicolumn{10}{@{}l}{\textbf{B：\texttt{k1}}} \\
+    P1--S1 & $10{,}248$ & $2{,}479$ & $-7{,}769$ & $+64$ & $-8{,}126$ & $+293$ & $-99.8403$ & 104.60 & $-4.60$ \\
+    P2--S2 & $7{,}861$ & $2{,}172$ & $-5{,}689$ & $-38$ & $-5{,}897$ & $+246$ & $-99.8307$ & 103.66 & $-3.66$ \\
+    P3--S3 & $5{,}661$ & $2{,}731$ & $-2{,}930$ & $-149$ & $-2{,}866$ & $+85$ & $-99.9303$ & 97.82 & $+2.18$ \\
+    P4--S4 & $2{,}589$ & $1{,}269$ & $-1{,}320$ & $-39$ & $-1{,}340$ & $+59$ & $-99.9254$ & 101.52 & $-1.52$ \\
+    P5--S5 & $1{,}265$ & $683$ & $-582$ & $+17$ & $-632$ & $+33$ & $-99.8420$ & 108.59 & $-8.59$ \\
+    P6--S6 & $531$ & $275$ & $-256$ & $+1$ & $-269$ & $+12$ & $-99.6296$ & 105.08 & $-5.08$ \\
+    \midrule
+    \multicolumn{10}{@{}l}{\textbf{C：\texttt{ms}}} \\
+    P1--S1 & $7{,}684$ & $5{,}502$ & $-2{,}182$ & $-305$ & $-2{,}022$ & $+145$ & $-99.7533$ & 92.67 & $+7.33$ \\
+    P2--S2 & $10{,}174$ & $8{,}114$ & $-2{,}060$ & $-356$ & $-2{,}035$ & $+331$ & $-99.7060$ & 98.79 & $+1.21$ \\
+    P3--S3 & $10{,}861$ & $9{,}477$ & $-1{,}384$ & $-137$ & $-1{,}514$ & $+267$ & $-99.6708$ & 109.39 & $-9.39$ \\
+    P4--S4 & $7{,}522$ & $6{,}895$ & $-627$ & $-27$ & $-811$ & $+211$ & $-100.0000$ & 129.35 & $-29.35$ \\
+    P5--S5 & $5{,}492$ & $5{,}011$ & $-481$ & $-127$ & $-454$ & $+100$ & $-100.0000$ & 94.39 & $+5.61$ \\
+    P6--S6 & $3{,}506$ & $3{,}249$ & $-257$ & $-66$ & $-206$ & $+15$ & $-100.0000$ & 80.16 & $+19.84$ \\
+    \bottomrule
+  \end{tabular*}
+
+  \vspace{0.4em}
+  \begin{minipage}{\textwidth}
+    \scriptsize
+    注：$N_0$ 和 $N_D$ 分别为均匀模体和缺陷模体中相应散射类别的中心照射总计数。$\Delta N$、$\Delta N_r$、$R_T$ 和 $R_{\mathrm{nonT}}$ 按式~\eqref{eq:region-net-count-change} 和式~\eqref{eq:target-contribution} 计算；负的计数变化表示计数下降，正值表示增加。$C_T$ 为 T 区自身的相对计数变化。两项贡献比例之和为 100\%；本表中整体计数均下降，负的贡献比例表示该来源计数增加、抵消部分下降，$R_T>100\%$ 对应 $R_{\mathrm{nonT}}<0$。贡献比例均由未舍入的计数计算后保留两位小数。
+  \end{minipage}
+\end{table}
+
+表~\ref{tab:results-target-counts} 记录了中心照射条件下均匀模体和缺陷模体的总计数，以及 F/T/B 各区的计数变化。中心照射时，由于入射束在空气缺陷中基本不发生康普顿散射，首次散射源项显著降低，因此，\texttt{total}、\texttt{k1} 和 \texttt{ms} 的 $C_T$ 均接近 $-100\%$。与本文核心问题更直接相关的是，三类事件的主要净计数下降均集中在 T 区：\texttt{total}、\texttt{k1} 和 \texttt{ms} 的 $R_T$ 分别为 92.59\%--110.48\%、97.82\%--108.59\% 和 80.16\%--129.35\%。特别是，\texttt{ms} 中同样存在明确的 T 区响应，说明多重散射事件虽然在首次散射后经历复杂输运，其统计变化仍与首次散射发生位置处的局部材料变化有关。
+
+图~\ref{fig:results-source-composition} 进一步给出了均匀模体中各匹配条件的事件来源组成。随着匹配深度增加，T 区事件在全部探测计数中的权重降低，$w_T$ 由 56.69\% 单调降至 11.79\%，前方来源的权重则持续增加，$w_F$ 由 16.39\% 单调增至 74.34\%。这种来源组成变化会削弱 T 区强缺陷响应在总信号中的相对权重，与原始图像中 CNR 持续下降的趋势一致。因此，前方来源增加导致目标深度事件权重降低可视为深部响应减弱的重要机制。下一节利用二维扫描数据，检验基于 Geant4 真值构建的不同事件集是否保留空气缺陷的成像信息。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{figures/E2/fig_source_composition_total.png}
+  \caption{均匀模体中心照射下 \texttt{total} 事件的首次散射来源组成。各柱对应 P1--P6 的匹配通道和目标深度，并按相应 F/T/B 边界对 P0 事件分类；$w_F$、$w_T$ 和 $w_B$ 均以该通道的均匀模体 \texttt{total} 计数为分母，三者之和为 100\%。来源分类基于 Geant4 首次散射深度真值。}
+  \label{fig:results-source-composition}
+\end{figure}
+
+\subsection{首次散射来源选择后保留的成像信息}
+\label{sec:results-source-selected-imaging}
+
+第~\ref{sec:results-depth-response}~节表明，空气缺陷引起的主要计数变化集中在首次散射发生于 T 区的事件，而随扫描深度增加，T 区事件在全部探测计数中的权重逐渐降低。E3 进一步利用蒙特卡罗真值构建 M0--M5，考察散射阶次是否足以描述结构变化、T 区多重散射是否保留结构信息。由于各事件集均由相同入射光子历史数下的探测事件构建，本节同时考查 CNR 和相对于 M0 的计数保留率：前者描述缺陷与背景的可分辨程度，后者反映仍有多少探测事件参与图像构建。较高的计数保留率意味着在相同采集条件下能够利用更多事件，有利于减小有限计数带来的相对统计波动。
+
+以 P4-S4 为代表进行分析。M0--M5 均在与缺陷位置一致的中心区域形成低计数响应（图~\ref{fig:results-m0-m5}）。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{figures/E3/E3_F1_P4_S4_M0_M5.png}
+  \caption{P4--S4 条件下 M0--M5 的二维计数图像。各子图使用独立色标，绝对计数、CNR 和保留率见表~\ref{tab:results-image-metrics}。}
+  \label{fig:results-m0-m5}
+\end{figure}
+
+\begin{table}[H]
+  \centering
+  \small
+  \caption{P4--S4 条件下 M0--M5 的图像指标}
+  \label{tab:results-image-metrics}
+  \begin{tabularx}{\textwidth}{@{}l X r X@{}}
+    \toprule
+    \textbf{事件集} & \textbf{CNR} & \textbf{总计数} & \textbf{相对于 M0 的保留率} \\
+    \midrule
+    M0 & 11.37 & 786,078 & 100.0\% \\
+    M1 & 23.06 & 193,248 & 24.6\% \\
+    M2 & 27.07 & 90,407 & 11.5\% \\
+    M3 & 14.05 & 50,045 & 6.4\% \\
+    M4 & 29.70 & 140,452 & 17.9\% \\
+    M5 & 18.26 & 299,827 & 38.1\% \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+\noindent{\small 注：各事件集由同一组基础事件类别组合获得。}
+
+M0、M1 和 M2 的比较首先说明散射阶次并不足以描述事件来源。未筛选的 M0 与保留所有深度 \texttt{k1} 的 M1 相比，CNR 由 11.37 提高至 23.06，同时保留了 M0 中约四分之一的计数。在 M1 基础上进一步仅保留首次散射发生在 T 区的 \texttt{k1}，得到 M2，其 CNR 为 27.07，但计数相对 M1 下降超过一半。这说明即使同为单次散射，其首次散射位置仍可能来自不同深度；散射阶次本身不包含这种位置信息，不能替代对事件来源的描述。
+
+M3 和 M2$\rightarrow$M4 的比较进一步考察 T 区多重散射是否保留结构信息。仅使用首次散射发生在 T 区的 \texttt{ms} 构建 M3 时，P1--P6 的二维图像均能在缺陷位置形成低计数区域（图~\ref{fig:results-cnr-retention}）；在较深的 P6--S6 条件下，M3 的 CNR 为 10.29，高于 M0 的 4.53。多重散射后的传播路径虽发生明显空间扩展，但首次散射发生在 T 区的这部分事件仍能在正确位置形成缺陷响应。M2 与 M4 具有相同的首次散射深度范围，区别仅在于 M4 在 T 区 \texttt{k1} 的基础上加入了同一区域的 \texttt{ms}。六个匹配条件下，加入这些事件后构图总计数增加 24.5\%--77.7\%，CNR 在当前结果中也均提高（表~\ref{tab:results-selection-comparison}）。因此，不能简单将全部多重散射视为无用背景；与目标深度相关的部分多重散射仍保留结构信息，并在 M4 中增加了构图事件数，有利于降低有限计数条件下的相对统计波动。
+
+作为补充，M1$\rightarrow$M4 比较了保留所有深度 \texttt{k1} 与保留 T 区全部事件的差异。六个匹配条件下，M4 的 CNR 均高于 M1，但总计数低 6.3\%--30.1\%。这一结果同样表明，散射阶次与首次散射位置描述的是两个不同方面：来自非目标深度的 \texttt{k1} 与来自目标深度的 \texttt{ms} 对缺陷响应的贡献并不相同。
+
+\begin{figure}[H]
+  \centering
+  \begin{minipage}{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/E3/E3_F4_all_methods_CNR_depth.png}\\
+    \small (a) CNR
+  \end{minipage}\hfill
+  \begin{minipage}{0.49\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{figures/E3/E3_F5_all_methods_retention_depth.png}\\
+    \small (b) 相对于 M0 的计数保留率
+  \end{minipage}
+  \caption{M0--M5 的 CNR 与计数保留率随匹配深度的变化。（a）CNR；（b）相对于 M0 的计数保留率。}
+  \label{fig:results-cnr-retention}
+\end{figure}
+
+\begin{table}[H]
+  \centering
+  \tiny
+  \caption{三组事件选择比较的 CNR 与计数变化}
+  \label{tab:results-selection-comparison}
+  \begin{tabularx}{\textwidth}{@{}l X X X X X X@{}}
+    \toprule
+    \textbf{条件} & \textbf{M2$\rightarrow$M4：CNR 变化} & \textbf{M2$\rightarrow$M4：计数变化} & \textbf{M1$\rightarrow$M4：CNR 变化} & \textbf{M1$\rightarrow$M4：计数变化} & \textbf{M0$\rightarrow$M5：CNR 变化} & \textbf{M5 保留率} \\
+    \midrule
+    P1 & 10.1\% & 24.5\% & 10.8\% & $-$7.7\% & 9.8\% & 81.7\% \\
+    P2 & 34.9\% & 32.3\% & 65.0\% & $-$6.3\% & 50.1\% & 68.4\% \\
+    P3 & 5.7\% & 49.3\% & 95.1\% & $-$30.1\% & 37.0\% & 45.9\% \\
+    P4 & 9.7\% & 55.4\% & 28.8\% & $-$27.3\% & 60.6\% & 38.1\% \\
+    P5 & 3.2\% & 64.1\% & 45.2\% & $-$24.4\% & 40.7\% & 30.8\% \\
+    P6 & 23.7\% & 77.7\% & 93.2\% & $-$19.7\% & 83.2\% & 24.1\% \\
+    \bottomrule
+  \end{tabularx}
+\end{table}
+
+M4 需要利用真值直接提取 T 区事件。考虑到在浅层事件占比较高的因素，本实验进一步降低约束条件构建 M5，仅从 M0 中去除首次散射发生在目标前方 F 区的事件，而保留 T 区和 B 区的 全部事件。P1--P6 中 M5 的 CNR 均高于相应 M0（表~\ref{tab:results-selection-comparison}），说明在当前模拟结果中，即使不严格只提取 T 区，减少前方来源后仍可获得更强的深部缺陷响应。随着目标及对应接收条件向深部变化，M5 的计数保留率由 P1 的 81.7\% 降至 P6 的 24.1\%，反映出原始探测计数中前方来源的权重持续增加。该结果支持将前方来源视为稀释深部目标响应的重要组成部分，但不排除衰减、接收几何和总计数变化等因素的共同影响。
+
+M5 说明减少前方来源可能改善深部缺陷响应，但它仍依赖每个事件的首次散射位置真值。由此提出一个更基础的问题：独立浅层模体所形成的响应，与完整模体中首次散射发生在前方区域的事件响应有多相似？为此，在 P4--S4 条件下额外模拟了厚度为 $55\,\mathrm{mm}$ 的均匀 PMMA 浅层参考模体，并将其 \texttt{total} 事件与完整缺陷模体中 $z_1<55\,\mathrm{mm}$ 的真值前方事件（\texttt{truth-front}）进行比较。两组模拟采用相同的入射光子历史数，因此原始计数可以直接比较。
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{figures/E3/E3_SF4_P4_S4_front_reference_two_panel.png}
+  \caption{P4--S4 条件下独立 55 mm 浅层参考与完整缺陷模体真值前方事件的首次散射深度分布比较。
+  (a)total 事件的原始深度计数分布，虚线表示 $z_1=55\,\mathrm{mm}$；
+  (b)在 $z_1<55\,\mathrm{mm}$ 范围内分别独立归一化后的深度分布。
+  图中同时给出浅层参考事件位于 55 mm 前的比例、浅层参考与真值前方事件的总计数比，以及归一化分布的 Pearson 相关系数。}
+  \label{fig:results-front-reference}
+\end{figure}
+
+图~\ref{fig:results-front-reference}(a) 给出了两者的首次散射深度原始计数分布。两组分布在主要深度范围内具有相近的变化趋势，并在接近 $55\,\mathrm{mm}$ 的位置呈现相似的计数上升，但浅层参考的整体计数幅值低于 \texttt{truth-front}；在相同入射光子历史数下，其总计数约为 \texttt{truth-front} 的 74.08\%。这种幅值差异与第~\ref{sec:source-response-model}~节中首次散射形成和后续输运的区分一致。完整模体中的 \texttt{truth-front} 事件虽首次散射于 $z_1<55\,\mathrm{mm}$，但此后仍可能进入更深层 PMMA，发生进一步散射，并经不同路径返回接收通道；独立浅层模体在 $55\,\mathrm{mm}$ 之后不存在相同的材料结构，因而两种条件下的后续输运环境并不完全相同。首次散射深度的范围和归一化形态可以高度相似，最终被探测事件的绝对计数却可能不同。
+
+图~\ref{fig:results-front-reference}(b) 将 $z_1<55\,\mathrm{mm}$ 范围内的两组深度直方图分别独立归一化。归一化后两条曲线在整个前方深度范围内基本重合，Pearson 相关系数达到 $r=0.995753$。结合首次散射范围、归一化分布和原始计数可见，$55\,\mathrm{mm}$ 独立浅层参考能够较好近似 P4--S4 完整模体前方来源的范围和深度分布形态，但不能直接作为 \texttt{truth-front} 的等幅替代。
+
+\subsection{研究限制}
+\label{sec:results-limitations}
+
+当前仿真限于 560 keV 单能光子、PMMA/空气材料组合、固定缺陷尺寸和既定系统几何，结果对其他能量、材料、缺陷尺寸和背散射成像系统几何的适用性也有待检验。独立浅层参考目前仅在 P4--S4 和 55 mm 厚度下进行了比较，其计数幅值标定及跨深度适用性仍需进一步研究。
+
+深层匹配条件下部分 \texttt{k1} 和 T 区事件的绝对计数较低，因此本文主要讨论事件组成、首次散射位置及成像响应中的整体变化特征，对较小幅度差异和局部非单调变化不作统计显著性解释。本文报告的 CNR 和计数保留率分别描述图像对比相对于背景起伏的大小以及筛选后的可用计数。实际成像性能还需在明确的采集剂量、探测噪声和重建条件下评价。
+
+本研究的事件来源分类依赖 Geant4 提供的首次散射深度真值 $z_1$，该值不能由探测器直接测量。将 M2--M5 的理想筛选用于实际系统，需要建立基于可测量信息的来源判别方法。

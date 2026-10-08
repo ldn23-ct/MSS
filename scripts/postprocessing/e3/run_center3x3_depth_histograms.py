@@ -36,6 +36,7 @@ DEPTH_EDGES_MM = np.arange(
     DEPTH_MIN_MM, DEPTH_MAX_MM + DEPTH_BIN_WIDTH_MM, DEPTH_BIN_WIDTH_MM
 )
 FRONT_BOUNDARY_MM = 55.0
+DISPLAY_EDGES_MM = np.sort(np.append(DEPTH_EDGES_MM, FRONT_BOUNDARY_MM))
 TARGET_INTERVAL_MM = (55.0, 65.0)
 DEFAULT_SUBDIRECTORY = "center3x3_first_scatter_depth"
 
@@ -43,6 +44,7 @@ FIGURE_NAMES = (
     "E3_SF1_P4_S4_front_components_depth.png",
     "E3_SF2_P4_S4_truth_front_vs_slab_overlay.png",
     "E3_SF3_P4_S4_truth_front_roi_depth.png",
+    "E3_SF4_P4_S4_front_reference_two_panel.png",
 )
 TABLE_NAME = "E3_ST1_P4_S4_front_source_summary.csv"
 OUTPUT_NAMES = (*FIGURE_NAMES, TABLE_NAME)
@@ -68,6 +70,19 @@ class AnalysisInputs:
     slab_pooled_n_primary: int
     p4_out_of_domain_count: int
     slab_out_of_domain_count: int
+
+
+@dataclass(frozen=True)
+class Figure10Data:
+    raw_edges_mm: np.ndarray
+    truth_counts: np.ndarray
+    slab_counts: np.ndarray
+    front_edges_mm: np.ndarray
+    truth_front_fraction: np.ndarray
+    slab_front_fraction: np.ndarray
+    slab_fraction_z_lt55: float
+    slab_to_truth_ratio: float
+    pearson_r_z_lt55: float
 
 
 def _point(x: Any, y: Any, label: str) -> tuple[float, float]:
@@ -227,6 +242,47 @@ def build_summary(inputs: AnalysisInputs, alpha: float) -> pd.DataFrame:
     )
 
 
+def build_figure10_data(inputs: AnalysisInputs) -> Figure10Data:
+    """Use unscaled total events from two runs with equal primary histories."""
+    if inputs.p4_pooled_n_primary <= 0 or inputs.p4_pooled_n_primary != inputs.slab_pooled_n_primary:
+        raise ValueError("Figure 10 requires equal positive pooled primary histories")
+    truth = np.asarray(inputs.truth_front_depths, dtype=float)
+    slab = np.asarray(inputs.slab_depths, dtype=float)
+    if not len(truth) or not len(slab):
+        raise ValueError("Figure 10 requires nonempty truth-front and slab events")
+    if (truth >= FRONT_BOUNDARY_MM).any():
+        raise ValueError("truth-front events must satisfy first_scatter_z < 55 mm")
+    # Split the one 2 mm bin crossing 55 mm so the stairs do not imply that
+    # the large pre-boundary count originated behind the front boundary.
+    truth_counts = np.histogram(truth, bins=DISPLAY_EDGES_MM)[0]
+    slab_counts = np.histogram(slab, bins=DISPLAY_EDGES_MM)[0]
+    if truth_counts.sum() != len(truth) or slab_counts.sum() != len(slab):
+        raise ValueError("Figure 10 depths must all fall in the histogram domain")
+    front_bin_mask = DEPTH_EDGES_MM[:-1] < FRONT_BOUNDARY_MM
+    truth_front_counts = _histogram(truth[truth < FRONT_BOUNDARY_MM])[front_bin_mask]
+    slab_front_counts = _histogram(slab[slab < FRONT_BOUNDARY_MM])[front_bin_mask]
+    if truth_front_counts.sum() == 0 or slab_front_counts.sum() == 0:
+        raise ValueError("Figure 10 requires events before 55 mm in both samples")
+    truth_fraction = truth_front_counts / truth_front_counts.sum()
+    slab_fraction = slab_front_counts / slab_front_counts.sum()
+    pearson = pearson_front_histograms(truth, slab)
+    if not math.isfinite(pearson):
+        raise ValueError("Figure 10 Pearson r is undefined")
+    front_edges = DEPTH_EDGES_MM[:len(truth_fraction) + 1].copy()
+    front_edges[-1] = FRONT_BOUNDARY_MM
+    return Figure10Data(
+        raw_edges_mm=DISPLAY_EDGES_MM,
+        truth_counts=truth_counts,
+        slab_counts=slab_counts,
+        front_edges_mm=front_edges,
+        truth_front_fraction=truth_fraction,
+        slab_front_fraction=slab_fraction,
+        slab_fraction_z_lt55=float(len(slab[slab < FRONT_BOUNDARY_MM]) / len(slab)),
+        slab_to_truth_ratio=float(len(slab) / len(truth)),
+        pearson_r_z_lt55=pearson,
+    )
+
+
 def _decorate_depth_axis(axis: plt.Axes, *, zero_line: bool = False) -> None:
     axis.axvspan(*TARGET_INTERVAL_MM, color="#BDBDBD", alpha=0.28, zorder=0)
     axis.axvline(FRONT_BOUNDARY_MM, color="#555555", linestyle="--", linewidth=1.0)
@@ -274,6 +330,62 @@ def plot_front_overlay(table: pd.DataFrame, output: Path) -> None:
     axis.set_ylim(bottom=0.0)
     axis.legend(fontsize=9)
     e3._save_png(fig, output)
+
+
+def plot_figure10(data: Figure10Data, output: Path) -> None:
+    with plt.rc_context({
+        "font.size": 11,
+        "axes.titlesize": 12,
+        "axes.labelsize": 11,
+        "xtick.labelsize": 10,
+        "ytick.labelsize": 10,
+    }):
+        fig, axes = plt.subplots(2, 1, figsize=(10.5, 8.2), constrained_layout=True)
+        truth_style = {"color": "#0072B2", "linewidth": 1.7, "label": "P4-S4 truth front"}
+        slab_style = {"color": "#D55E00", "linewidth": 1.7, "label": "55 mm shallow reference"}
+
+        axes[0].stairs(data.truth_counts, data.raw_edges_mm, **truth_style)
+        axes[0].stairs(data.slab_counts, data.raw_edges_mm, **slab_style)
+        axes[0].axvline(FRONT_BOUNDARY_MM, color="#555555", linestyle="--", linewidth=1.0)
+        axes[0].set(
+            xlim=(DEPTH_MIN_MM, 160.0),
+            ylim=(0.0, 1.18 * max(data.truth_counts.max(), data.slab_counts.max())),
+            xlabel=r"First-scatter depth $z_1$ (mm)",
+            ylabel="Total events per depth bin",
+            title="(a) Raw total-event counts",
+        )
+        axes[0].legend(loc="upper left", fontsize=10)
+        axes[0].text(
+            0.52, 0.91,
+            "Shallow $P(z_1<55\\,\\mathrm{mm})$ = "
+            f"{100 * data.slab_fraction_z_lt55:.4f}%\n"
+            "$N_{\\mathrm{shallow}}/N_{\\mathrm{truth-front}}$ = "
+            f"{100 * data.slab_to_truth_ratio:.2f}%",
+            transform=axes[0].transAxes, ha="left", va="top", fontsize=11,
+        )
+        axes[0].text(
+            0.99, 0.76, "2 mm bins; 55 mm split; 0–220 mm analysis domain",
+            transform=axes[0].transAxes, ha="right", va="top", fontsize=9,
+        )
+
+        axes[1].stairs(data.truth_front_fraction, data.front_edges_mm, **truth_style)
+        axes[1].stairs(data.slab_front_fraction, data.front_edges_mm, **slab_style)
+        axes[1].set(
+            xlim=(DEPTH_MIN_MM, FRONT_BOUNDARY_MM),
+            ylim=(0.0, 1.18 * max(data.truth_front_fraction.max(), data.slab_front_fraction.max())),
+            xlabel=r"First-scatter depth $z_1$ (mm)",
+            ylabel="Normalized event fraction",
+            title=r"(b) Distribution shape for $z_1<55$ mm",
+        )
+        axes[1].legend(loc="upper left", fontsize=10)
+        axes[1].text(
+            0.53, 0.91, f"Pearson $r$ = {data.pearson_r_z_lt55:.6f}",
+            transform=axes[1].transAxes, ha="left", va="top", fontsize=11,
+        )
+        for axis in axes:
+            axis.grid(axis="y", alpha=0.18)
+        fig.suptitle("P4-S4 truth front and independent shallow reference", fontsize=13)
+        e3._save_png(fig, output)
 
 
 def plot_roi_depth(roi: pd.DataFrame, output: Path) -> None:
@@ -355,11 +467,13 @@ def load_inputs(results_root: Path, p4_rows: pd.DataFrame,
 
 
 def write_outputs(depth_table: pd.DataFrame, roi_table: pd.DataFrame,
-                  summary: pd.DataFrame, output_dir: Path) -> None:
+                  summary: pd.DataFrame, figure10_data: Figure10Data,
+                  output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     plot_front_components(depth_table, output_dir / FIGURE_NAMES[0])
     plot_front_overlay(depth_table, output_dir / FIGURE_NAMES[1])
     plot_roi_depth(roi_table, output_dir / FIGURE_NAMES[2])
+    plot_figure10(figure10_data, output_dir / FIGURE_NAMES[3])
     summary.to_csv(output_dir / TABLE_NAME, index=False)
     validate_outputs(output_dir)
 
@@ -408,7 +522,8 @@ def run_analysis(results_root: Path, slab_root: Path,
                                     inputs.slab_depths, alpha)
     roi_table = roi_depth_statistics(inputs.truth_front_images)
     summary = build_summary(inputs, alpha)
-    write_outputs(depth_table, roi_table, summary, output_dir)
+    figure10_data = build_figure10_data(inputs)
+    write_outputs(depth_table, roi_table, summary, figure10_data, output_dir)
     return summary, inputs
 
 
@@ -458,7 +573,7 @@ def main(argv: list[str] | None = None) -> int:
     print("out-of-domain events: "
           f"P4(all 81 poses)={inputs.p4_out_of_domain_count}, "
           f"slab(center 3x3)={inputs.slab_out_of_domain_count}")
-    print("files: 3 PNG + 1 CSV")
+    print("files: 4 PNG + 1 CSV")
     return 0
 
 

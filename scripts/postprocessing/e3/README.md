@@ -34,6 +34,28 @@ conda run -n data python -m scripts.postprocessing.e3.run_center3x3_depth_histog
   --overwrite
 ```
 
-输出位于 `postprocessing/E3/supplementary/center3x3_first_scatter_depth/`，固定为 3 张 300 dpi PNG 和一个单行 summary CSV，不属于正式十文件合同。CSV 保存 truth/slab 总数、slab/truth、slab 浅层比例和浅层 Pearson r；固定深度域以外的有限事件不夹到边界 bin，而是排除并在终端报告。`run_core.py` 应始终显式指定独立输出目录，不能覆盖完整 E3 目录。
+输出位于 `postprocessing/E3/supplementary/center3x3_first_scatter_depth/`，固定为 4 张 300 dpi PNG 和一个单行 summary CSV，不属于正式十文件合同。新增的 `E3_SF4_P4_S4_front_reference_two_panel.png` 用原始 total 计数比较 truth-front 与浅层参考，并在 `z1<55 mm` 内分别归一化比较形态；仅绘图时将跨越 55 mm 的 bin 切开，Pearson 仍按原有 2 mm bin 计算。CSV 保存 truth/slab 总数、slab/truth、slab 浅层比例和浅层 Pearson r；固定深度域以外的有限事件不夹到边界 bin，而是排除并在终端报告。`run_core.py` 应始终显式指定独立输出目录，不能覆盖完整 E3 目录。
 
-当前 matched grid 与 81 个 slab 位姿均已通过预检，严格入口已发布正式 6 图 4 表。完整执行合同与数值解释边界见 `docs/articlev2_analysis/E3.md` 和 `docs/articlev2_analysis/Report.md`。
+真实体素数据辅助入口读取 `results/real_data/defect.npy` 与 `front.npy`。两者的 z 轴均按 1 mm/slice 解释；`front` 在 y/x 方向分别以 2/8 个像素为一块求和到 defect 网格，随后两侧都以宽 3、步长 1 的 z 向滑动窗求和。前层扣除固定为 `R=D-F`（`alpha=1`），不做归一化、横向 ROI、CNR、Poisson 重采样或置信区间：
+
+```bash
+conda run -n data python -m scripts.postprocessing.e3.run_real_data_validation \
+  --real-data-root results/real_data \
+  --results-root results/articlev3_merged \
+  --overwrite
+```
+
+输出位于 `postprocessing/E3/supplementary/real_data_front_validation/`，固定为 2 张 300 dpi PNG、2 个 CSV 和 3 个 `float64` NPY。三份 NPY 分别保存 windowed defect、rebinned/windowed front 与逐元素 residual，形状均为 `64×103×101`。目标区固定为 0-based slices 46–55；仅在完全落入该区间的三层窗中按 residual 总计数选代表窗，并列时选择较浅窗口。该辅助入口不改变正式 E3 十文件合同。
+
+圆孔 ROI/CNR 入口固定读取上述 D/R NPY 的 window index 49，即 `[49,52) mm`、中心 50.5 mm。定位阶段仅向 `derive_roi_geometry(D)` 传入 D；25 个中心、统一半径、valid mask 和逐孔 defect/background mask 冻结后，`evaluate_cnr(D,R,frozen_roi)` 才读取 R。定位图、平滑图和插值 radial profile 只用于确定几何，CNR 始终在未平滑、未归一化的 D/R 上按 signed `(mu_bg-mu_defect)/sigma_bg`、`ddof=1` 计算：
+
+```bash
+conda run -n data python -m scripts.postprocessing.e3.run_real_data_roi_cnr \
+  --results-root results/articlev3_merged \
+  --window-index 49 \
+  --overwrite
+```
+
+输出位于 `real_data_front_validation/roi_cnr_analysis/`，固定包含 7 张 300 dpi PNG、5 个 CSV、3 份 bool mask NPY、5 份分析数组以及参数 JSON、summary 与 README。父入口只允许这一子目录，并在 `--overwrite` 时原样保留。当前数据得到 25/25 个圆孔，行/列间距 9.774569/11.183711 px，统一半径为 1.796693/3.203483/3.773614 px；D 与 R 的 mean CNR 分别为 2.867045 和 2.291730，4/25 个孔满足 `R_CNR>D_CNR`。九配置敏感性中 mean/median ΔCNR 始终为负，但改善孔比例跨度为 28 个百分点，故按预设规则判为不稳定；不据此重新选择 ROI。
+
+当前 matched grid 与 81 个 slab 位姿均已通过预检，严格入口已发布正式 6 图 4 表；真实数据深度入口选择 `[50,53) mm`、中心 51.5 mm 的总 residual 代表窗，而圆孔 ROI/CNR 入口按固定协议使用 `[49,52) mm`、中心 50.5 mm，两者用途不同。完整执行合同与数值解释边界见 `docs/articlev2_analysis/E3.md` 和 `docs/articlev2_analysis/Report.md`。

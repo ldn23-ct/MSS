@@ -6,7 +6,9 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -200,7 +202,8 @@ class ArticleV2E2AnalysisTests(unittest.TestCase):
     def test_case_parser_and_binwise_response(self):
         case = analysis.parse_case("P0:P4:S4:ms")
         self.assertEqual("P0-S4_vs_P4-S4_ms", case.selection_slug)
-        self.assertEqual((analysis.DEFAULT_CASE,), analysis.normalize_cases(None))
+        self.assertEqual(analysis.FORMAL_CASES, analysis.normalize_cases(None))
+        self.assertEqual(18, len(analysis.normalize_cases(None)))
         with self.assertRaisesRegex(ValueError, "duplicate"):
             analysis.normalize_cases([case, case])
         with self.assertRaisesRegex(Exception, "matched slit"):
@@ -305,7 +308,10 @@ class ArticleV2E2AnalysisTests(unittest.TestCase):
             root = Path(tmp)
             context = FakeE2Context(root, (("P0", "P001"), ("P2", "P001")))
             summary = analysis.run_e2(
-                context, allow_partial_grid=True, resample_count=120
+                context,
+                allow_partial_grid=True,
+                cases=(analysis.E2Case("P0", "P2", "S2", "total"),),
+                resample_count=120,
             )
             self.assertEqual("partial", summary["publication_status"])
             analysis.write_report(root, summary, [])
@@ -314,7 +320,11 @@ class ArticleV2E2AnalysisTests(unittest.TestCase):
             self.assertEqual(set(summary["expected_figure_names"]), {path.name for path in (root / "figures").iterdir()})
             self.assertEqual(set(summary["expected_table_names"]), {path.name for path in (root / "tables").iterdir()})
             center = pd.read_csv(root / "tables" / analysis.T1_TABLE_NAME)
-            regions = pd.read_csv(root / "tables" / analysis.t2_table_name(analysis.DEFAULT_CASE))
+            regions = pd.read_csv(
+                root / "tables" / analysis.t2_table_name(
+                    analysis.E2Case("P0", "P2", "S2", "total")
+                )
+            )
             fractions = pd.read_csv(root / "tables" / analysis.T3_TABLE_NAME)
             self.assertEqual(analysis.T1_COLUMNS, tuple(center.columns))
             self.assertEqual(analysis.T2_COLUMNS, tuple(regions.columns))
@@ -339,6 +349,10 @@ class ArticleV2E2AnalysisTests(unittest.TestCase):
                 resample_count=80,
             )
             self.assertEqual("grid-zero", summary["summary_source"])
+            self.assertEqual("P1-P6_2x3", summary["depth_figure_layout"])
+            self.assertEqual(7, len(summary["expected_figure_names"]))
+            self.assertEqual(8, len(summary["expected_table_names"]))
+            self.assertEqual(18, len(summary["selected_cases"]))
             self.assertIn(
                 analysis.ZERO_POSE_T1_TABLE_NAME, summary["expected_table_names"]
             )
@@ -348,6 +362,46 @@ class ArticleV2E2AnalysisTests(unittest.TestCase):
             self.assertNotIn(analysis.T1_TABLE_NAME, summary["expected_table_names"])
             acceptance = analysis.validate_generated_outputs(root, summary)
             self.assertEqual("pass", acceptance["overall_status"])
+
+    def test_grouped_depth_figures_have_six_target_panels(self):
+        cases = tuple(
+            analysis.E2Case("P0", f"P{index}", f"S{index}", "total")
+            for index in range(1, 7)
+        )
+        edges = analysis.depth_edges()
+        histograms = {
+            case: (
+                edges,
+                {
+                    "baseline": np.full(len(edges) - 1, 10, dtype=int),
+                    "defect": np.full(len(edges) - 1, 8, dtype=int),
+                },
+            )
+            for case in cases
+        }
+        captured = {}
+
+        def capture(figure, path):
+            captured[path.name] = figure
+
+        with patch.object(analysis, "_save_png", side_effect=capture):
+            masked = analysis._plot_grouped_f2(cases, histograms, Path("/tmp"), None)
+            analysis._plot_grouped_f3(cases, histograms, Path("/tmp"))
+        self.assertEqual(set(cases), set(masked))
+        self.assertEqual(
+            {
+                "E2-F2_P1-P6_total_binwise_relative_response.png",
+                "E2-F3_P1-P6_total_raw_depth_counts.png",
+            },
+            set(captured),
+        )
+        for name, figure in captured.items():
+            self.assertEqual(6, len(figure.axes), name)
+            for axis in figure.axes:
+                self.assertGreaterEqual(len(axis.patches), 2 if "F2" in name else 3, name)
+            if "F2" in name:
+                self.assertTrue(any(len(axis.lines) >= 1 for axis in figure.axes))
+            plt.close(figure)
 
     def test_summary_source_validation_and_missing_zero_pose(self):
         with self.assertRaisesRegex(ValueError, "summary_source"):
@@ -440,6 +494,34 @@ class ArticleV2E2AnalysisTests(unittest.TestCase):
             analysis.publish(staging, existing, overwrite=True)
             self.assertFalse((existing / "figures/old_fixed_case.png").exists())
             self.assertEqual(b"new", (existing / "figures/new_dynamic_case.png").read_bytes())
+
+    def test_atomic_publish_preserves_supplementary_tree(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            existing = root / "E2"
+            supplementary = existing / analysis.SUPPLEMENTARY_DIR_NAME / "target_scatter_composition"
+            supplementary.mkdir(parents=True)
+            (supplementary / "result.csv").write_text("value\n1\n", encoding="utf-8")
+            front = existing / analysis.SUPPLEMENTARY_DIR_NAME / "front_source_trends"
+            front.mkdir(parents=True)
+            (front / "result.csv").write_text("value\n2\n", encoding="utf-8")
+            staging = root / "staging"
+            (staging / "figures").mkdir(parents=True)
+            (staging / "figures/formal.png").write_bytes(b"formal")
+
+            analysis.publish(staging, existing, overwrite=True)
+
+            self.assertEqual(
+                "value\n1\n",
+                (existing / analysis.SUPPLEMENTARY_DIR_NAME
+                 / "target_scatter_composition/result.csv").read_text(encoding="utf-8"),
+            )
+            self.assertEqual(b"formal", (existing / "figures/formal.png").read_bytes())
+            self.assertEqual(
+                "value\n2\n",
+                (existing / analysis.SUPPLEMENTARY_DIR_NAME
+                 / "front_source_trends/result.csv").read_text(encoding="utf-8"),
+            )
 
 
 if __name__ == "__main__":

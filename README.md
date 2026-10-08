@@ -20,6 +20,7 @@ Geant4 核心只生成事件级数据，不实现 pose-level summary、scan-leve
 - Geant4 核心规格：[`docs/archive/v2/spec.md`](docs/archive/v2/spec.md)、[`docs/archive/v2/decisions.md`](docs/archive/v2/decisions.md)、[`docs/archive/v2/architecture.md`](docs/archive/v2/architecture.md)。
 - Article v1：仅保留 [`docs/archive/v2/`](docs/archive/v2/) 历史文档，运行脚本和兼容入口已移除。
 - Article V2：[`docs/articlev2_experiment_automation.md`](docs/articlev2_experiment_automation.md) 和 [`docs/articlev2_analysis/`](docs/articlev2_analysis/)。
+- P1/P2/P3/P5/P6 前层 slab 补充仿真：[`远端 grid 运行手册`](docs/articlev2_analysis/front_slab_grid_remote_run.md)，五个 worker 各使用 7 个线程。
 
 下一项目版本尚未开始，版本号未定义。工作区中的预研草案或配套资产不属于项目 v2，也不代表相关能力已经实现。
 

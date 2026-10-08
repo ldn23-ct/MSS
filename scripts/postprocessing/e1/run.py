@@ -384,11 +384,10 @@ def run_e1(
             xlim=x_range,
             ylim=detector_y_range,
             xlabel="Detector-plane x (mm)",
-            title=f"({chr(ord('a') + index)}) {' / '.join(slit_ids)} group ({profile_id})",
+            title=f"({chr(ord('a') + index)}) {'/'.join(slit_ids)} group",
         )
         axis.legend(ncol=3, loc="lower center", fontsize=8)
     axes[0].set_ylabel("Detector-plane y (mm)")
-    fig.suptitle("E1-F1  Detector-plane valid events and acquisition-group slit ROIs")
     _save_png(fig, figures / FIGURE_NAMES[0])
 
     # E1-F2: one independently normalized total profile per ROI.
@@ -429,7 +428,6 @@ def run_e1(
     axis.set(
         xlim=E1_DEPTH_RANGE_MM,
         ylabel="Normalized detected contribution",
-        title="E1-F2  ROI-conditioned total first-scatter depth response",
     )
     axis.set_xlabel("First-scatter depth z (mm)", labelpad=38)
     axis.legend(ncol=6, loc="upper right")
@@ -503,13 +501,12 @@ def run_e1(
                 xlabel=f"{horizontal} (mm)",
                 ylabel="z (mm)",
                 title=(
-                    f"({chr(ord('a') + panel_index)}) {group_label} ({profile_id}) "
+                    f"({chr(ord('a') + panel_index)}) {group_label} group "
                     f"{horizontal}-z"
                 ),
             )
             axis.legend(loc="upper right", fontsize=8, markerscale=2.5)
             panel_index += 1
-    fig.suptitle("E1-F3  All-valid-events first/last scatter overlay")
     _save_png(fig, figures / FIGURE_NAMES[2])
 
     for profile_id, slit_ids in acquisition_groups:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -110,6 +111,25 @@ class Center3x3DepthHistogramTests(unittest.TestCase):
         )
         self.assertAlmostEqual(with_boundary, without_boundary)
 
+    def test_figure10_uses_raw_counts_and_independent_front_normalization(self):
+        inputs = replace(synthetic_inputs(), slab_pooled_n_primary=900)
+        figure = depth.build_figure10_data(inputs)
+        self.assertEqual(3, int(figure.truth_counts.sum()))
+        self.assertEqual(5, int(figure.slab_counts.sum()))
+        self.assertEqual(55.0, figure.raw_edges_mm[28])
+        self.assertEqual(1, int(figure.slab_counts[27]))  # 54–55 mm
+        self.assertEqual(1, int(figure.slab_counts[28]))  # 55–56 mm
+        self.assertEqual(0, int(figure.truth_counts[28]))
+        self.assertAlmostEqual(3 / 5, figure.slab_fraction_z_lt55)
+        self.assertAlmostEqual(5 / 3, figure.slab_to_truth_ratio)
+        self.assertAlmostEqual(1.0, float(figure.truth_front_fraction.sum()))
+        self.assertAlmostEqual(1.0, float(figure.slab_front_fraction.sum()))
+        self.assertAlmostEqual(1 / 3, float(figure.slab_front_fraction[-1]))
+        self.assertEqual(55.0, figure.front_edges_mm[-1])
+        self.assertAlmostEqual(1.0, figure.pearson_r_z_lt55)
+        with self.assertRaisesRegex(ValueError, "equal positive pooled primary histories"):
+            depth.build_figure10_data(synthetic_inputs())
+
     def test_outputs_replace_legacy_contract_and_are_300dpi(self):
         inputs = synthetic_inputs()
         alpha = inputs.p4_pooled_n_primary / inputs.slab_pooled_n_primary
@@ -121,6 +141,7 @@ class Center3x3DepthHistogramTests(unittest.TestCase):
         )
         roi = depth.roi_depth_statistics(inputs.truth_front_images)
         summary = depth.build_summary(inputs, alpha)
+        figure = depth.build_figure10_data(replace(inputs, slab_pooled_n_primary=900))
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             output = root / "center3x3"
@@ -129,7 +150,7 @@ class Center3x3DepthHistogramTests(unittest.TestCase):
             (output / "E3_SF1_center3x3_all_four_first_scatter_depth.png").write_text(
                 "legacy", encoding="utf-8"
             )
-            depth.write_outputs(table, roi, summary, staging)
+            depth.write_outputs(table, roi, summary, figure, staging)
             depth.publish(staging, output, overwrite=True)
             self.assertEqual(
                 set(depth.OUTPUT_NAMES), {path.name for path in output.iterdir()}

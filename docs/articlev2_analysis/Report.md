@@ -1,6 +1,6 @@
 # PMMA–空气缺陷 X 射线背散射蒙特卡罗实验报告
 
-> 数据版本：`results/articlev3_merged` + `results/articlev3_p4_front_slab_55mm_100m`。更新日期：2026-08-31。E1、E2 与包含 55 mm PMMA 前层参考的严格 E3 均已完成。
+> 数据版本：`results/articlev3_merged` + `results/articlev3_p4_front_slab_55mm_100m`。更新日期：2026-09-11。E1、E2 与包含 55 mm PMMA 前层参考的严格 E3 均已完成。
 
 ## 1. 实验目的与结论摘要
 
@@ -11,10 +11,12 @@
 - S1–S6 在探测面形成可分离接受区域，独立归一化的主要首次散射深度随狭缝编号有序向深部移动。
 - 100M histories/pose 的完整网格中，P1–P6 原始 total 图像均呈现与 10×10 mm² 缺陷位置一致的低计数区；可见性随深度降低，但 P6 仍可辨识。
 - 零位姿 total 相对计数变化从 P1 的 −55.5% 单调减弱至 P6 的 −12.7%；k1 和 ms 在全部深度均显示统计可测的负响应。
-- P4–S4 的 T 区 total 从 2152 降至 1，ms 从 811 降至 0；与此同时全深度 total 只下降 19.3%，说明局部目标深度响应会被其他深度来源计数稀释。
+- 第 3.2 节的原始事件重算显示，18/18 个条件均有 $|\Gamma_T|>|\Gamma_{nonT}|$；其中 12 个 non-T 项反向抵消 T 项，6 个同向叠加。
+- baseline total 的 F 占比由 16.4% 增至 74.3%，T 占比由 56.7% 降至 11.8%；来源组成随目标深度系统变化。
 - M0 CNR 从 P1 的 47.25 单调降至 P6 的 4.53。M3 在 P6 仍有 CNR 10.29，表明 T 区 ms 事件自身能够形成位置一致的二维响应。
 - M4 在六个深度均取得最高点估计 CNR，但只保留 M0 的 51.0% 到 10.0% 计数；CNR 增益必须与计数代价共同报告。
 - P4–S4 中，独立 55 mm slab 作差仍保留中心低响应，但点估计 CNR 为 9.80，低于 M0 的 11.37 和理想 truth 去前层 M5 的 18.26；该参考不能视为 M5 的等价替代。
+- P4–S4 的直接深度比较显示 slab 与 truth front 的浅层 histogram 形状高度一致（Pearson r=0.995753），但 slab 只覆盖 truth-front 计数的 74.1%。
 
 上述结论描述统计关系，不将某一首次散射源区直接表述为图像变化的独立因果来源。
 
@@ -119,50 +121,112 @@ P002 的 S1/S3/S5 与 P001 的 S2/S4/S6 在 detector x 上形成六个有序且�
 | P5–S5 | -15.7% ([-18.5%, -12.7%]) | -46.0% ([-50.9%, -40.7%]) | -8.8% ([-12.0%, -5.3%]) |
 | P6–S6 | -12.7% ([-16.5%, -8.7%]) | -48.2% ([-55.2%, -40.5%]) | -7.3% ([-11.7%, -2.8%]) |
 
-### 5.3 目标深度来源事件占比
+### 5.3 P1–P6 首次散射深度分布（新版图 5）
 
-P0 baseline 的 total 目标区占比随匹配深度从 56.7% 单调降至 11.8%。空气缺陷条件的 T 区首次散射事件被压低到 0.23% 以下，因此其点估计不呈可靠的深度单调序列；这不影响 baseline 中目标深度统计权重随深度下降的观察。每个条件和类别的 F/T/B 分数均严格闭合为 1。
+![Figure 5 total](../../results/articlev3_merged/postprocessing/E2/supplementary/section_3_2/fig5_first_scatter_depth_total.png)
 
-| 条件 | baseline fT total (95% CI) | defect fT total (95% CI) | defect fT k1 | defect fT ms |
-|---|---|---|---:|---:|
-| P1–S1 | 56.69% ([56.0%, 57.4%]) | 0.226% ([0.1%, 0.3%]) | 0.524% | 0.091% |
-| P2–S2 | 44.07% ([43.4%, 44.8%]) | 0.156% ([0.1%, 0.2%]) | 0.460% | 0.074% |
-| P3–S3 | 26.55% ([25.9%, 27.2%]) | 0.057% ([0.0%, 0.1%]) | 0.073% | 0.053% |
-| P4–S4 | 21.28% ([20.5%, 22.1%]) | 0.012% ([0.0%, 0.0%]) | 0.079% | 0.000% |
-| P5–S5 | 16.09% ([15.2%, 16.9%]) | 0.018% ([0.0%, 0.1%]) | 0.146% | 0.000% |
-| P6–S6 | 11.79% ([10.8%, 12.8%]) | 0.028% ([0.0%, 0.1%]) | 0.364% | 0.000% |
+![Figure 5 k1](../../results/articlev3_merged/postprocessing/E2/supplementary/section_3_2/fig5_first_scatter_depth_k1.png)
 
-### 5.4 P4–S4 代表性深度分布
+![Figure 5 ms](../../results/articlev3_merged/postprocessing/E2/supplementary/section_3_2/fig5_first_scatter_depth_ms.png)
 
-![E2-F2 total relative response](../../results/articlev3_merged/postprocessing/E2/figures/E2-F2_P0-S4_vs_P4-S4_total_binwise_relative_response.png)
+三张 2×3 小倍图分别给出 total、k1 和 ms。每个 panel 使用该条件自身的原始计数纵轴，实线为均匀模体，虚线为缺陷模体，灰色阴影为对应 T 区。主要计数凹陷随目标深度移动并集中在 T 区；T 区之外两条曲线总体较接近，但并非处处相同。
 
-![E2-F2 k1 relative response](../../results/articlev3_merged/postprocessing/E2/figures/E2-F2_P0-S4_vs_P4-S4_k1_binwise_relative_response.png)
+### 5.4 新表 6：T 区对整体计数变化的贡献
 
-![E2-F2 ms relative response](../../results/articlev3_merged/postprocessing/E2/figures/E2-F2_P0-S4_vs_P4-S4_ms_binwise_relative_response.png)
+下表各项直接从零位姿原始事件计数计算，不使用重采样区间。$\Gamma_T=w_TC_T=(N_{T,D}-N_{T,0})/N_0$，$\Gamma_{nonT}=C-\Gamma_T$；二者均表示相对于 baseline 总计数的百分点贡献。
 
-![E2-F3 total depth](../../results/articlev3_merged/postprocessing/E2/figures/E2-F3_P0-S4_vs_P4-S4_total_raw_depth_counts.png)
+#### Panel A — `total`
 
-![E2-F3 k1 depth](../../results/articlev3_merged/postprocessing/E2/figures/E2-F3_P0-S4_vs_P4-S4_k1_raw_depth_counts.png)
+| 条件 | N_T,0→N_T,D | C_T | w_T | C | Gamma_T | Gamma_nonT |
+|---|---:|---:|---:|---:|---:|---:|
+| P1–S1 | 10,166→18 | -99.82% | 56.69% | -55.49% | -56.59% | 1.10% |
+| P2–S2 | 7,948→16 | -99.80% | 44.07% | -42.97% | -43.98% | 1.01% |
+| P3–S3 | 4,387→7 | -99.84% | 26.55% | -26.11% | -26.51% | 0.40% |
+| P4–S4 | 2,152→1 | -99.95% | 21.28% | -19.26% | -21.27% | 2.02% |
+| P5–S5 | 1,087→1 | -99.91% | 16.09% | -15.73% | -16.07% | 0.34% |
+| P6–S6 | 476→1 | -99.79% | 11.79% | -12.71% | -11.77% | -0.94% |
 
-![E2-F3 ms depth](../../results/articlev3_merged/postprocessing/E2/figures/E2-F3_P0-S4_vs_P4-S4_ms_raw_depth_counts.png)
+#### Panel B — `k1`
 
-P4 的 55–65 mm T 区出现接近完全的计数缺失：total 2152→1、k1 1341→1、ms 811→0。F 区曲线近似重合，B 区缺陷条件计数反而增加。该组合说明全深度 −19.3% 的 total 变化不能代表 T 区局部响应幅度。
+| 条件 | N_T,0→N_T,D | C_T | w_T | C | Gamma_T | Gamma_nonT |
+|---|---:|---:|---:|---:|---:|---:|
+| P1–S1 | 8,139→13 | -99.84% | 79.42% | -75.81% | -79.29% | 3.48% |
+| P2–S2 | 5,907→10 | -99.83% | 75.14% | -72.37% | -75.02% | 2.65% |
+| P3–S3 | 2,868→2 | -99.93% | 50.66% | -51.76% | -50.63% | -1.13% |
+| P4–S4 | 1,341→1 | -99.93% | 51.80% | -50.98% | -51.76% | 0.77% |
+| P5–S5 | 633→1 | -99.84% | 50.04% | -46.01% | -49.96% | 3.95% |
+| P6–S6 | 270→1 | -99.63% | 50.85% | -48.21% | -50.66% | 2.45% |
 
-### 5.5 P4–S4 F/T/B 定量分解
+#### Panel C — `ms`
 
-| 类别 | 区域 | N0→ND | Cr (95% CI) | DTV (95% CI) | n effective |
-|---|---|---:|---|---|---:|
-| total | Front | 6065→5999 | -1.1% ([-4.4%, 2.6%]) | 0.045 ([0.04, 0.07]) | 5000 |
-| total | Target | 2152→1 | -100.0% ([-100.0%, -99.9%]) | 0.772 ([0.75, 0.79]) | 3123 |
-| total | Behind | 1894→2164 | 14.3% ([7.4%, 21.4%]) | 0.081 ([0.10, 0.15]) | 5000 |
-| k1 | Front | 1098→1059 | -3.6% ([-11.1%, 5.0%]) | 0.057 ([0.04, 0.11]) | 5000 |
-| k1 | Target | 1341→1 | -99.9% ([-100.0%, -99.8%]) | 0.768 ([0.75, 0.79]) | 3123 |
-| k1 | Behind | 150→209 | 39.3% ([13.5%, 71.6%]) | 0.012 ([0.02, 0.13]) | 5000 |
-| ms | Front | 4967→4940 | -0.5% ([-4.4%, 3.5%]) | 0.046 ([0.05, 0.08]) | 5000 |
-| ms | Target | 811→0 | -100.0% ([-100.0%, -100.0%]) | NA | 0 |
-| ms | Behind | 1744→1955 | 12.1% ([5.1%, 19.4%]) | 0.090 ([0.11, 0.16]) | 5000 |
+| 条件 | N_T,0→N_T,D | C_T | w_T | C | Gamma_T | Gamma_nonT |
+|---|---:|---:|---:|---:|---:|---:|
+| P1–S1 | 2,027→5 | -99.75% | 26.38% | -28.40% | -26.31% | -2.08% |
+| P2–S2 | 2,041→6 | -99.71% | 20.06% | -20.25% | -20.00% | -0.25% |
+| P3–S3 | 1,519→5 | -99.67% | 13.99% | -12.74% | -13.94% | 1.20% |
+| P4–S4 | 811→0 | -100.00% | 10.78% | -8.34% | -10.78% | 2.45% |
+| P5–S5 | 454→0 | -100.00% | 8.27% | -8.76% | -8.27% | -0.49% |
+| P6–S6 | 206→0 | -100.00% | 5.88% | -7.33% | -5.88% | -1.45% |
 
-F 区三类 Cr 的区间均跨越 0；B 区三类计数均增加且区间高于 0。T 区 total/k1 的 DTV 很高，但缺陷直方图各只有 1 个事件，应谨慎解释；T 区 ms 的缺陷计数为 0，内部形态无法归一化，因此 DTV 按规则记为 NA。
+18 个条件均满足 $|\Gamma_T|>|\Gamma_{nonT}|$，因此当前原始数据支持“整体计数下降主要来自 T 区”。其中 12 个 non-T 项与 T 项方向相反并部分抵消，6 个同向叠加；不能假定 non-T 在全部条件中方向相同。绝对值最大的 non-T 项列于下表。
+
+| 条件 | 类别 | Gamma_T | Gamma_nonT | 方向 |
+|---|---|---:|---:|---|
+| P5–S5 | k1 | -49.96% | 3.95% | 抵消 T |
+| P1–S1 | k1 | -79.29% | 3.48% | 抵消 T |
+| P2–S2 | k1 | -75.02% | 2.65% | 抵消 T |
+| P6–S6 | k1 | -50.66% | 2.45% | 抵消 T |
+| P4–S4 | ms | -10.78% | 2.45% | 抵消 T |
+
+### 5.5 non-T 首次散射深度形态检查
+
+F 与 B 保持各自原始深度 bin 身份，排除 T 后拼接并联合归一化。下表只给出观测点估计，不绘制 DTV 折线图。
+
+| 条件 | 类别 | N_nonT,0→N_nonT,D | D_TV,F | D_TV,B | D_TV,nonT |
+|---|---|---:|---:|---:|---:|
+| P1–S1 | total | 7,766→7,963 | 0.030 | 0.075 | 0.073 |
+| P1–S1 | k1 | 2,109→2,466 | 0.008 | 0.018 | 0.066 |
+| P1–S1 | ms | 5,657→5,497 | 0.034 | 0.071 | 0.081 |
+| P2–S2 | total | 10,087→10,270 | 0.018 | 0.055 | 0.060 |
+| P2–S2 | k1 | 1,954→2,162 | 0.018 | 0.048 | 0.082 |
+| P2–S2 | ms | 8,133→8,108 | 0.026 | 0.072 | 0.064 |
+| P3–S3 | total | 12,135→12,201 | 0.022 | 0.070 | 0.047 |
+| P3–S3 | k1 | 2,793→2,729 | 0.013 | 0.030 | 0.042 |
+| P3–S3 | ms | 9,342→9,472 | 0.030 | 0.077 | 0.050 |
+| P4–S4 | total | 7,959→8,163 | 0.045 | 0.081 | 0.059 |
+| P4–S4 | k1 | 1,248→1,268 | 0.057 | 0.012 | 0.079 |
+| P4–S4 | ms | 6,711→6,895 | 0.046 | 0.090 | 0.059 |
+| P5–S5 | total | 5,670→5,693 | 0.055 | 0.098 | 0.068 |
+| P5–S5 | k1 | 632→682 | 0.059 | 0.041 | 0.078 |
+| P5–S5 | ms | 5,038→5,011 | 0.059 | 0.113 | 0.072 |
+| P6–S6 | total | 3,561→3,523 | 0.083 | 0.145 | 0.094 |
+| P6–S6 | k1 | 261→274 | 0.142 | 0.099 | 0.151 |
+| P6–S6 | ms | 3,300→3,249 | 0.081 | 0.168 | 0.095 |
+
+| 类别 | min | max | range | 最小条件 | 最大条件 | 趋势 |
+|---|---:|---:|---:|---|---|---|
+| total | 0.047 | 0.094 | 0.047 | P3–S3 | P6–S6 | 存在下降或起伏，不是单调增加 |
+| k1 | 0.042 | 0.151 | 0.110 | P3–S3 | P6–S6 | 存在下降或起伏，不是单调增加 |
+| ms | 0.050 | 0.095 | 0.046 | P3–S3 | P6–S6 | 存在下降或起伏，不是单调增加 |
+
+三类 $D_{TV,nonT}$ 均在 P6–S6 达到最大值；total：存在下降或起伏，不是单调增加；k1：存在下降或起伏，不是单调增加；ms：存在下降或起伏，不是单调增加。因此这里只记录数值和起伏，不依据非零值或端点差异扩展结论。
+
+### 5.6 baseline total 的 F/T/B 来源组成
+
+![Baseline total F/T/B composition](../../results/articlev3_merged/postprocessing/E2/supplementary/section_3_2/fig_source_composition_total.png)
+
+100% 堆叠柱仅使用均匀模体 total 事件。来源组成趋势为 F 严格增加、T 严格下降、B 严格下降；每根柱严格闭合为 100%。
+
+| 条件 | N0 | N_F,0 | N_T,0 | N_B,0 | w_F | w_T | w_B |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| P1–S1 | 17,932 | 2,939 | 10,166 | 4,827 | 16.39% | 56.69% | 26.92% |
+| P2–S2 | 18,035 | 5,412 | 7,948 | 4,675 | 30.01% | 44.07% | 25.92% |
+| P3–S3 | 16,522 | 8,603 | 4,387 | 3,532 | 52.07% | 26.55% | 21.38% |
+| P4–S4 | 10,111 | 6,065 | 2,152 | 1,894 | 59.98% | 21.28% | 18.73% |
+| P5–S5 | 6,757 | 4,591 | 1,087 | 1,079 | 67.94% | 16.09% | 15.97% |
+| P6–S6 | 4,037 | 3,001 | 476 | 560 | 74.34% | 11.79% | 13.87% |
+
+数值验收中，$C=\Gamma_T+\Gamma_{nonT}$、两种 $\Gamma_T$ 算法、F/T/B 与 total/k1/ms 计数闭合、表 5 的全精度 C 复核以及每柱权重闭合均通过；最大浮点误差不超过 $1.11\times10^{-16}$。本节不引入重采样、置信区间或显著性判断。
 
 ## 6. E3：首次散射真值条件下的二维成像作用
 
@@ -248,15 +312,38 @@ P4 与均匀 slab 均为 100M histories/pose，因此参考作差的历史数归
 
 E3-F6 中，slab 作差图仍显示与缺陷位置一致的中心低响应，但点估计 CNR 的顺序为 M5 18.26、M0 11.37、slab 作差 9.80。作差图的背景标准差为 133.47，高于 M0 的 114.09 和 M5 的 68.00，因此它没有复现理想 source-truth 去除 F 区后的图像质量。E3-T4 只给出各图像自身的重采样区间，没有定义配对 CNR 差值或收益区间；这里不据区间重叠作显著性判断。
 
+### 6.7 P4–S4 truth front 与 slab reference 的直接深度验证
+
+![E3 supplementary front components](../../results/articlev3_merged/postprocessing/E3/supplementary/center3x3_first_scatter_depth/E3_SF1_P4_S4_front_components_depth.png)
+
+![E3 supplementary truth-slab overlay](../../results/articlev3_merged/postprocessing/E3/supplementary/center3x3_first_scatter_depth/E3_SF2_P4_S4_truth_front_vs_slab_overlay.png)
+
+![E3 supplementary ROI-depth response](../../results/articlev3_merged/postprocessing/E3/supplementary/center3x3_first_scatter_depth/E3_SF3_P4_S4_truth_front_roi_depth.png)
+
+这里不以 CNR 或全图计数间接反推 front source，而是直接使用 P4–S4 first-scatter depth。第一张图依次显示中心 3×3 的 P4 Total、truth front (`z<55 mm`)、按实际 histories 缩放的 slab front，以及 signed residual；第二张图把 truth/slab 放在同一幅原始计数坐标上以比较浅层范围、峰位、宽度和尾部；第三张图以完整 9×9 truth-front 图像按深度计算 background/defect ROI 均值与其差值。
+
+| 指标 | 结果 |
+|---|---:|
+| P4/slab pooled histories | 900,000,000 / 900,000,000 |
+| alpha | 1.000 |
+| truth front total | 53,644 |
+| slab front total | 39740 |
+| slab/truth | 74.08% |
+| slab 的 z<55 mm 比例 | 99.9245% |
+| 浅层 Pearson r | 0.995753 |
+
+两侧 histories 相同，故 `alpha=1.0`。slab 的 99.9245% 位于 55 mm 前，且与 truth front 的浅层 histogram 形状高度一致（r=0.995753）；但 slab 只覆盖 truth-front 幅值的 74.08%，不能把它当作逐 bin 完整 truth front。余下约 0.0755% 是 55 mm 后的 slab 尾部。ROI 图显示高计数浅层 bin 的 background/defect 均值接近、Delta 相对较小，但不同 bin 的 Delta 有正有负，因此这里只记录该局部观察，不将其推广为所有浅层来源的普遍机制。
+
 ## 7. E1–E3 综合证据链
 
 1. **系统选择特征：** 探测面通道可分，主要深度响应按 S1–S6 有序移动；末次散射位置比首次散射明显扩展。
 2. **原始响应随深度降低：** total 相对变化由 −55.5% 减弱至 −12.7%，M0 CNR 由 47.25 降至 4.53；P6 仍可辨识而非完全消失。
-3. **目标深度局部响应：** P4 T 区 total/k1/ms 分别接近完全损失，而 F 区变化不显著、B 区增加；局部 T 区响应显著大于全深度 total 响应。
-4. **事件组成：** P0 baseline fT total 从 56.7% 降至 11.8%；缺陷零位姿 T 区事件因空气替代而接近零。
+3. **目标区贡献分解：** 18/18 个条件均满足 $|\Gamma_T|>|\Gamma_{nonT}|$；12 个 non-T 项反向抵消，6 个同向叠加。
+4. **事件组成：** baseline total 的 F 占比由 16.4% 增至 74.3%，T 占比由 56.7% 降至 11.8%，且各柱 F/T/B 严格闭合。
 5. **目标深度 ms：** M3 在全部深度形成位置一致的二维响应，深部 P5/P6 点估计 CNR 高于 M0。
 6. **策略权衡：** M4 在六个深度具有最高点估计 CNR，但深部只保留约 10% 计数；M5 提高深部 CNR 的同时舍弃大量 F 区事件。
 7. **独立参考边界：** 55 mm slab 作差保留中心缺陷响应，但 CNR 点估计低于 M0，且明显低于 truth M5；本配置不支持把均匀 slab 作差视为理想 F 区去除的等价实现。
+8. **直接深度对应：** slab front 的 99.9245% 位于 F 区且与 truth front 形状高度相关，但其幅值仅为 truth front 的 74.1%；这支持其为浅层参考，而不支持其为完整 truth-front 幅值替代。
 
 ## 8. 核心结果总表
 
@@ -267,14 +354,16 @@ E3-F6 中，slab 作差图仍显示与缺陷位置一致的中心低响应，但
 | 首次/末次空间分布是否不同 | 末次散射横向扩展明显更大 | 支持 |
 | 原始缺陷可见性是否随深度下降 | M0 CNR 47.25→4.53，但 P6 仍可辨 | 支持下降，不支持“完全不可见” |
 | 整体计数响应是否随深度减弱 | total C −55.5%→−12.7% | 支持 |
-| T 区是否保持局部响应 | P4 total 2152→1，ms 811→0 | 支持 |
-| baseline T 区占比是否随深度下降 | 56.7%→11.8%，单调下降 | 支持 |
+| T 区是否主导整体变化 | 18/18 个条件均有 `abs(Gamma_T) > abs(Gamma_nonT)` | 支持 |
+| non-T 项方向是否固定 | 12 个抵消、6 个同向 | 不支持固定方向 |
+| baseline 来源组成是否随深度变化 | w_F 16.4%→74.3%；w_T 56.7%→11.8% | 支持 |
 | T 区 ms 是否独立成像 | M3 全深度出现二维响应 | 支持 |
 | 加入 T 区 ms 是否增加计数 | M2→M4 +24.5% 至 +77.7% | 支持 |
 | 加入 T 区 ms 是否稳定提高 CNR | 仅 P2/P6 的增益 CI 高于 0 | 部分支持 |
 | M1→M4 完整策略 | P2–P6 CNR 增益 CI 高于 0，计数减少 | 支持但有代价 |
 | 去除 F 区事件 | P2–P6 CNR 增益 CI 高于 0，M5保留率随深度下降 | 支持统计关联 |
 | slab 参考近似 F 区 | 作差 CNR 9.80，M0 11.37，truth M5 18.26 | 保留响应，但不支持与理想去除等价 |
+| slab 是否对应 truth front 深度来源 | F 区占 99.9245%，Pearson r=0.995753，幅值比 74.1% | 支持形状对应，不支持完整幅值等价 |
 
 ## 9. 完成状态与结果边界
 
@@ -283,9 +372,11 @@ E3-F6 中，slab 作差图仍显示与缺陷位置一致的中心低响应，但
 - [x] E1 三图
 - [x] E2 完整网格、整体响应、F/T/B 占比和 P4 定量分解
 - [x] E2 5000 次 Poisson 重采样
+- [x] E2 第 3.2 节原始事件重算：新版图 5、表 6、non-T DTV 与 baseline F/T/B 组成
 - [x] E3 M0–M5、M3、三类策略比较和深度趋势
 - [x] E3 严格入口 5000 次 Poisson 重采样
 - [x] 55 mm 均匀前层 slab 参考 81 pose、E3-F6 与 E3-T4
+- [x] P4–S4 truth-front/slab 直接深度比较与 9×9 ROI-depth 辅助分析
 
 本报告的数值结论限定于 560 keV、当前 PMMA/空气材料、模体尺寸、准直几何、理想探测面和蒙特卡罗首次散射真值。实际系统可实现性、能量/材料推广、source-truth 的可观测近似以及机制归因留待 Discussion。
 
@@ -293,7 +384,10 @@ E3-F6 中，slab 作差图仍显示与缺陷位置一致的中心低响应，但
 
 - E1：[`postprocessing/E1`](../../results/articlev3_merged/postprocessing/E1/)
 - E2：[`postprocessing/E2`](../../results/articlev3_merged/postprocessing/E2/)
+- E2 第 3.2 节原始事件重算：[`section_3_2`](../../results/articlev3_merged/postprocessing/E2/supplementary/section_3_2/)
+- E2 第 3.2 节独立结果说明：[analysis_3_2_results.md](analysis_3_2_results.md)
 - E3 完整六图四表：[`postprocessing/E3`](../../results/articlev3_merged/postprocessing/E3/)
+- E3 truth-front/slab 补充结果：[`postprocessing/E3/supplementary/center3x3_first_scatter_depth`](../../results/articlev3_merged/postprocessing/E3/supplementary/center3x3_first_scatter_depth/)
 - 合并审计：`results/articlev3_merged/data_processing/audit/`
 - 合并来源与行数：`results/articlev3_merged/data_processing/merge/`
 - slab provenance 与清洗审计：[`reference_manifest.yaml`](../../results/articlev3_p4_front_slab_55mm_100m/reference_manifest.yaml)、[`valid_events_manifest.yaml`](../../results/articlev3_p4_front_slab_55mm_100m/events/valid/valid_events_manifest.yaml)

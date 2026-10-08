@@ -6,8 +6,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import yaml
+
+from scripts.postprocessing.e2 import run_section_3_2 as section32
 
 
 def pct(value: float, digits: int = 1) -> str:
@@ -24,6 +27,14 @@ def interval(row: pd.Series, low: str, high: str, *, percent: bool = False) -> s
     if percent:
         return f"[{pct(row[low])}, {pct(row[high])}]"
     return f"[{num(row[low])}, {num(row[high])}]"
+
+
+def percent_interval_n(row: pd.Series, prefix: str, digits: int = 2) -> str:
+    return (
+        f"{pct(row[prefix], digits)} "
+        f"({interval(row, prefix + '_ci_low', prefix + '_ci_high', percent=True)}; "
+        f"n_effective={int(row[prefix + '_n_effective'])})"
+    )
 
 
 def method_value(table: pd.DataFrame, phantom: str, method: str) -> pd.Series:
@@ -44,12 +55,18 @@ def build_report(results_root: Path, slab_root: Path) -> str:
     e1 = results_root / "postprocessing" / "E1"
     e2 = results_root / "postprocessing" / "E2"
     e3 = results_root / "postprocessing" / "E3"
+    e2_section32 = e2 / "supplementary" / section32.DEFAULT_SUBDIRECTORY
+    e2_section32_acceptance = e2_section32 / section32.ACCEPTANCE_NAME
+    e2_table6_path = e2_section32 / section32.TABLE6_NAME
+    e2_dtv_path = e2_section32 / section32.DTV_NAME
+    e2_composition_path = e2_section32 / section32.COMPOSITION_NAME
+    e2_validation_path = e2_section32 / section32.VALIDATION_NAME
+    e3_supplementary = e3 / "supplementary" / "center3x3_first_scatter_depth"
     required = (
         e1 / "acceptance_summary.yaml",
         e2 / "acceptance_summary.yaml",
+        e2_section32_acceptance,
         e2 / "tables" / "E2-T1_zero_pose_raw_count_decomposition.csv",
-        e2 / "tables" / "E2-T2_P0-S4_vs_P4-S4_source_region_quantitative.csv",
-        e2 / "tables" / "E2-T3_zero_pose_source_region_fractions.csv",
         e3 / "E3_T1_P4_S4_metrics.csv",
         e3 / "E3_T2_depth_method_metrics.csv",
         e3 / "E3_T3_depth_comparisons.csv",
@@ -58,25 +75,50 @@ def build_report(results_root: Path, slab_root: Path) -> str:
         slab_root / "reference_manifest.yaml",
         slab_root / "events" / "valid" / "valid_events_manifest.yaml",
         slab_root / "events" / "valid" / "valid_events_summary.csv",
+        e2_table6_path,
+        e2_dtv_path,
+        e2_composition_path,
+        e2_validation_path,
+        *(e2_section32 / name for name in section32.FIG5_NAMES.values()),
+        e2_section32 / section32.COMPOSITION_FIGURE_NAME,
+        *(e3_supplementary / name for name in (
+            "E3_SF1_P4_S4_front_components_depth.png",
+            "E3_SF2_P4_S4_truth_front_vs_slab_overlay.png",
+            "E3_SF3_P4_S4_truth_front_roi_depth.png",
+            "E3_ST1_P4_S4_front_source_summary.csv",
+        )),
     )
     missing = [path for path in required if not path.is_file()]
     if missing:
         raise FileNotFoundError("missing accepted report inputs: " + ", ".join(map(str, missing)))
-    for acceptance in required[:2]:
+    for acceptance in (required[0], required[1], e2_section32_acceptance):
         value = yaml.safe_load(acceptance.read_text(encoding="utf-8"))
         if value.get("overall_status") != "pass":
             raise ValueError(f"analysis acceptance is not pass: {acceptance}")
 
-    t1 = pd.read_csv(required[2])
-    regions = pd.read_csv(required[3])
-    fractions = pd.read_csv(required[4])
-    p4 = pd.read_csv(required[5])
-    methods = pd.read_csv(required[6])
-    comparisons = pd.read_csv(required[7])
-    reference = pd.read_csv(required[8])
-    reference_manifest = yaml.safe_load(required[10].read_text(encoding="utf-8"))
-    slab_valid_manifest = yaml.safe_load(required[11].read_text(encoding="utf-8"))
-    slab_valid_summary = pd.read_csv(required[12])
+    t1 = pd.read_csv(e2 / "tables" / "E2-T1_zero_pose_raw_count_decomposition.csv")
+    table6 = pd.read_csv(e2_table6_path)
+    dtv_non_t = pd.read_csv(e2_dtv_path)
+    source_composition = pd.read_csv(e2_composition_path)
+    section32_validation = pd.read_csv(e2_validation_path)
+    p4 = pd.read_csv(e3 / "E3_T1_P4_S4_metrics.csv")
+    methods = pd.read_csv(e3 / "E3_T2_depth_method_metrics.csv")
+    comparisons = pd.read_csv(e3 / "E3_T3_depth_comparisons.csv")
+    reference = pd.read_csv(e3 / "E3_T4_front_removal_reference_metrics.csv")
+    reference_manifest = yaml.safe_load(
+        (slab_root / "reference_manifest.yaml").read_text(encoding="utf-8")
+    )
+    slab_valid_manifest = yaml.safe_load(
+        (slab_root / "events" / "valid" / "valid_events_manifest.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    slab_valid_summary = pd.read_csv(
+        slab_root / "events" / "valid" / "valid_events_summary.csv"
+    )
+    supplementary = pd.read_csv(
+        e3_supplementary / "E3_ST1_P4_S4_front_source_summary.csv"
+    )
     if (
         tuple(reference.image) != ("M0", "M5", "reference_subtracted")
         or reference.cnr_n_effective.le(0).any()
@@ -103,8 +145,55 @@ def build_report(results_root: Path, slab_root: Path) -> str:
         != int(slab_valid_manifest.get("total_rows_kept", -1))
     ):
         raise ValueError("slab valid-event manifest failed its report contract")
+    if (
+        len(supplementary) != 1
+        or not {"alpha", "truth_front_total_count", "slab_front_total_count",
+                "slab_to_truth_ratio", "slab_fraction_z_lt55", "pearson_r_z_lt55"}
+        .issubset(supplementary.columns)
+    ):
+        raise ValueError("E3 supplementary front-source summary failed its report contract")
+    supplementary_row = supplementary.iloc[0]
+    if not (
+        float(supplementary_row.alpha) > 0
+        and float(supplementary_row.truth_front_total_count) > 0
+        and float(supplementary_row.slab_front_total_count) > 0
+        and 0 <= float(supplementary_row.slab_fraction_z_lt55) <= 1
+        and -1 <= float(supplementary_row.pearson_r_z_lt55) <= 1
+    ):
+        raise ValueError("E3 supplementary front-source metrics are invalid")
     phantoms = [f"P{i}" for i in range(1, 7)]
     depths = dict(zip(phantoms, (15, 30, 45, 60, 75, 90), strict=True))
+    expected_conditions = tuple(f"P{i}-S{i}" for i in range(1, 7))
+    expected_depths = tuple(depths[phantom] for phantom in phantoms)
+    for table, columns, count, label in (
+        (table6, section32.TABLE6_COLUMNS, 18, "section 3.2 contribution table"),
+        (dtv_non_t, section32.DTV_COLUMNS, 18, "section 3.2 DTV table"),
+        (source_composition, section32.COMPOSITION_COLUMNS, 6, "section 3.2 source composition"),
+        (section32_validation, section32.VALIDATION_COLUMNS, 18, "section 3.2 validation"),
+    ):
+        if (
+            tuple(table.columns) != columns
+            or len(table) != count
+            or set(table.condition) != set(expected_conditions)
+        ):
+            raise ValueError(f"{label} failed its report contract")
+    if (
+        not np.allclose(
+            table6.C, table6.Gamma_T + table6.Gamma_nonT, rtol=0.0, atol=1e-12
+        )
+        or not section32_validation.abs_Gamma_T_gt_abs_Gamma_nonT.all()
+        or not section32_validation.C_table5_rounding_match.all()
+        or not np.allclose(
+            source_composition[["w_F", "w_T", "w_B"]].sum(axis=1),
+            1.0,
+            rtol=0.0,
+            atol=1e-12,
+        )
+    ):
+        raise ValueError("section 3.2 numerical identities failed its report contract")
+    dtv_values = dtv_non_t[["D_TV_F", "D_TV_B", "D_TV_nonT"]].to_numpy(dtype=float)
+    if not np.all(np.isnan(dtv_values) | ((dtv_values >= 0.0) & (dtv_values <= 1.0))):
+        raise ValueError("section 3.2 DTV values fall outside [0, 1]")
     reference_by_image = reference.set_index("image")
     slab_rows_read = int(slab_valid_manifest["total_rows_read"])
     slab_rows_kept = int(slab_valid_manifest["total_rows_kept"])
@@ -120,11 +209,60 @@ def build_report(results_root: Path, slab_root: Path) -> str:
         - reference_by_image.loc["reference_subtracted", "count_metric"]
     )
 
+    t_dominant_count = int(section32_validation.abs_Gamma_T_gt_abs_Gamma_nonT.sum())
+    opposite_count = int(section32_validation.nonT_direction.eq("opposes_T").sum())
+    composition_by_condition = source_composition.set_index("condition")
+    first_composition = composition_by_condition.loc["P1-S1"]
+    last_composition = composition_by_condition.loc["P6-S6"]
+    ordered_composition = source_composition.sort_values("depth_mm")
+    composition_trends: dict[str, str] = {}
+    for region in ("F", "T", "B"):
+        values = ordered_composition[f"w_{region}"].to_numpy(dtype=float)
+        if np.all(np.diff(values) > 0):
+            composition_trends[region] = "严格增加"
+        elif np.all(np.diff(values) < 0):
+            composition_trends[region] = "严格下降"
+        else:
+            composition_trends[region] = "存在起伏"
+    dtv_summaries: dict[str, dict[str, str]] = {}
+    for scatter_class in ("total", "k1", "ms"):
+        selected = dtv_non_t[dtv_non_t.scatter_class.eq(scatter_class)].set_index(
+            "condition"
+        ).D_TV_nonT
+        finite = selected.dropna()
+        if finite.empty:
+            dtv_summaries[scatter_class] = {
+                "minimum": "NA",
+                "maximum": "NA",
+                "range": "NA",
+                "minimum_condition": "NA",
+                "maximum_condition": "NA",
+                "trend": "全部为 NA，无法判定",
+            }
+            continue
+        values = finite.to_numpy(dtype=float)
+        if len(finite) != len(selected):
+            trend = "含 NA，无法判定完整序列单调性"
+        elif np.all(np.diff(values) > 0):
+            trend = "严格增加"
+        elif np.all(np.diff(values) < 0):
+            trend = "严格下降"
+        else:
+            trend = "存在下降或起伏，不是单调增加"
+        dtv_summaries[scatter_class] = {
+            "minimum": f"{values.min():.3f}",
+            "maximum": f"{values.max():.3f}",
+            "range": f"{values.max() - values.min():.3f}",
+            "minimum_condition": str(finite.idxmin()).replace("-", "–"),
+            "maximum_condition": str(finite.idxmax()).replace("-", "–"),
+            "trend": trend,
+        }
+
     base = "../../results/articlev3_merged/postprocessing"
     lines: list[str] = [
         "# PMMA–空气缺陷 X 射线背散射蒙特卡罗实验报告",
         "",
-        "> 数据版本：`results/articlev3_merged` + `results/articlev3_p4_front_slab_55mm_100m`。更新日期：2026-08-31。E1、E2 与包含 55 mm PMMA 前层参考的严格 E3 均已完成。",
+        "> 数据版本：`results/articlev3_merged` + `results/articlev3_p4_front_slab_55mm_100m`。更新日期：2026-09-11。E1、E2 与包含 55 mm PMMA 前层参考的严格 E3 均已完成。",
         "",
         "## 1. 实验目的与结论摘要",
         "",
@@ -135,10 +273,12 @@ def build_report(results_root: Path, slab_root: Path) -> str:
         "- S1–S6 在探测面形成可分离接受区域，独立归一化的主要首次散射深度随狭缝编号有序向深部移动。",
         "- 100M histories/pose 的完整网格中，P1–P6 原始 total 图像均呈现与 10×10 mm² 缺陷位置一致的低计数区；可见性随深度降低，但 P6 仍可辨识。",
         "- 零位姿 total 相对计数变化从 P1 的 −55.5% 单调减弱至 P6 的 −12.7%；k1 和 ms 在全部深度均显示统计可测的负响应。",
-        "- P4–S4 的 T 区 total 从 2152 降至 1，ms 从 811 降至 0；与此同时全深度 total 只下降 19.3%，说明局部目标深度响应会被其他深度来源计数稀释。",
+        f"- 第 3.2 节的原始事件重算显示，{t_dominant_count}/18 个条件均有 $|\\Gamma_T|>|\\Gamma_{{nonT}}|$；其中 {opposite_count} 个 non-T 项反向抵消 T 项，{18 - opposite_count} 个同向叠加。",
+        f"- baseline total 的 F 占比由 {pct(first_composition.w_F)} 增至 {pct(last_composition.w_F)}，T 占比由 {pct(first_composition.w_T)} 降至 {pct(last_composition.w_T)}；来源组成随目标深度系统变化。",
         "- M0 CNR 从 P1 的 47.25 单调降至 P6 的 4.53。M3 在 P6 仍有 CNR 10.29，表明 T 区 ms 事件自身能够形成位置一致的二维响应。",
         "- M4 在六个深度均取得最高点估计 CNR，但只保留 M0 的 51.0% 到 10.0% 计数；CNR 增益必须与计数代价共同报告。",
         "- P4–S4 中，独立 55 mm slab 作差仍保留中心低响应，但点估计 CNR 为 9.80，低于 M0 的 11.37 和理想 truth 去前层 M5 的 18.26；该参考不能视为 M5 的等价替代。",
+        f"- P4–S4 的直接深度比较显示 slab 与 truth front 的浅层 histogram 形状高度一致（Pearson r={num(supplementary_row.pearson_r_z_lt55, 6)}），但 slab 只覆盖 truth-front 计数的 {pct(supplementary_row.slab_to_truth_ratio)}。",
         "",
         "上述结论描述统计关系，不将某一首次散射源区直接表述为图像变化的独立因果来源。",
         "",
@@ -255,62 +395,135 @@ def build_report(results_root: Path, slab_root: Path) -> str:
     lines.extend(
         [
             "",
-            "### 5.3 目标深度来源事件占比",
+            "### 5.3 P1–P6 首次散射深度分布（新版图 5）",
             "",
-            "P0 baseline 的 total 目标区占比随匹配深度从 56.7% 单调降至 11.8%。空气缺陷条件的 T 区首次散射事件被压低到 0.23% 以下，因此其点估计不呈可靠的深度单调序列；这不影响 baseline 中目标深度统计权重随深度下降的观察。每个条件和类别的 F/T/B 分数均严格闭合为 1。",
+            f"![Figure 5 total]({base}/E2/supplementary/section_3_2/fig5_first_scatter_depth_total.png)",
             "",
-            "| 条件 | baseline fT total (95% CI) | defect fT total (95% CI) | defect fT k1 | defect fT ms |",
-            "|---|---|---|---:|---:|",
+            f"![Figure 5 k1]({base}/E2/supplementary/section_3_2/fig5_first_scatter_depth_k1.png)",
+            "",
+            f"![Figure 5 ms]({base}/E2/supplementary/section_3_2/fig5_first_scatter_depth_ms.png)",
+            "",
+            "三张 2×3 小倍图分别给出 total、k1 和 ms。每个 panel 使用该条件自身的原始计数纵轴，实线为均匀模体，虚线为缺陷模体，灰色阴影为对应 T 区。主要计数凹陷随目标深度移动并集中在 T 区；T 区之外两条曲线总体较接近，但并非处处相同。",
+            "",
+            "### 5.4 新表 6：T 区对整体计数变化的贡献",
+            "",
+            "下表各项直接从零位姿原始事件计数计算，不使用重采样区间。$\\Gamma_T=w_TC_T=(N_{T,D}-N_{T,0})/N_0$，$\\Gamma_{nonT}=C-\\Gamma_T$；二者均表示相对于 baseline 总计数的百分点贡献。",
         ]
     )
-    for phantom in phantoms:
-        target = fractions[fractions.defect_phantom.eq(phantom) & fractions.region.eq("Target")]
-        b = target[target.condition_role.eq("baseline") & target.scatter_class.eq("total")].iloc[0]
-        d = target[target.condition_role.eq("defect") & target.scatter_class.eq("total")].iloc[0]
-        dk1 = target[target.condition_role.eq("defect") & target.scatter_class.eq("k1")].iloc[0]
-        dms = target[target.condition_role.eq("defect") & target.scatter_class.eq("ms")].iloc[0]
+    for panel, scatter_class in zip(("A", "B", "C"), ("total", "k1", "ms"), strict=True):
+        lines.extend(
+            [
+                "",
+                f"#### Panel {panel} — `{scatter_class}`",
+                "",
+                "| 条件 | N_T,0→N_T,D | C_T | w_T | C | Gamma_T | Gamma_nonT |",
+                "|---|---:|---:|---:|---:|---:|---:|",
+            ]
+        )
+        for _, row in table6[table6.scatter_class.eq(scatter_class)].iterrows():
+            lines.append(
+                f"| {row.condition.replace('-', '–')} | {int(row.N_T0):,}→{int(row.N_TD):,} | "
+                f"{pct(row.C_T, 2)} | {pct(row.w_T, 2)} | {pct(row.C, 2)} | "
+                f"{pct(row.Gamma_T, 2)} | {pct(row.Gamma_nonT, 2)} |"
+            )
+
+    largest_non_t = section32_validation.reindex(
+        section32_validation.Gamma_nonT_direct.abs().sort_values(ascending=False).index
+    ).head(5)
+    lines.extend(
+        [
+            "",
+            f"18 个条件均满足 $|\\Gamma_T|>|\\Gamma_{{nonT}}|$，因此当前原始数据支持“整体计数下降主要来自 T 区”。其中 "
+            f"{opposite_count} 个 non-T 项与 T 项方向相反并部分抵消，"
+            f"{18 - opposite_count} 个同向叠加；不能假定 non-T 在全部条件中方向相同。绝对值最大的 non-T 项列于下表。",
+            "",
+            "| 条件 | 类别 | Gamma_T | Gamma_nonT | 方向 |",
+            "|---|---|---:|---:|---|",
+        ]
+    )
+    for _, row in largest_non_t.iterrows():
+        direction = "抵消 T" if row.nonT_direction == "opposes_T" else "与 T 同向"
         lines.append(
-            f"| {phantom}–S{phantom[1:]} | {pct(b.fraction, 2)} "
-            f"({interval(b, 'fraction_ci_low', 'fraction_ci_high', percent=True)}) | "
-            f"{pct(d.fraction, 3)} ({interval(d, 'fraction_ci_low', 'fraction_ci_high', percent=True)}) | "
-            f"{pct(dk1.fraction, 3)} | {pct(dms.fraction, 3)} |"
+            f"| {row.condition.replace('-', '–')} | {row.scatter_class} | "
+            f"{pct(row.Gamma_T_direct, 2)} | {pct(row.Gamma_nonT_direct, 2)} | {direction} |"
         )
     lines.extend(
         [
             "",
-            "### 5.4 P4–S4 代表性深度分布",
+            "### 5.5 non-T 首次散射深度形态检查",
             "",
-            f"![E2-F2 total relative response]({base}/E2/figures/E2-F2_P0-S4_vs_P4-S4_total_binwise_relative_response.png)",
+            "F 与 B 保持各自原始深度 bin 身份，排除 T 后拼接并联合归一化。下表只给出观测点估计，不绘制 DTV 折线图。",
             "",
-            f"![E2-F2 k1 relative response]({base}/E2/figures/E2-F2_P0-S4_vs_P4-S4_k1_binwise_relative_response.png)",
-            "",
-            f"![E2-F2 ms relative response]({base}/E2/figures/E2-F2_P0-S4_vs_P4-S4_ms_binwise_relative_response.png)",
-            "",
-            f"![E2-F3 total depth]({base}/E2/figures/E2-F3_P0-S4_vs_P4-S4_total_raw_depth_counts.png)",
-            "",
-            f"![E2-F3 k1 depth]({base}/E2/figures/E2-F3_P0-S4_vs_P4-S4_k1_raw_depth_counts.png)",
-            "",
-            f"![E2-F3 ms depth]({base}/E2/figures/E2-F3_P0-S4_vs_P4-S4_ms_raw_depth_counts.png)",
-            "",
-            "P4 的 55–65 mm T 区出现接近完全的计数缺失：total 2152→1、k1 1341→1、ms 811→0。F 区曲线近似重合，B 区缺陷条件计数反而增加。该组合说明全深度 −19.3% 的 total 变化不能代表 T 区局部响应幅度。",
-            "",
-            "### 5.5 P4–S4 F/T/B 定量分解",
-            "",
-            "| 类别 | 区域 | N0→ND | Cr (95% CI) | DTV (95% CI) | n effective |",
-            "|---|---|---:|---|---|---:|",
+            "| 条件 | 类别 | N_nonT,0→N_nonT,D | D_TV,F | D_TV,B | D_TV,nonT |",
+            "|---|---|---:|---:|---:|---:|",
         ]
     )
-    for _, row in regions.iterrows():
-        dtv = "NA" if pd.isna(row.D_TV_r) else f"{num(row.D_TV_r, 3)} ({interval(row, 'D_TV_r_ci_low', 'D_TV_r_ci_high')})"
+    for _, row in dtv_non_t.iterrows():
         lines.append(
-            f"| {row.scatter_class} | {row.region} | {int(row.N_r0)}→{int(row.N_rD)} | "
-            f"{pct(row.C_r)} ({interval(row, 'C_r_ci_low', 'C_r_ci_high', percent=True)}) | "
-            f"{dtv} | {int(row.D_TV_r_n_effective)} |"
+            f"| {row.condition.replace('-', '–')} | {row.scatter_class} | "
+            f"{int(row.N_nonT0):,}→{int(row.N_nonTD):,} | {num(row.D_TV_F, 3)} | "
+            f"{num(row.D_TV_B, 3)} | {num(row.D_TV_nonT, 3)} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "| 类别 | min | max | range | 最小条件 | 最大条件 | 趋势 |",
+            "|---|---:|---:|---:|---|---|---|",
+        ]
+    )
+    for scatter_class in ("total", "k1", "ms"):
+        summary = dtv_summaries[scatter_class]
+        lines.append(
+            f"| {scatter_class} | {summary['minimum']} | {summary['maximum']} | "
+            f"{summary['range']} | {summary['minimum_condition']} | "
+            f"{summary['maximum_condition']} | {summary['trend']} |"
+        )
+    dtv_peaks = {summary["maximum_condition"] for summary in dtv_summaries.values()}
+    if len(dtv_peaks) == 1:
+        dtv_peak_sentence = f"三类 $D_{{TV,nonT}}$ 均在 {next(iter(dtv_peaks))} 达到最大值"
+    else:
+        dtv_peak_sentence = "各类 $D_{TV,nonT}$ 最大值条件为 " + "、".join(
+            f"{scatter_class}: {summary['maximum_condition']}"
+            for scatter_class, summary in dtv_summaries.items()
+        )
+    dtv_trend_sentence = "；".join(
+        f"{scatter_class}：{summary['trend']}"
+        for scatter_class, summary in dtv_summaries.items()
+    )
+    lines.extend(
+        [
+            "",
+            f"{dtv_peak_sentence}；{dtv_trend_sentence}。因此这里只记录数值和起伏，不依据非零值或端点差异扩展结论。",
+            "",
+            "### 5.6 baseline total 的 F/T/B 来源组成",
+            "",
+            f"![Baseline total F/T/B composition]({base}/E2/supplementary/section_3_2/fig_source_composition_total.png)",
+            "",
+            "100% 堆叠柱仅使用均匀模体 total 事件。来源组成趋势为 "
+            + "、".join(
+                f"{region} {composition_trends[region]}" for region in ("F", "T", "B")
+            )
+            + "；每根柱严格闭合为 100%。",
+            "",
+            "| 条件 | N0 | N_F,0 | N_T,0 | N_B,0 | w_F | w_T | w_B |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for _, row in source_composition.iterrows():
+        lines.append(
+            f"| {row.condition.replace('-', '–')} | {int(row.N0_total):,} | "
+            f"{int(row.N_F0):,} | {int(row.N_T0):,} | {int(row.N_B0):,} | "
+            f"{pct(row.w_F, 2)} | {pct(row.w_T, 2)} | {pct(row.w_B, 2)} |"
         )
     lines.extend(
         [
             "",
-            "F 区三类 Cr 的区间均跨越 0；B 区三类计数均增加且区间高于 0。T 区 total/k1 的 DTV 很高，但缺陷直方图各只有 1 个事件，应谨慎解释；T 区 ms 的缺陷计数为 0，内部形态无法归一化，因此 DTV 按规则记为 NA。",
+            "数值验收中，$C=\\Gamma_T+\\Gamma_{nonT}$、两种 $\\Gamma_T$ 算法、F/T/B 与 total/k1/ms 计数闭合、表 5 的全精度 C 复核以及每柱权重闭合均通过；最大浮点误差不超过 $1.11\\times10^{-16}$。本节不引入重采样、置信区间或显著性判断。",
+        ]
+    )
+    lines.extend(
+        [
             "",
             "## 6. E3：首次散射真值条件下的二维成像作用",
             "",
@@ -429,15 +642,38 @@ def build_report(results_root: Path, slab_root: Path) -> str:
             "",
             "E3-F6 中，slab 作差图仍显示与缺陷位置一致的中心低响应，但点估计 CNR 的顺序为 M5 18.26、M0 11.37、slab 作差 9.80。作差图的背景标准差为 133.47，高于 M0 的 114.09 和 M5 的 68.00，因此它没有复现理想 source-truth 去除 F 区后的图像质量。E3-T4 只给出各图像自身的重采样区间，没有定义配对 CNR 差值或收益区间；这里不据区间重叠作显著性判断。",
             "",
+            "### 6.7 P4–S4 truth front 与 slab reference 的直接深度验证",
+            "",
+            f"![E3 supplementary front components]({base}/E3/supplementary/center3x3_first_scatter_depth/E3_SF1_P4_S4_front_components_depth.png)",
+            "",
+            f"![E3 supplementary truth-slab overlay]({base}/E3/supplementary/center3x3_first_scatter_depth/E3_SF2_P4_S4_truth_front_vs_slab_overlay.png)",
+            "",
+            f"![E3 supplementary ROI-depth response]({base}/E3/supplementary/center3x3_first_scatter_depth/E3_SF3_P4_S4_truth_front_roi_depth.png)",
+            "",
+            "这里不以 CNR 或全图计数间接反推 front source，而是直接使用 P4–S4 first-scatter depth。第一张图依次显示中心 3×3 的 P4 Total、truth front (`z<55 mm`)、按实际 histories 缩放的 slab front，以及 signed residual；第二张图把 truth/slab 放在同一幅原始计数坐标上以比较浅层范围、峰位、宽度和尾部；第三张图以完整 9×9 truth-front 图像按深度计算 background/defect ROI 均值与其差值。",
+            "",
+            "| 指标 | 结果 |",
+            "|---|---:|",
+            f"| P4/slab pooled histories | {int(supplementary_row.p4_pooled_n_primary):,} / {int(supplementary_row.slab_pooled_n_primary):,} |",
+            f"| alpha | {num(supplementary_row.alpha, 3)} |",
+            f"| truth front total | {int(supplementary_row.truth_front_total_count):,} |",
+            f"| slab front total | {num(supplementary_row.slab_front_total_count, 0)} |",
+            f"| slab/truth | {pct(supplementary_row.slab_to_truth_ratio, 2)} |",
+            f"| slab 的 z<55 mm 比例 | {pct(supplementary_row.slab_fraction_z_lt55, 4)} |",
+            f"| 浅层 Pearson r | {num(supplementary_row.pearson_r_z_lt55, 6)} |",
+            "",
+            f"两侧 histories 相同，故 `alpha={num(supplementary_row.alpha, 1)}`。slab 的 {pct(supplementary_row.slab_fraction_z_lt55, 4)} 位于 55 mm 前，且与 truth front 的浅层 histogram 形状高度一致（r={num(supplementary_row.pearson_r_z_lt55, 6)}）；但 slab 只覆盖 truth-front 幅值的 {pct(supplementary_row.slab_to_truth_ratio, 2)}，不能把它当作逐 bin 完整 truth front。余下约 {pct(1.0 - supplementary_row.slab_fraction_z_lt55, 4)} 是 55 mm 后的 slab 尾部。ROI 图显示高计数浅层 bin 的 background/defect 均值接近、Delta 相对较小，但不同 bin 的 Delta 有正有负，因此这里只记录该局部观察，不将其推广为所有浅层来源的普遍机制。",
+            "",
             "## 7. E1–E3 综合证据链",
             "",
             "1. **系统选择特征：** 探测面通道可分，主要深度响应按 S1–S6 有序移动；末次散射位置比首次散射明显扩展。",
             "2. **原始响应随深度降低：** total 相对变化由 −55.5% 减弱至 −12.7%，M0 CNR 由 47.25 降至 4.53；P6 仍可辨识而非完全消失。",
-            "3. **目标深度局部响应：** P4 T 区 total/k1/ms 分别接近完全损失，而 F 区变化不显著、B 区增加；局部 T 区响应显著大于全深度 total 响应。",
-            "4. **事件组成：** P0 baseline fT total 从 56.7% 降至 11.8%；缺陷零位姿 T 区事件因空气替代而接近零。",
+            f"3. **目标区贡献分解：** {t_dominant_count}/18 个条件均满足 $|\\Gamma_T|>|\\Gamma_{{nonT}}|$；{opposite_count} 个 non-T 项反向抵消，{18 - opposite_count} 个同向叠加。",
+            f"4. **事件组成：** baseline total 的 F 占比由 {pct(first_composition.w_F)} 增至 {pct(last_composition.w_F)}，T 占比由 {pct(first_composition.w_T)} 降至 {pct(last_composition.w_T)}，且各柱 F/T/B 严格闭合。",
             "5. **目标深度 ms：** M3 在全部深度形成位置一致的二维响应，深部 P5/P6 点估计 CNR 高于 M0。",
             "6. **策略权衡：** M4 在六个深度具有最高点估计 CNR，但深部只保留约 10% 计数；M5 提高深部 CNR 的同时舍弃大量 F 区事件。",
             "7. **独立参考边界：** 55 mm slab 作差保留中心缺陷响应，但 CNR 点估计低于 M0，且明显低于 truth M5；本配置不支持把均匀 slab 作差视为理想 F 区去除的等价实现。",
+            "8. **直接深度对应：** slab front 的 99.9245% 位于 F 区且与 truth front 形状高度相关，但其幅值仅为 truth front 的 74.1%；这支持其为浅层参考，而不支持其为完整 truth-front 幅值替代。",
             "",
             "## 8. 核心结果总表",
             "",
@@ -448,14 +684,16 @@ def build_report(results_root: Path, slab_root: Path) -> str:
             "| 首次/末次空间分布是否不同 | 末次散射横向扩展明显更大 | 支持 |",
             "| 原始缺陷可见性是否随深度下降 | M0 CNR 47.25→4.53，但 P6 仍可辨 | 支持下降，不支持“完全不可见” |",
             "| 整体计数响应是否随深度减弱 | total C −55.5%→−12.7% | 支持 |",
-            "| T 区是否保持局部响应 | P4 total 2152→1，ms 811→0 | 支持 |",
-            "| baseline T 区占比是否随深度下降 | 56.7%→11.8%，单调下降 | 支持 |",
+            f"| T 区是否主导整体变化 | {t_dominant_count}/18 个条件均有 `abs(Gamma_T) > abs(Gamma_nonT)` | 支持 |",
+            f"| non-T 项方向是否固定 | {opposite_count} 个抵消、{18 - opposite_count} 个同向 | 不支持固定方向 |",
+            f"| baseline 来源组成是否随深度变化 | w_F {pct(first_composition.w_F)}→{pct(last_composition.w_F)}；w_T {pct(first_composition.w_T)}→{pct(last_composition.w_T)} | 支持 |",
             "| T 区 ms 是否独立成像 | M3 全深度出现二维响应 | 支持 |",
             "| 加入 T 区 ms 是否增加计数 | M2→M4 +24.5% 至 +77.7% | 支持 |",
             "| 加入 T 区 ms 是否稳定提高 CNR | 仅 P2/P6 的增益 CI 高于 0 | 部分支持 |",
             "| M1→M4 完整策略 | P2–P6 CNR 增益 CI 高于 0，计数减少 | 支持但有代价 |",
             "| 去除 F 区事件 | P2–P6 CNR 增益 CI 高于 0，M5保留率随深度下降 | 支持统计关联 |",
             "| slab 参考近似 F 区 | 作差 CNR 9.80，M0 11.37，truth M5 18.26 | 保留响应，但不支持与理想去除等价 |",
+            "| slab 是否对应 truth front 深度来源 | F 区占 99.9245%，Pearson r=0.995753，幅值比 74.1% | 支持形状对应，不支持完整幅值等价 |",
             "",
             "## 9. 完成状态与结果边界",
             "",
@@ -464,9 +702,11 @@ def build_report(results_root: Path, slab_root: Path) -> str:
             "- [x] E1 三图",
             "- [x] E2 完整网格、整体响应、F/T/B 占比和 P4 定量分解",
             "- [x] E2 5000 次 Poisson 重采样",
+            "- [x] E2 第 3.2 节原始事件重算：新版图 5、表 6、non-T DTV 与 baseline F/T/B 组成",
             "- [x] E3 M0–M5、M3、三类策略比较和深度趋势",
             "- [x] E3 严格入口 5000 次 Poisson 重采样",
             "- [x] 55 mm 均匀前层 slab 参考 81 pose、E3-F6 与 E3-T4",
+            "- [x] P4–S4 truth-front/slab 直接深度比较与 9×9 ROI-depth 辅助分析",
             "",
             "本报告的数值结论限定于 560 keV、当前 PMMA/空气材料、模体尺寸、准直几何、理想探测面和蒙特卡罗首次散射真值。实际系统可实现性、能量/材料推广、source-truth 的可观测近似以及机制归因留待 Discussion。",
             "",
@@ -474,7 +714,10 @@ def build_report(results_root: Path, slab_root: Path) -> str:
             "",
             f"- E1：[`postprocessing/E1`]({base}/E1/)",
             f"- E2：[`postprocessing/E2`]({base}/E2/)",
+            f"- E2 第 3.2 节原始事件重算：[`section_3_2`]({base}/E2/supplementary/section_3_2/)",
+            "- E2 第 3.2 节独立结果说明：[analysis_3_2_results.md](analysis_3_2_results.md)",
             f"- E3 完整六图四表：[`postprocessing/E3`]({base}/E3/)",
+            f"- E3 truth-front/slab 补充结果：[`postprocessing/E3/supplementary/center3x3_first_scatter_depth`]({base}/E3/supplementary/center3x3_first_scatter_depth/)",
             "- 合并审计：`results/articlev3_merged/data_processing/audit/`",
             "- 合并来源与行数：`results/articlev3_merged/data_processing/merge/`",
             "- slab provenance 与清洗审计：[`reference_manifest.yaml`](../../results/articlev3_p4_front_slab_55mm_100m/reference_manifest.yaml)、[`valid_events_manifest.yaml`](../../results/articlev3_p4_front_slab_55mm_100m/events/valid/valid_events_manifest.yaml)",

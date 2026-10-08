@@ -1,11 +1,13 @@
+# Frozen source, collimator and physics settings from the existing P4 slab campaign.
+# Batch generation replaces geometry, profile, detector x range, pose, seed and output.
 schema_version: 2
 run:
-  random_seed: 10202
-  number_of_threads: 4
-  n_primary_per_pose: 80000000
+  random_seed: 12000
+  number_of_threads: 7
+  n_primary_per_pose: 100000000
   debug: false
 vehicle:
-  geometry_file: config/geometry/example.yaml
+  geometry_file: config/geometry/article_files/P4_front_slab_55mm.yaml
   model_type: normal
   selected_target_component: null
   abnormal_material: G4_POLYETHYLENE
@@ -28,14 +30,14 @@ source:
   source_pos_zero_mm:
   - 0.0
   - 0.0
-  - -70.0
+  - -20.0
   incident_theta_deg: 90.0
   focal_spot_diameter_mm: 5.0
 collimator:
   enable: true
   profile_file: config/collimator/article_v2_collimator_profiles.csv
   profile_id: P001
-  jaw_extrusion_length_y_mm: 200.0
+  jaw_extrusion_length_y_mm: 1300.0
 detector:
   detector_z_zero_mm: -73.0
   detector_x_range_zero_mm:
@@ -49,9 +51,8 @@ physics:
   physics_list: G4EmLivermorePhysics
   production_cut_mm: 0.1
 output:
-  output_directory: results/articlev3_grid_p001_add80m/events/raw/grid/P4/P001
+  output_directory: results/front_slab_grid
   events_csv_name: events.csv
   metadata_yaml_name: metadata.yaml
   thread_tmp_directory: tmp
   existing_run_policy: fail
-case_id: source_response_grid_P4_P001_pose_x0_y0_E560_seed10202

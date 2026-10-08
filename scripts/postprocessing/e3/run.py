@@ -846,7 +846,7 @@ def plot_f1(methods: np.ndarray, output: Path) -> None:
             formatter.set_powerlimits((-2, 3))
             colorbar.formatter = formatter
             colorbar.update_ticks()
-    fig.suptitle("E3-F1  P4–S4 source-conditioned raw-count images")
+    fig.suptitle("P4–S4 M0–M5 count images")
     _save_png(fig, output)
 
 
@@ -962,16 +962,17 @@ def plot_f4(
     boots: dict[str, BootstrapResult],
     output: Path,
 ) -> None:
-    _, depths = _depth_values()
+    phantoms, depths = _depth_values()
     fig, axis = plt.subplots(figsize=(10.5, 6.4), constrained_layout=True)
     for method in METHODS:
-        values, intervals = _method_depth_series(points, boots, method, "cnr")
-        _series_with_ci(
-            axis, depths, values, intervals,
+        method_index = METHODS.index(method)
+        values = [points[phantom]["cnr"][method_index] for phantom in phantoms]
+        axis.plot(
+            depths, values,
             label=f"{method} {METHOD_LABELS[method]}",
-            color=METHOD_COLORS[method], marker=METHOD_MARKERS[method],
+            color=METHOD_COLORS[method], marker=METHOD_MARKERS[method], lw=1.0,
         )
-    axis.set(xlabel="Target depth (mm)", ylabel="CNR", title="E3-F4  M0–M5 CNR by target depth")
+    axis.set(xlabel="Target depth (mm)", ylabel="CNR")
     _format_depth_axis(axis, depths)
     axis.legend(fontsize=8, ncol=2)
     _save_png(fig, output)
@@ -982,18 +983,18 @@ def plot_f5(
     boots: dict[str, BootstrapResult],
     output: Path,
 ) -> None:
-    _, depths = _depth_values()
+    phantoms, depths = _depth_values()
     fig, axis = plt.subplots(figsize=(10.5, 6.4), constrained_layout=True)
     for method in METHODS:
-        values, intervals = _method_depth_series(points, boots, method, "retention")
-        _series_with_ci(
-            axis, depths, values, intervals,
+        method_index = METHODS.index(method)
+        values = [points[phantom]["retention"][method_index] for phantom in phantoms]
+        axis.plot(
+            depths, values,
             label=f"{method} {METHOD_LABELS[method]}",
-            color=METHOD_COLORS[method], marker=METHOD_MARKERS[method],
+            color=METHOD_COLORS[method], marker=METHOD_MARKERS[method], lw=1.0,
         )
     axis.set(
         xlabel="Target depth (mm)", ylabel="Count retention",
-        title="E3-F5  M0–M5 count retention by target depth",
     )
     _format_depth_axis(axis, depths, percent=True)
     axis.legend(fontsize=8, ncol=2)
